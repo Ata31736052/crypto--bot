@@ -1,5 +1,5 @@
 # ============================================
-# 🤖 ربات ارز دیجیتال - نسخه نهایی و اصلاح‌شده
+# 🤖 ربات ارز دیجیتال - نسخه نهایی
 # ============================================
 
 import json, time, os, ssl, urllib.request, warnings
@@ -7,7 +7,7 @@ from datetime import datetime
 warnings.filterwarnings('ignore')
 
 # 🔑 اطلاعات ربات خود را اینجا وارد کنید
-TOKEN = "8838013512:AAET14zy-MNbhrBxdHiq2Cgimx07vMaTAPE"
+TOKEN = "8838013512:AAF_sPxVF70YFGegDdGVyGYmeePrxW1oOcE"
 CHAT = "90464197"
 
 CTX = ssl.create_default_context()
@@ -106,7 +106,7 @@ def rsi(p, n=14):
 def macd_histogram(p):
     if len(p) < 35:
         return None
-    
+
     def calculate_ema_sequence(data, period):
         k = 2 / (period + 1)
         val = sum(data[:period]) / period
@@ -118,11 +118,11 @@ def macd_histogram(p):
 
     ema12 = calculate_ema_sequence(p, 12)
     ema26 = calculate_ema_sequence(p, 26)
-    
+
     macd_line = [f - s for f, s in zip(ema12[14:], ema26)]
     if len(macd_line) < 9:
         return None
-        
+
     signal_line = calculate_ema_sequence(macd_line, 9)
     return macd_line[-1] - signal_line[-1]
 
@@ -143,43 +143,43 @@ def trend(tf_data):
 def analyze(sym):
     tfs = {'15m': '۱۵د', '1h': '۱س', '4h': '۴س', '1d': 'روز'}
     res = {}
-    
+
     for i, n in tfs.items():
         k = klines(sym, i)
         if not k or len(k['p']) < 50:
             continue
-            
+
         e9 = ema(k['p'], 9)
         e21 = ema(k['p'], 21)
         e50 = ema(k['p'], 50)
         rr = rsi(k['p'])
         h = macd_histogram(k['p'])
-        
+
         va = sum(k['v'][-5:]) / 5 if len(k['v']) >= 5 else 1
         vr = k['v'][-1] / va if va > 0 else 1
-        
+
         bs = ss = 0
-        
+
         # RSI Analysis
         if 50 < rr < 65:
             bs += 2
         elif 35 < rr < 50:
             ss += 2
-            
+
         # MACD Analysis
         if h is not None:
             if h > 0:
                 bs += 2
             else:
                 ss += 2
-                
+
         # EMA Trend Analysis
         if e9 and e21 and e50:
             if e9 > e21 > e50:
                 bs += 3
             elif e9 < e21 < e50:
                 ss += 3
-                
+
         # Volume Spike
         if vr > 1.3:
             if bs > ss:
@@ -202,7 +202,7 @@ def analyze(sym):
         return None
 
     r4, r1 = trend(t4), trend(t1)
-    
+
     if r4 == 'up' and r1 == 'up':
         d = 'buy'
     elif r4 == 'down' and r1 == 'down':
@@ -359,7 +359,7 @@ def fmt(a):
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("Robot v6.1 (Fixed)")
+    print("Robot v6.1 (Final)")
     print("=" * 50)
     print(f"Coins: {len(COINS)}")
     print("Filter: 4H + 1D")
@@ -396,19 +396,19 @@ if __name__ == "__main__":
                         alerted[s] = now
                         sent_count += 1
                         print(f"  SENT {s} | {a['sig']} ({a['score']})")
-                        time.sleep(2)
+                        time.sleep(1)
                 else:
                     print(f"  skip {s} (Cooldown)")
 
-                time.sleep(0.2)
+                time.sleep(0.1)
 
             print(f"\nValid: {valid_count} | Sent: {sent_count}")
 
             if len(alerted) > 200:
                 alerted = {k: v for k, v in alerted.items() if v > time.time() - 7200}
 
-            print("Wait 3 min...")
-            time.sleep(180)
+            print("Done. Exiting.")
+            break
 
         except KeyboardInterrupt:
             print("\nStopped by user")
