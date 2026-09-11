@@ -1,5 +1,5 @@
 # ============================================
-# 🤖 ربات ارز دیجیتال - نسخه v6 (نهایی)
+# 🤖 ربات ارز دیجیتال - نسخه نهایی
 # ============================================
 
 import json, time, os, ssl, urllib.request, warnings
@@ -13,16 +13,12 @@ CTX = ssl.create_default_context()
 CTX.check_hostname = False
 CTX.verify_mode = ssl.CERT_NONE
 
+# ۲۰ ارز با پشتوانه قوی و پتانسیل رشد
 COINS = [
-    'BTC','ETH','BNB','SOL','XRP','ADA','DOGE','TRX','SHIB','DOT',
-    'LINK','AVAX','MATIC','UNI','ATOM','NEAR','FTM','XLM','VET','ALGO',
-    'HBAR','ICP','FIL','ETC','XMR','ZEC','DASH','NEO','QTUM','ONT',
-    'WAVES','KSM','ZIL','BAT','IOST','ANKR','STORJ','GNO','COMP','SNX',
-    'CRV','SUSHI','1INCH','YFI','MKR','AAVE','LDO','BAL','ENJ','MANA',
-    'SAND','GALA','APE','AXS','CHZ','FET','AGIX','OCEAN','RNDR','ARB',
-    'OP','APT','SUI','SEI','STX','INJ','TIA','PYTH','JUP','RUNE','W',
-    'STRK','ALT','BLUR','KAVA','AR','HOT','CHR','RLC','CAKE','BAKE',
-    'XVS','ALPACA','PEPE','FLOKI','BONK','WIF'
+    'BTC', 'ETH', 'BNB', 'SOL', 'XRP',
+    'ADA', 'DOGE', 'TRX', 'LINK', 'AVAX',
+    'DOT', 'MATIC', 'ATOM', 'NEAR', 'FIL',
+    'APT', 'ARB', 'OP', 'INJ', 'SUI'
 ]
 
 
@@ -353,7 +349,7 @@ print(f"Coins: {len(COINS)}")
 print("Filter: 4H + 1D")
 print("=" * 50)
 
-send("🤖 <b>ربات v6 راه‌اندازی شد</b>\n\n"
+send("🤖 <b>ربات راه‌اندازی شد</b>\n\n"
      f"📊 {len(COINS)} ارز\n"
      f"⏱ فیلتر: ۴ ساعته + روزانه\n"
      f"🎯 فقط سیگنال معتبر")
