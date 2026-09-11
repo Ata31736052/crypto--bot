@@ -21,7 +21,7 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: timeout 800 python bot.py
+        run: timeout 600 python bot.py
 
   keepalive:
     if: github.event_name == 'schedule'
