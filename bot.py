@@ -6,7 +6,7 @@ import json, time, os, ssl, urllib.request, warnings
 from datetime import datetime
 warnings.filterwarnings('ignore')
 
-TOKEN = "8838013512:AAG-WnPvrkBeOeHd7XqO2iWye9EWGqFKIqY"
+TOKEN = "8838013512:AAEnGtEodh2SrWmuL4uhsPtzlGO6Lx2fX9o"
 CHAT = "90464197"
 
 CTX = ssl.create_default_context()
