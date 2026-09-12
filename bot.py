@@ -1,6 +1,6 @@
 # ============================================
-# 🤖 ربات جامع سیگنال‌دهی کریپتو - تایم‌فریم روزانه (1D)
-# 🎯 دریافت بدون محدودیت داده‌ها از KuCoin / Binance
+# 🤖 ربات جامع سیگنال‌دهی کریپتو - تایم‌فریم ۴ ساعته (4H)
+# 🎯 همراه با تاییدیه اندیکاتور MACD، ATR، فیلتر حجم و پرایس‌اکشن
 # ============================================
 
 import json, time, os, ssl, urllib.request, warnings
@@ -32,17 +32,17 @@ def http(url, t=10):
         )
         with urllib.request.urlopen(req, context=CTX, timeout=t) as x:
             return json.loads(x.read().decode())
-    except Exception as e:
+    except Exception:
         return None
 
-def klines(sym, tf='1d'):
-    # ۱. تلاش برای دریافت داده از KuCoin (بدون تحریم و فیلتر روی GitHub Actions)
-    url_kc = f"https://api.kucoin.com/api/v1/market/candles?symbol={sym}-USDT&type=1day"
+def klines(sym, tf='4h'):
+    # ۱. دریافت داده از KuCoin (تایم‌فریم ۴ ساعته)
+    url_kc = f"https://api.kucoin.com/api/v1/market/candles?symbol={sym}-USDT&type=4hour"
     d = http(url_kc)
     
     if d and d.get('code') == '200000' and isinstance(d.get('data'), list) and len(d['data']) > 0:
         data = d['data'][:60]
-        data.reverse() # مرتب‌سازی از قدیمی به جدید
+        data.reverse()
         opens = [float(c[1]) for c in data]
         closes = [float(c[2]) for c in data]
         highs = [float(c[3]) for c in data]
@@ -50,7 +50,7 @@ def klines(sym, tf='1d'):
         vols = [float(c[5]) for c in data]
         return {'o': opens, 'h': highs, 'l': lows, 'p': closes, 'v': vols, 'price': closes[-1]}
 
-    # ۲. در صورت ناموفق بودن، تلاش با سرور پشتیبان Binance (data-api)
+    # ۲. سرور پشتیبان Binance (تایم‌فریم ۴ ساعته)
     url_bn = f"https://data-api.binance.vision/api/v3/klines?symbol={sym}USDT&interval={tf}&limit=60"
     d = http(url_bn)
     if d and isinstance(d, list) and len(d) > 0:
@@ -63,13 +63,36 @@ def klines(sym, tf='1d'):
 
     return None
 
-def ema(p, n):
-    if len(p) < n: return None
+def ema_series(p, n):
+    if len(p) < n: return []
     k = 2 / (n + 1)
-    e = sum(p[:n]) / n
+    emas = [sum(p[:n]) / n]
     for x in p[n:]:
-        e = x * k + e * (1 - k)
-    return e
+        emas.append(x * k + emas[-1] * (1 - k))
+    return emas
+
+def ema(p, n):
+    s = ema_series(p, n)
+    return s[-1] if s else None
+
+def macd(p, fast=12, slow=26, signal=9):
+    if len(p) < slow + signal: return None, None, None
+    ema_fast = ema_series(p, fast)
+    ema_slow = ema_series(p, slow)
+    
+    diff_len = len(ema_fast) - len(ema_slow)
+    ema_fast = ema_fast[diff_len:]
+    
+    macd_line = [f - s for f, s in zip(ema_fast, ema_slow)]
+    signal_line = ema_series(macd_line, signal)
+    
+    if not signal_line: return None, None, None
+    
+    curr_macd = macd_line[-1]
+    curr_signal = signal_line[-1]
+    curr_hist = curr_macd - curr_signal
+    
+    return curr_macd, curr_signal, curr_hist
 
 def rsi(p, n=14):
     if len(p) < n + 1: return 50.0
@@ -98,43 +121,57 @@ def atr(highs, lows, closes, n=14):
     return sum(tr_list[-n:]) / n
 
 def analyze(sym):
-    k1d = klines(sym, '1d')
-    if not k1d:
+    k4h = klines(sym, '4h')
+    if not k4h:
         return None
 
-    p1d, h1d, l1d, o1d, v1d = k1d['p'], k1d['h'], k1d['l'], k1d['o'], k1d['v']
-    curr_price = k1d['price']
+    p4h, h4h, l4h, o4h, v4h = k4h['p'], k4h['h'], k4h['l'], k4h['o'], k4h['v']
+    curr_price = k4h['price']
     
-    e9 = ema(p1d, 9)
-    e21 = ema(p1d, 21)
-    e50 = ema(p1d, 50)
-    rsi1d = rsi(p1d)
-    atr1d = atr(h1d, l1d, p1d, 14)
+    e9 = ema(p4h, 9)
+    e21 = ema(p4h, 21)
+    e50 = ema(p4h, 50)
+    rsi4h = rsi(p4h)
+    atr4h = atr(h4h, l4h, p4h, 14)
+    macd_val, signal_val, hist_val = macd(p4h)
 
-    if not (e9 and e21 and e50 and atr1d):
+    if not (e9 and e21 and e50 and atr4h and macd_val is not None):
         return None
 
     score_buy = 0
     score_sell = 0
 
+    # ۱. ترتیب میانگین‌های متحرک (EMA Trend)
     if e9 > e21: score_buy += 3
     if e21 > e50: score_buy += 2
     if e9 < e21: score_sell += 3
     if e21 < e50: score_sell += 2
 
-    if 45 < rsi1d < 68: score_buy += 3
-    if 32 < rsi1d < 55: score_sell += 3
+    # ۲. وضعیت اندیکاتور RSI
+    if 45 < rsi4h < 68: score_buy += 3
+    if 32 < rsi4h < 55: score_sell += 3
 
-    avg_vol = sum(v1d[-21:-1]) / 20 if len(v1d) >= 21 else sum(v1d) / len(v1d)
-    if v1d[-1] > avg_vol:
+    # ۳. تاییدیه اندیکاتور MACD
+    macd_status = "خنثی"
+    if macd_val > signal_val or hist_val > 0:
+        score_buy += 2
+        macd_status = "صعودی 🟢"
+    if macd_val < signal_val or hist_val < 0:
+        score_sell += 2
+        macd_status = "نزولی 🔴"
+
+    # ۴. فیلتر حجم معاملات
+    avg_vol = sum(v4h[-21:-1]) / 20 if len(v4h) >= 21 else sum(v4h) / len(v4h)
+    if v4h[-1] > avg_vol:
         score_buy += 1
         score_sell += 1
 
-    body = abs(p1d[-1] - o1d[-1])
-    candle_range = h1d[-1] - l1d[-1]
+    # ۵. الگوی کندلی بازگشتی (Pin Bar)
+    body = abs(p4h[-1] - o4h[-1])
+    candle_range = h4h[-1] - l4h[-1]
     if candle_range > 0:
-        lower_shadow = min(p1d[-1], o1d[-1]) - l1d[-1]
-        upper_shadow = h1d[-1] - max(p1d[-1], o1d[-1])
+        lower_shadow = min(p4h[-1], o4h[-1]) - l4h[-1]
+        upper_shadow = h4h[-1] - max(p4h[-1], o4h[-1])
         if lower_shadow > (2 * body) and lower_shadow > (0.5 * candle_range):
             score_buy += 2
         if upper_shadow > (2 * body) and upper_shadow > (0.5 * candle_range):
@@ -143,6 +180,7 @@ def analyze(sym):
     direction = None
     final_score = 0
     
+    # حد نصاب ۷ از ۱۳ برای ورود به معامله
     if score_buy >= 7 and score_buy > score_sell:
         direction = 'buy'
         final_score = score_buy
@@ -155,7 +193,7 @@ def analyze(sym):
     base_info = {
         'sym': sym, 
         'price': curr_price, 
-        'rsi1d': round(rsi1d, 1),
+        'rsi4h': round(rsi4h, 1),
         'icon': trend_icon
     }
 
@@ -163,14 +201,14 @@ def analyze(sym):
         return {'is_signal': False, **base_info}
 
     if direction == 'buy':
-        sl = curr_price - (1.5 * atr1d)
-        tp1 = curr_price + (2.0 * atr1d)
-        tp2 = curr_price + (4.0 * atr1d)
+        sl = curr_price - (1.5 * atr4h)
+        tp1 = curr_price + (2.0 * atr4h)
+        tp2 = curr_price + (4.0 * atr4h)
         sig_text = "خرید (LONG)"
     else:
-        sl = curr_price + (1.5 * atr1d)
-        tp1 = curr_price - (2.0 * atr1d)
-        tp2 = curr_price - (4.0 * atr1d)
+        sl = curr_price + (1.5 * atr4h)
+        tp1 = curr_price - (2.0 * atr4h)
+        tp2 = curr_price - (4.0 * atr4h)
         sig_text = "فروش (SHORT)"
 
     risk = abs(curr_price - sl)
@@ -184,8 +222,9 @@ def analyze(sym):
         'dir': direction,
         'sig': sig_text, 
         'score': final_score,
-        'rsi1d': round(rsi1d, 1),
-        'atr1d': fp(atr1d),
+        'rsi4h': round(rsi4h, 1),
+        'macd_status': macd_status,
+        'atr4h': fp(atr4h),
         'sl': sl, 
         'tp1': tp1, 
         'tp2': tp2,
@@ -207,7 +246,7 @@ def send(msg):
         req = urllib.request.Request(url, data=d, headers={'Content-Type': 'application/json'})
         with urllib.request.urlopen(req, context=CTX, timeout=10) as x:
             return x.status == 200
-    except Exception as e:
+    except Exception:
         return False
 
 def fp(n):
@@ -220,22 +259,23 @@ def fmt(a):
     tv_link = f"https://www.tradingview.com/chart/?symbol=BINANCE:{a['sym']}USDT"
     
     return (
-        f"{icon} <b>#سیگنال_روزانه_{a['sym']} | USDT</b>\n\n"
+        f"{icon} <b>#سیگنال_4ساعته_{a['sym']} | USDT</b>\n\n"
         f"🎯 جهت معامله: <b>{a['sig']}</b>\n"
-        f"📊 قدرت سیگنال: <b>{a['score']} / 11</b>\n"
+        f"📊 قدرت سیگنال: <b>{a['score']} / 13</b>\n"
         f"💰 قیمت ورود: <b>{fp(a['price'])} $</b>\n"
         f"⚖️ نسبت ریسک به ریوارد (R/R): <b>1:{a['rr']}</b>\n"
-        f"📏 دامنه نوسان (ATR 14): <b>{a['atr1d']} $</b>\n\n"
+        f"📏 دامنه نوسان (ATR 14): <b>{a['atr4h']} $</b>\n\n"
         f"🛑 حد زیان (1.5x ATR): <b>{fp(a['sl'])} $</b>\n"
         f"🎯 حد سود اول (2x ATR): <b>{fp(a['tp1'])} $</b>\n"
         f"🚀 حد سود دوم (4x ATR): <b>{fp(a['tp2'])} $</b>\n\n"
-        f"📈 RSI روزانه: <b>{a['rsi1d']}</b>\n"
+        f"📈 وضعیت RSI (4H): <b>{a['rsi4h']}</b>\n"
+        f"📊 وضعیت MACD: <b>{a['macd_status']}</b>\n"
         f"🔗 <a href='{tv_link}'>مشاهده نمودار در TradingView</a>\n"
         f"📅 زمان ثبت: {a['time']}"
     )
 
 if __name__ == "__main__":
-    print("شروع اسکن جامع بازار...")
+    print("شروع اسکن بازار در تایم‌فریم ۴ ساعته...")
     
     signals = []
     market_summary = []
@@ -256,19 +296,19 @@ if __name__ == "__main__":
         now = datetime.now().strftime('%H:%M')
         
         if market_summary:
-            avg_rsi_1d = round(sum(item['rsi1d'] for item in market_summary) / len(market_summary), 1)
+            avg_rsi_4h = round(sum(item['rsi4h'] for item in market_summary) / len(market_summary), 1)
             
-            msg = f"📊 <b>گزارش روزانه بازار کریپتو ({now})</b>\n\n"
-            msg += f"• میانگین RSI روزانه بازار: <b>{avg_rsi_1d}</b>\n"
-            msg += "• وضعیت سیگنال: <i>هیچ ارزی تمام شرایط ورود معتبر در تایم روزانه را احراز نکرد.</i>\n\n"
+            msg = f"📊 <b>گزارش بازار کریپتو (۴ ساعته - {now})</b>\n\n"
+            msg += f"• میانگین RSI ۴ ساعته بازار: <b>{avg_rsi_4h}</b>\n"
+            msg += "• وضعیت سیگنال: <i>هیچ ارزی تمام شرایط ورود معتبر در تایم ۴ ساعته را احراز نکرد.</i>\n\n"
             
             msg += "<pre>"
-            msg += f"{'نماد':<8} {'قیمت ($)':<13} {'RSI روزانه':<10}\n"
+            msg += f"{'نماد':<8} {'قیمت ($)':<13} {'RSI 4H':<10}\n"
             msg += "─" * 32 + "\n"
             
             for item in market_summary:
                 price_str = fp(item['price'])
-                msg += f"{item['sym']:<8} {price_str:<13} {item['rsi1d']:<10}\n"
+                msg += f"{item['sym']:<8} {price_str:<13} {item['rsi4h']:<10}\n"
                 
             msg += "</pre>\n"
             msg += "🔍 اسکن بعدی انجام خواهد شد."
@@ -278,4 +318,4 @@ if __name__ == "__main__":
         send(msg)
 
     print("پایان اسکن.")
-        
+    
