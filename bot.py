@@ -1,18 +1,19 @@
 # ============================================
-# 🤖 ربات ارز دیجیتال - نسخه مخصوص GitHub Actions
+# 🤖 ربات ارز دیجیتال - نسخه نهایی و کامل
 # ============================================
 
 import json, time, os, ssl, urllib.request, warnings
 from datetime import datetime
 warnings.filterwarnings('ignore')
 
-# 🔑 دریافت اطلاعات ربات از GitHub Secrets
+# 🔑 دریافت اطلاعات از GitHub Secrets
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT = os.getenv("TELEGRAM_CHAT_ID")
 
 CTX = ssl.create_default_context()
+CTX.check_hostname = False
+CTX.verify_mode = ssl.CERT_NONE
 
-# لیست ارزها جهت اسکن
 COINS = [
     'BTC', 'ETH', 'BNB', 'SOL', 'XRP',
     'ADA', 'DOGE', 'TRX', 'LINK', 'AVAX',
@@ -20,20 +21,29 @@ COINS = [
     'APT', 'ARB', 'OP', 'INJ', 'SUI'
 ]
 
+# دامنه‌های پشتیبان بایننس برای دور زدن محدودیت آی‌پی GitHub Actions
+BINANCE_HOSTS = [
+    "https://api.binance.com",
+    "https://api1.binance.com",
+    "https://api2.binance.com",
+    "https://api3.binance.com"
+]
 
-def http(url, t=30, retries=2):
+
+def http(path, t=20, retries=2):
     last_err = None
-    for attempt in range(retries + 1):
-        try:
-            req = urllib.request.Request(url)
-            req.add_header('User-Agent', 'Mozilla/5.0')
-            req.add_header('Accept', 'application/json')
-            with urllib.request.urlopen(req, context=CTX, timeout=t) as x:
-                return json.loads(x.read().decode())
-        except Exception as e:
-            last_err = e
-            if attempt < retries:
-                time.sleep(1.5)
+    for host in BINANCE_HOSTS:
+        url = f"{host}{path}" if path.startswith('/') else path
+        for attempt in range(retries):
+            try:
+                req = urllib.request.Request(url)
+                req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)')
+                req.add_header('Accept', 'application/json')
+                with urllib.request.urlopen(req, context=CTX, timeout=t) as x:
+                    return json.loads(x.read().decode())
+            except Exception as e:
+                last_err = e
+                time.sleep(0.5)
     raise last_err
 
 
@@ -46,28 +56,33 @@ def tickers():
     if _cache and time.time() - _cache_t < 60:
         return _cache
     try:
-        d = http("https://api.binance.com/api/v3/ticker/24hr", t=30)
+        d = http("/api/v3/ticker/24hr", t=25)
         _cache = {i['symbol']: i for i in d}
         _cache_t = time.time()
     except Exception as e:
-        print(f"  warn ticker: {e}")
+        print(f"  ⚠️ warn ticker: {e}")
     return _cache
 
 
 def klines(sym, tf):
     try:
-        url = f"https://api.binance.com/api/v3/klines?symbol={sym}USDT&interval={tf}&limit=100"
-        d = http(url, t=20)
+        path = f"/api/v3/klines?symbol={sym}USDT&interval={tf}&limit=100"
+        d = http(path, t=15)
+        if not d or not isinstance(d, list):
+            return None
+            
         closes = [float(c[4]) for c in d]
-        vols = [float(c[5]) for c in d][:-1]
+        vols = [float(c[5]) for c in d]
         t = tickers().get(f"{sym}USDT", {})
+        
         return {
             'p': closes,
             'v': vols,
             'price': float(t.get('lastPrice', closes[-1] if closes else 0)),
             'chg': float(t.get('priceChangePercent', 0)),
         }
-    except Exception:
+    except Exception as e:
+        print(f"  ⚠️ Error fetching klines for {sym} ({tf}): {e}")
         return None
 
 
@@ -156,33 +171,33 @@ def analyze(sym):
         rr = rsi(k['p'])
         h = macd_histogram(k['p'])
 
-        va = sum(k['v'][-5:]) / 5 if len(k['v']) >= 5 else 1
+        va = sum(k['v'][-6:-1]) / 5 if len(k['v']) >= 6 else 1
         vr = k['v'][-1] / va if va > 0 else 1
 
         bs = ss = 0
 
-        # تحلیل RSI
+        # امتیازدهی شاخص RSI
         if 50 < rr < 65:
             bs += 2
         elif 35 < rr < 50:
             ss += 2
 
-        # تحلیل MACD
+        # امتیازدهی MACD
         if h is not None:
             if h > 0:
                 bs += 2
             else:
                 ss += 2
 
-        # تحلیل روند EMA
+        # امتیازدهی روند EMA
         if e9 and e21 and e50:
             if e9 > e21 > e50:
                 bs += 3
             elif e9 < e21 < e50:
                 ss += 3
 
-        # افزایش حجم معاملات
-        if vr > 1.3:
+        # امتیازدهی حجم
+        if vr > 1.1:
             if k['p'][-1] > k['p'][-2]:
                 bs += 2
             else:
@@ -218,25 +233,26 @@ def analyze(sym):
     rsi4, rsi1 = t4['rsi'], t1['rsi']
 
     if d == 'buy':
-        ok = 45 < rsi4 < 70 and 45 < rsi1 < 70
+        ok = 38 < rsi4 < 72 and 38 < rsi1 < 72
         sc = wb
     else:
-        ok = 30 < rsi4 < 55 and 30 < rsi1 < 55
+        ok = 28 < rsi4 < 62 and 28 < rsi1 < 62
         sc = ws
 
-    vol_ok = t4['vol'] > 1.1
+    vol_ok = t4['vol'] >= 0.85
 
+    # حد نصاب منطقی برای صدور سیگنال
     if d == 'buy':
-        if sc >= 30 and ok and vol_ok:
+        if sc >= 12 and ok and vol_ok:
             sig, act, st = "خرید قوی", "ورود", 'strong'
-        elif sc >= 20 and ok and vol_ok:
+        elif sc >= 8 and ok and vol_ok:
             sig, act, st = "خرید متوسط", "بررسی", 'medium'
         else:
             return None
     else:
-        if sc >= 30 and ok and vol_ok:
+        if sc >= 12 and ok and vol_ok:
             sig, act, st = "فروش قوی", "خروج", 'strong'
-        elif sc >= 20 and ok and vol_ok:
+        elif sc >= 8 and ok and vol_ok:
             sig, act, st = "فروش متوسط", "بررسی", 'medium'
         else:
             return None
@@ -250,7 +266,7 @@ def analyze(sym):
 
 def send(msg):
     if not TOKEN or not CHAT:
-        print("  Error: TELEGRAM_TOKEN or TELEGRAM_CHAT_ID is missing.")
+        print("  ❌ Error: TELEGRAM_TOKEN or TELEGRAM_CHAT_ID is missing!")
         return False
     try:
         url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
@@ -260,10 +276,10 @@ def send(msg):
         }).encode()
         req = urllib.request.Request(url, data=d)
         req.add_header('Content-Type', 'application/json')
-        with urllib.request.urlopen(req, context=CTX, timeout=30) as x:
+        with urllib.request.urlopen(req, context=CTX, timeout=25) as x:
             return x.status == 200
     except Exception as e:
-        print(f"  warn telegram: {e}")
+        print(f"  ⚠️ warn telegram: {e}")
         return False
 
 
@@ -358,7 +374,7 @@ def fmt(a):
 
 
 # ============================================
-# 🎯 اجرای اسکن تک‌نوبتی
+# 🎯 اجرای اصلی
 # ============================================
 
 if __name__ == "__main__":
@@ -366,6 +382,13 @@ if __name__ == "__main__":
     print("Starting Crypto Bot Scan...")
     print(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 50)
+
+    # تست اولیه سلامت اتصال به تلگرام
+    test_sent = send("🤖 <b>تست ربات سیگنال</b>\n\nربات اجرا شد و در حال اسکن بازار است...")
+    if test_sent:
+        print("  ✅ Test message sent to Telegram successfully!")
+    else:
+        print("  ❌ Failed to send test message. Check TELEGRAM_TOKEN and TELEGRAM_CHAT_ID.")
 
     sent_count = 0
     valid_count = 0
@@ -388,4 +411,3 @@ if __name__ == "__main__":
     print("-" * 50)
     print(f"Scan Completed. Valid Signals: {valid_count} | Sent: {sent_count}")
     print("=" * 50)
-        
