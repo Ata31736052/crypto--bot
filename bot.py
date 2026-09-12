@@ -1,18 +1,17 @@
 # ============================================
-# 🤖 ربات ارز دیجیتال - نسخه نهایی
+# 🤖 ربات ارز دیجیتال - مخصوص GitHub Actions
 # ============================================
 
 import json, time, os, ssl, urllib.request, warnings
 from datetime import datetime
 warnings.filterwarnings('ignore')
 
-# 🔑 اطلاعات ربات خود را اینجا وارد کنید
-TOKEN = "8838013512:AAF_sPxVF70YFGegDdGVyGYmeePrxW1oOcE"
-CHAT = "90464197"
+# 🔑 دریافت اطلاعات از GitHub Secrets
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT = os.getenv("TELEGRAM_CHAT_ID")
 
 CTX = ssl.create_default_context()
 
-# ۲۰ ارز با پشتوانه قوی و پتانسیل رشد
 COINS = [
     'BTC', 'ETH', 'BNB', 'SOL', 'XRP',
     'ADA', 'DOGE', 'TRX', 'LINK', 'AVAX',
@@ -25,10 +24,10 @@ def http(url, t=30, retries=2):
     last_err = None
     for attempt in range(retries + 1):
         try:
-            r = urllib.request.Request(url)
-            r.add_header('User-Agent', 'Mozilla/5.0')
-            r.add_header('Accept', 'application/json')
-            with urllib.request.urlopen(r, context=CTX, timeout=t) as x:
+            req = urllib.request.Request(url)
+            req.add_header('User-Agent', 'Mozilla/5.0')
+            req.add_header('Accept', 'application/json')
+            with urllib.request.urlopen(req, context=CTX, timeout=t) as x:
                 return json.loads(x.read().decode())
         except Exception as e:
             last_err = e
@@ -119,7 +118,8 @@ def macd_histogram(p):
     ema12 = calculate_ema_sequence(p, 12)
     ema26 = calculate_ema_sequence(p, 26)
 
-    macd_line = [f - s for f, s in zip(ema12[14:], ema26)]
+    offset = len(ema12) - len(ema26)
+    macd_line = [f - s for f, s in zip(ema12[offset:], ema26)]
     if len(macd_line) < 9:
         return None
 
@@ -182,7 +182,7 @@ def analyze(sym):
 
         # Volume Spike
         if vr > 1.3:
-            if bs > ss:
+            if k['p'][-1] > k['p'][-2]:
                 bs += 2
             else:
                 ss += 2
@@ -248,15 +248,18 @@ def analyze(sym):
 
 
 def send(msg):
+    if not TOKEN or not CHAT:
+        print("  Error: TELEGRAM_TOKEN or TELEGRAM_CHAT_ID is missing.")
+        return False
     try:
         url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
         d = json.dumps({
             "chat_id": CHAT, "text": msg,
             "parse_mode": "HTML", "disable_web_page_preview": True,
         }).encode()
-        r = urllib.request.Request(url, data=d)
-        r.add_header('Content-Type', 'application/json')
-        with urllib.request.urlopen(r, context=CTX, timeout=30) as x:
+        req = urllib.request.Request(url, data=d)
+        req.add_header('Content-Type', 'application/json')
+        with urllib.request.urlopen(req, context=CTX, timeout=30) as x:
             return x.status == 200
     except Exception as e:
         print(f"  warn telegram: {e}")
@@ -354,65 +357,34 @@ def fmt(a):
 
 
 # ============================================
-# 🎯 اجرای اصلی
+# 🎯 اجرای تک‌منظوره برای GitHub Actions
 # ============================================
 
 if __name__ == "__main__":
     print("=" * 50)
-    print("Robot v6.1 (Final)")
-    print("=" * 50)
-    print(f"Coins: {len(COINS)}")
-    print("Filter: 4H + 1D")
+    print("Starting Crypto Bot Scan...")
+    print(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 50)
 
-    send("🤖 <b>ربات راه‌اندازی شد</b>\n\n"
-         f"📊 {len(COINS)} ارز\n"
-         f"⏱ فیلتر: ۴ ساعته + روزانه\n"
-         f"🎯 دریافت سیگنال‌های معتبر")
+    sent_count = 0
+    valid_count = 0
 
-    alerted = {}
+    tickers()
 
-    while True:
-        try:
-            print(f"\nCycle: {datetime.now().strftime('%H:%M:%S')}")
-            print("-" * 50)
-            sent_count = 0
-            valid_count = 0
+    for s in COINS:
+        a = analyze(s)
+        if not a:
+            continue
+        valid_count += 1
 
-            tickers()
+        if send(fmt(a)):
+            sent_count += 1
+            print(f"  SENT: {s} | Signal: {a['sig']} ({a['score']})")
+            time.sleep(1)
 
-            for s in COINS:
-                a = analyze(s)
-                if not a:
-                    continue
-                valid_count += 1
+        time.sleep(0.1)
 
-                now = time.time()
-                last = alerted.get(s, 0)
-                cd = 600 if a['st'] == 'strong' else 3600
-
-                if now - last >= cd:
-                    if send(fmt(a)):
-                        alerted[s] = now
-                        sent_count += 1
-                        print(f"  SENT {s} | {a['sig']} ({a['score']})")
-                        time.sleep(1)
-                else:
-                    print(f"  skip {s} (Cooldown)")
-
-                time.sleep(0.1)
-
-            print(f"\nValid: {valid_count} | Sent: {sent_count}")
-
-            if len(alerted) > 200:
-                alerted = {k: v for k, v in alerted.items() if v > time.time() - 7200}
-
-            print("Done. Exiting.")
-            break
-
-        except KeyboardInterrupt:
-            print("\nStopped by user")
-            break
-        except Exception as e:
-            print(f"Error: {e}")
-            time.sleep(15)
+    print("-" * 50)
+    print(f"Scan Completed. Valid Signals: {valid_count} | Sent: {sent_count}")
+    print("=" * 50)
+        
