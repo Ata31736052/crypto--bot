@@ -1,5 +1,5 @@
 # ============================================
-# 🤖 ربات سیگنال ارز دیجیتال - نسخه پرسیگنال و بهینه‌شده
+# 🤖 ربات سیگنال ارز دیجیتال - همراه با گزارش وضعیت بازار
 # ============================================
 
 import json, time, os, ssl, urllib.request, warnings
@@ -13,7 +13,7 @@ CTX = ssl.create_default_context()
 CTX.check_hostname = False
 CTX.verify_mode = ssl.CERT_NONE
 
-# ۲۰ ارز برتر و نقدشونده
+# ۲۰ ارز برتر
 COINS = [
     'BTC', 'ETH', 'SOL', 'BNB', 'XRP', 
     'ADA', 'DOGE', 'AVAX', 'LINK', 'DOT', 
@@ -87,22 +87,18 @@ def analyze(sym):
     score_buy = 0
     score_sell = 0
 
-    # بررسی میانگین‌های متحرک در 4h
     if e9_4 > e21_4: score_buy += 3
     if e21_4 > e50_4: score_buy += 2
     if e9_4 < e21_4: score_sell += 3
     if e21_4 < e50_4: score_sell += 2
 
-    # بررسی RSI
     if 40 < rsi4 < 70: score_buy += 2
     if 30 < rsi4 < 60: score_sell += 2
 
-    # تأییدیه روند روزانه (امتیاز کمکی)
     if e9_1d and e21_1d:
         if e9_1d > e21_1d: score_buy += 3
         if e9_1d < e21_1d: score_sell += 3
 
-    # تعیین جهت معامله براساس حداقل امتیاز
     direction = None
     final_score = 0
     
@@ -113,11 +109,17 @@ def analyze(sym):
         direction = 'sell'
         final_score = score_sell
 
-    if not direction:
-        return None
-
     curr_price = k4['price']
-    
+
+    # بازگرداندن خلاصه اطلاعات حتی بدون سیگنال
+    base_info = {
+        'sym': sym, 'price': curr_price, 'rsi4': round(rsi4, 1),
+        'trend4': 'صعودی' if e9_4 > e21_4 else 'نزولی'
+    }
+
+    if not direction:
+        return {'is_signal': False, **base_info}
+
     if direction == 'buy':
         sl = curr_price * 0.975
         tp1 = curr_price * 1.025
@@ -130,6 +132,7 @@ def analyze(sym):
         sig_text = "فروش (SHORT)"
 
     return {
+        'is_signal': True,
         'sym': sym, 'price': curr_price, 'dir': direction,
         'sig': sig_text, 'score': final_score,
         'rsi4': round(rsi4, 1), 'rsi1d': round(rsi1d, 1),
@@ -169,15 +172,44 @@ def fmt(a):
 
 if __name__ == "__main__":
     print("شروع اسکن...")
-    send("🤖 <b>اسکن بازار برای یافتن سیگنال‌های جدید شروع شد...</b>")
     
-    count = 0
+    signals = []
+    market_summary = []
+    
     for s in COINS:
         a = analyze(s)
         if a:
-            if send(fmt(a)):
-                print(f"سیگنال فرستاده شد: {s}")
-                count += 1
+            if a['is_signal']:
+                signals.append(a)
+            else:
+                market_summary.append(a)
         time.sleep(0.1)
+
+    # اگر سیگنالی پیدا شد
+    if signals:
+        for sig in signals:
+            send(fmt(sig))
+            time.sleep(0.3)
+    else:
+        # اگر سیگنالی پیدا نشد، ارسال گزارش خلاصه بازار
+        btc_info = next((item for item in market_summary if item['sym'] == 'BTC'), None)
+        eth_info = next((item for item in market_summary if item['sym'] == 'ETH'), None)
         
-    print(f"پایان اسکن. تعداد سیگنال: {count}")
+        avg_rsi = round(sum(item['rsi4'] for item in market_summary) / len(market_summary), 1) if market_summary else 50
+        
+        now = datetime.now().strftime('%H:%M')
+        msg = (
+            f"ℹ️ <b>گزارش دوره ای بازار کریپتو ({now})</b>\n\n"
+            f"در این اسکن نقطه ورود معتبری برای ۲۰ ارز اصلی یافت نشد (بازار رنج یا بدون روند قوی است).\n\n"
+            f"📊 <b>وضعیت کلی بازار:</b>\n"
+            f"• میانگین شاخص RSI بازار: <b>{avg_rsi}</b>\n"
+        )
+        if btc_info:
+            msg += f"• بیت‌کوین (BTC): <b>{fp(btc_info['price'])} $</b> (روند ۴ساعته: {btc_info['trend4']})\n"
+        if eth_info:
+            msg += f"• اتریوم (ETH): <b>{fp(eth_info['price'])} $</b> (روند ۴ساعته: {eth_info['trend4']})\n"
+            
+        msg += "\n🔍 اسکن بعدی ۳۰ دقیقه دیگر انجام خواهد شد."
+        send(msg)
+
+    print("پایان اسکن.")
