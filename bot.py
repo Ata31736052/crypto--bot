@@ -1,6 +1,6 @@
 # ============================================
 # 🤖 ربات جامع سیگنال‌دهی کریپتو - تایم‌فریم روزانه (1D)
-# 🎯 نسخه اصلاح‌شده با دریافت مطمئن داده‌ها
+# 🎯 دریافت بدون محدودیت داده‌ها از KuCoin / Binance
 # ============================================
 
 import json, time, os, ssl, urllib.request, warnings
@@ -14,6 +14,7 @@ CTX = ssl.create_default_context()
 CTX.check_hostname = False
 CTX.verify_mode = ssl.CERT_NONE
 
+# لیست ۲۰ ارز برتر و محبوب
 COINS = [
     'BTC', 'ETH', 'SOL', 'BNB', 'XRP', 
     'ADA', 'DOGE', 'AVAX', 'LINK', 'DOT', 
@@ -26,37 +27,41 @@ def http(url, t=10):
         req = urllib.request.Request(
             url, 
             headers={
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
             }
         )
         with urllib.request.urlopen(req, context=CTX, timeout=t) as x:
             return json.loads(x.read().decode())
     except Exception as e:
-        print(f"Error fetching {url}: {e}")
         return None
 
 def klines(sym, tf='1d'):
-    # آدرس اصلی بایننس
-    url = f"https://api.binance.com/api/v3/klines?symbol={sym}USDT&interval={tf}&limit=60"
-    d = http(url)
+    # ۱. تلاش برای دریافت داده از KuCoin (بدون تحریم و فیلتر روی GitHub Actions)
+    url_kc = f"https://api.kucoin.com/api/v1/market/candles?symbol={sym}-USDT&type=1day"
+    d = http(url_kc)
     
-    # در صورت عدم پاسخ از بایننس اصلی، استفاده از API دامنه جایگزین
-    if not d or not isinstance(d, list):
-        url_alt = f"https://api1.binance.com/api/v3/klines?symbol={sym}USDT&interval={tf}&limit=60"
-        d = http(url_alt)
+    if d and d.get('code') == '200000' and isinstance(d.get('data'), list) and len(d['data']) > 0:
+        data = d['data'][:60]
+        data.reverse() # مرتب‌سازی از قدیمی به جدید
+        opens = [float(c[1]) for c in data]
+        closes = [float(c[2]) for c in data]
+        highs = [float(c[3]) for c in data]
+        lows = [float(c[4]) for c in data]
+        vols = [float(c[5]) for c in data]
+        return {'o': opens, 'h': highs, 'l': lows, 'p': closes, 'v': vols, 'price': closes[-1]}
 
-    if not d or not isinstance(d, list):
-        return None
+    # ۲. در صورت ناموفق بودن، تلاش با سرور پشتیبان Binance (data-api)
+    url_bn = f"https://data-api.binance.vision/api/v3/klines?symbol={sym}USDT&interval={tf}&limit=60"
+    d = http(url_bn)
+    if d and isinstance(d, list) and len(d) > 0:
+        opens = [float(c[1]) for c in d]
+        highs = [float(c[2]) for c in d]
+        lows = [float(c[3]) for c in d]
+        closes = [float(c[4]) for c in d]
+        vols = [float(c[5]) for c in d]
+        return {'o': opens, 'h': highs, 'l': lows, 'p': closes, 'v': vols, 'price': closes[-1]}
 
-    opens = [float(c[1]) for c in d]
-    highs = [float(c[2]) for c in d]
-    lows = [float(c[3]) for c in d]
-    closes = [float(c[4]) for c in d]
-    vols = [float(c[5]) for c in d]
-    return {
-        'o': opens, 'h': highs, 'l': lows, 'p': closes, 'v': vols, 
-        'price': closes[-1]
-    }
+    return None
 
 def ema(p, n):
     if len(p) < n: return None
@@ -136,6 +141,8 @@ def analyze(sym):
             score_sell += 2
 
     direction = None
+    final_score = 0
+    
     if score_buy >= 7 and score_buy > score_sell:
         direction = 'buy'
         final_score = score_buy
@@ -201,7 +208,6 @@ def send(msg):
         with urllib.request.urlopen(req, context=CTX, timeout=10) as x:
             return x.status == 200
     except Exception as e:
-        print(f"Error sending message: {e}")
         return False
 
 def fp(n):
@@ -229,7 +235,7 @@ def fmt(a):
     )
 
 if __name__ == "__main__":
-    print("شروع اسکن جامع بازار در تایم‌فریم روزانه...")
+    print("شروع اسکن جامع بازار...")
     
     signals = []
     market_summary = []
@@ -240,7 +246,7 @@ if __name__ == "__main__":
             if a['is_signal']:
                 signals.append(a)
             market_summary.append(a)
-        time.sleep(0.2)
+        time.sleep(0.1)
 
     if signals:
         for sig in signals:
@@ -267,9 +273,9 @@ if __name__ == "__main__":
             msg += "</pre>\n"
             msg += "🔍 اسکن بعدی انجام خواهد شد."
         else:
-            msg = f"⚠️ <b>خطا در دریافت داده‌ها ({now})</b>\n\nاتصال به API بایننس برقرار نشد. اسکن بعدی انجام خواهد شد."
+            msg = f"⚠️ <b>خطا در دریافت داده‌ها ({now})</b>\n\nاتصال به سرورهای بازار برقرار نشد."
 
         send(msg)
 
     print("پایان اسکن.")
-    
+        
