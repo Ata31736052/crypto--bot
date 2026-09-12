@@ -1,5 +1,6 @@
 # ============================================
-# 🤖 ربات سیگنال ارز دیجیتال - همراه با گزارش وضعیت بازار
+# 🤖 ربات جامع سیگنال‌دهی کریپتو - تایم‌فریم روزانه (1D)
+# 🎯 با مدیریت ریسک ATR، فیلتر حجم و الگوی کندل‌استیک
 # ============================================
 
 import json, time, os, ssl, urllib.request, warnings
@@ -13,7 +14,7 @@ CTX = ssl.create_default_context()
 CTX.check_hostname = False
 CTX.verify_mode = ssl.CERT_NONE
 
-# ۲۰ ارز برتر
+# لیست ۲۰ ارز برتر و محبوب
 COINS = [
     'BTC', 'ETH', 'SOL', 'BNB', 'XRP', 
     'ADA', 'DOGE', 'AVAX', 'LINK', 'DOT', 
@@ -30,15 +31,20 @@ def http(url, t=5):
     except Exception:
         return None
 
-def klines(sym, tf):
-    url = f"https://api.binance.com/api/v3/klines?symbol={sym}USDT&interval={tf}&limit=50"
+def klines(sym, tf='1d'):
+    url = f"https://api.binance.com/api/v3/klines?symbol={sym}USDT&interval={tf}&limit=60"
     d = http(url)
     if not d or not isinstance(d, list):
         return None
-    closes = [float(c[4]) for c in d]
+    opens = [float(c[1]) for c in d]
     highs = [float(c[2]) for c in d]
     lows = [float(c[3]) for c in d]
-    return {'p': closes, 'h': highs, 'l': lows, 'price': closes[-1]}
+    closes = [float(c[4]) for c in d]
+    vols = [float(c[5]) for c in d]
+    return {
+        'o': opens, 'h': highs, 'l': lows, 'p': closes, 'v': vols, 
+        'price': closes[-1]
+    }
 
 def ema(p, n):
     if len(p) < n: return None
@@ -63,88 +69,133 @@ def rsi(p, n=14):
     if avg_l == 0: return 100.0
     return 100.0 - (100.0 / (1.0 + (avg_g / avg_l)))
 
+def atr(highs, lows, closes, n=14):
+    if len(closes) < n + 1: return None
+    tr_list = []
+    for i in range(1, len(closes)):
+        h = highs[i]
+        l = lows[i]
+        pc = closes[i - 1]
+        tr = max(h - l, abs(h - pc), abs(l - pc))
+        tr_list.append(tr)
+    return sum(tr_list[-n:]) / n
+
 def analyze(sym):
-    k4 = klines(sym, '4h')
     k1d = klines(sym, '1d')
-    
-    if not k4 or not k1d:
+    if not k1d:
         return None
 
-    p4, p1d = k4['p'], k1d['p']
+    p1d, h1d, l1d, o1d, v1d = k1d['p'], k1d['h'], k1d['l'], k1d['o'], k1d['v']
+    curr_price = k1d['price']
     
-    e9_4 = ema(p4, 9)
-    e21_4 = ema(p4, 21)
-    e50_4 = ema(p4, 50)
-    rsi4 = rsi(p4)
-    
-    e9_1d = ema(p1d, 9)
-    e21_1d = ema(p1d, 21)
+    e9 = ema(p1d, 9)
+    e21 = ema(p1d, 21)
+    e50 = ema(p1d, 50)
     rsi1d = rsi(p1d)
+    atr1d = atr(h1d, l1d, p1d, 14)
 
-    if not (e9_4 and e21_4 and e50_4):
+    if not (e9 and e21 and e50 and atr1d):
         return None
 
     score_buy = 0
     score_sell = 0
 
-    if e9_4 > e21_4: score_buy += 3
-    if e21_4 > e50_4: score_buy += 2
-    if e9_4 < e21_4: score_sell += 3
-    if e21_4 < e50_4: score_sell += 2
+    # ۱. ترتیب میانگین‌های متحرک (EMA Trend)
+    if e9 > e21: score_buy += 3
+    if e21 > e50: score_buy += 2
+    if e9 < e21: score_sell += 3
+    if e21 < e50: score_sell += 2
 
-    if 40 < rsi4 < 70: score_buy += 2
-    if 30 < rsi4 < 60: score_sell += 2
+    # ۲. وضعیت اندیکاتور RSI
+    if 45 < rsi1d < 68: score_buy += 3
+    if 32 < rsi1d < 55: score_sell += 3
 
-    if e9_1d and e21_1d:
-        if e9_1d > e21_1d: score_buy += 3
-        if e9_1d < e21_1d: score_sell += 3
+    # ۳. فیلتر حجم معاملات (اگر حجم کندل آخری از میانگین ۲۰ کندل بیشتر باشد)
+    avg_vol = sum(v1d[-21:-1]) / 20
+    if v1d[-1] > avg_vol:
+        score_buy += 1
+        score_sell += 1
+
+    # ۴. تشخیص الگوی کندلی بازگشتی (Pin Bar / Hammer)
+    body = abs(p1d[-1] - o1d[-1])
+    candle_range = h1d[-1] - l1d[-1]
+    if candle_range > 0:
+        lower_shadow = min(p1d[-1], o1d[-1]) - l1d[-1]
+        upper_shadow = h1d[-1] - max(p1d[-1], o1d[-1])
+        # پین‌بار صعودی
+        if lower_shadow > (2 * body) and lower_shadow > (0.5 * candle_range):
+            score_buy += 2
+        # پین‌بار نزولی
+        if upper_shadow > (2 * body) and upper_shadow > (0.5 * candle_range):
+            score_sell += 2
 
     direction = None
     final_score = 0
     
-    if score_buy >= 5 and score_buy > score_sell:
+    # حد نصاب امتیاز برای صدور سیگنال (حداقل ۷ از ۱۱)
+    if score_buy >= 7 and score_buy > score_sell:
         direction = 'buy'
         final_score = score_buy
-    elif score_sell >= 5 and score_sell > score_buy:
+    elif score_sell >= 7 and score_sell > score_buy:
         direction = 'sell'
         final_score = score_sell
 
-    curr_price = k4['price']
+    trend_icon = "🟢" if e9 > e21 else "🔴"
 
-    # بازگرداندن خلاصه اطلاعات حتی بدون سیگنال
     base_info = {
-        'sym': sym, 'price': curr_price, 'rsi4': round(rsi4, 1),
-        'trend4': 'صعودی' if e9_4 > e21_4 else 'نزولی'
+        'sym': sym, 
+        'price': curr_price, 
+        'rsi1d': round(rsi1d, 1),
+        'icon': trend_icon
     }
 
     if not direction:
         return {'is_signal': False, **base_info}
 
+    # محاسبه حد سود و زیان بر اساس ATR پویا
     if direction == 'buy':
-        sl = curr_price * 0.975
-        tp1 = curr_price * 1.025
-        tp2 = curr_price * 1.05
+        sl = curr_price - (1.5 * atr1d)
+        tp1 = curr_price + (2.0 * atr1d)
+        tp2 = curr_price + (4.0 * atr1d)
         sig_text = "خرید (LONG)"
     else:
-        sl = curr_price * 1.025
-        tp1 = curr_price * 0.975
-        tp2 = curr_price * 0.95
+        sl = curr_price + (1.5 * atr1d)
+        tp1 = curr_price - (2.0 * atr1d)
+        tp2 = curr_price - (4.0 * atr1d)
         sig_text = "فروش (SHORT)"
+
+    # محاسبه نسبت ریسک به ریوارد (R/R) برای تارگت دوم
+    risk = abs(curr_price - sl)
+    reward = abs(tp2 - curr_price)
+    rr_ratio = round(reward / risk, 2) if risk > 0 else 2.0
 
     return {
         'is_signal': True,
-        'sym': sym, 'price': curr_price, 'dir': direction,
-        'sig': sig_text, 'score': final_score,
-        'rsi4': round(rsi4, 1), 'rsi1d': round(rsi1d, 1),
-        'sl': sl, 'tp1': tp1, 'tp2': tp2,
-        'time': datetime.now().strftime('%H:%M')
+        'sym': sym, 
+        'price': curr_price, 
+        'dir': direction,
+        'sig': sig_text, 
+        'score': final_score,
+        'rsi1d': round(rsi1d, 1),
+        'atr1d': fp(atr1d),
+        'sl': sl, 
+        'tp1': tp1, 
+        'tp2': tp2,
+        'rr': rr_ratio,
+        'time': datetime.now().strftime('%H:%M'),
+        'icon': trend_icon
     }
 
 def send(msg):
     if not TOKEN or not CHAT: return False
     try:
         url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-        d = json.dumps({"chat_id": CHAT, "text": msg, "parse_mode": "HTML"}).encode()
+        d = json.dumps({
+            "chat_id": CHAT, 
+            "text": msg, 
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True
+        }).encode()
         req = urllib.request.Request(url, data=d, headers={'Content-Type': 'application/json'})
         with urllib.request.urlopen(req, context=CTX, timeout=10) as x:
             return x.status == 200
@@ -153,25 +204,30 @@ def send(msg):
 
 def fp(n):
     if n >= 1000: return f"{n:,.2f}"
-    if n >= 1: return f"{n:,.4f}"
-    return f"{n:.6f}"
+    if n >= 1: return f"{n:,.3f}"
+    return f"{n:.5f}"
 
 def fmt(a):
     icon = "🟢" if a['dir'] == 'buy' else "🔴"
+    tv_link = f"https://www.tradingview.com/chart/?symbol=BINANCE:{a['sym']}USDT"
+    
     return (
-        f"{icon} <b>#سیگنال_{a['sym']} | USDT</b>\n\n"
-        f"🎯 جهت: <b>{a['sig']}</b>\n"
-        f"📊 قدرت سیگنال: <b>{a['score']} / 10</b>\n"
+        f"{icon} <b>#سیگنال_روزانه_{a['sym']} | USDT</b>\n\n"
+        f"🎯 جهت معامله: <b>{a['sig']}</b>\n"
+        f"📊 قدرت سیگنال: <b>{a['score']} / 11</b>\n"
         f"💰 قیمت ورود: <b>{fp(a['price'])} $</b>\n"
-        f"🛑 حد زیان (SL): <b>{fp(a['sl'])} $</b>\n"
-        f"🎯 حد سود ۱ (TP1): <b>{fp(a['tp1'])} $</b>\n"
-        f"🚀 حد سود ۲ (TP2): <b>{fp(a['tp2'])} $</b>\n\n"
-        f"📈 RSI ۴ساعته: {a['rsi4']} | روزانه: {a['rsi1d']}\n"
-        f"📅 زمان: {a['time']}"
+        f"⚖️ نسبت ریسک به ریوارد (R/R): <b>1:{a['rr']}</b>\n"
+        f"📏 دامنه نوسان (ATR 14): <b>{a['atr1d']} $</b>\n\n"
+        f"🛑 حد زیان (1.5x ATR): <b>{fp(a['sl'])} $</b>\n"
+        f"🎯 حد سود اول (2x ATR): <b>{fp(a['tp1'])} $</b>\n"
+        f"🚀 حد سود دوم (4x ATR): <b>{fp(a['tp2'])} $</b>\n\n"
+        f"📈 RSI روزانه: <b>{a['rsi1d']}</b>\n"
+        f"🔗 <a href='{tv_link}'>مشاهده نمودار در TradingView</a>\n"
+        f"📅 زمان ثبت: {a['time']}"
     )
 
 if __name__ == "__main__":
-    print("شروع اسکن...")
+    print("شروع اسکن جامع بازار در تایم‌فریم روزانه...")
     
     signals = []
     market_summary = []
@@ -181,35 +237,33 @@ if __name__ == "__main__":
         if a:
             if a['is_signal']:
                 signals.append(a)
-            else:
-                market_summary.append(a)
+            market_summary.append(a)
         time.sleep(0.1)
 
-    # اگر سیگنالی پیدا شد
     if signals:
         for sig in signals:
             send(fmt(sig))
             time.sleep(0.3)
     else:
-        # اگر سیگنالی پیدا نشد، ارسال گزارش خلاصه بازار
-        btc_info = next((item for item in market_summary if item['sym'] == 'BTC'), None)
-        eth_info = next((item for item in market_summary if item['sym'] == 'ETH'), None)
-        
-        avg_rsi = round(sum(item['rsi4'] for item in market_summary) / len(market_summary), 1) if market_summary else 50
-        
         now = datetime.now().strftime('%H:%M')
-        msg = (
-            f"ℹ️ <b>گزارش دوره ای بازار کریپتو ({now})</b>\n\n"
-            f"در این اسکن نقطه ورود معتبری برای ۲۰ ارز اصلی یافت نشد (بازار رنج یا بدون روند قوی است).\n\n"
-            f"📊 <b>وضعیت کلی بازار:</b>\n"
-            f"• میانگین شاخص RSI بازار: <b>{avg_rsi}</b>\n"
-        )
-        if btc_info:
-            msg += f"• بیت‌کوین (BTC): <b>{fp(btc_info['price'])} $</b> (روند ۴ساعته: {btc_info['trend4']})\n"
-        if eth_info:
-            msg += f"• اتریوم (ETH): <b>{fp(eth_info['price'])} $</b> (روند ۴ساعته: {eth_info['trend4']})\n"
+        avg_rsi_1d = round(sum(item['rsi1d'] for item in market_summary) / len(market_summary), 1) if market_summary else 50
+        
+        msg = f"📊 <b>گزارش روزانه بازار کریپتو ({now})</b>\n\n"
+        msg += f"• میانگین RSI روزانه بازار: <b>{avg_rsi_1d}</b>\n"
+        msg += "• وضعیت سیگنال: <i>هیچ ارزی تمام شرایط ورود معتبر در تایم روزانه را احراز نکرد.</i>\n\n"
+        
+        msg += "<pre>"
+        msg += f"{'نماد':<8} {'قیمت ($)':<13} {'RSI روزانه':<10}\n"
+        msg += "─" * 32 + "\n"
+        
+        for item in market_summary:
+            price_str = fp(item['price'])
+            msg += f"{item['sym']:<8} {price_str:<13} {item['rsi1d']:<10}\n"
             
-        msg += "\n🔍 اسکن بعدی ۳۰ دقیقه دیگر انجام خواهد شد."
+        msg += "</pre>\n"
+        msg += "🔍 اسکن بعدی انجام خواهد شد."
+        
         send(msg)
 
     print("پایان اسکن.")
+    
