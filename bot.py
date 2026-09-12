@@ -1,12 +1,13 @@
 # ============================================
-# 🤖 ربات ارز دیجیتال - نسخه نهایی و کامل
+# 🤖 ربات سیگنال‌دهی حرفه‌ای ارز دیجیتال - نسخه VIP
 # ============================================
 
 import json, time, os, ssl, urllib.request, warnings
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
+
 warnings.filterwarnings('ignore')
 
-# 🔑 دریافت اطلاعات از GitHub Secrets
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT = os.getenv("TELEGRAM_CHAT_ID")
 
@@ -14,14 +15,17 @@ CTX = ssl.create_default_context()
 CTX.check_hostname = False
 CTX.verify_mode = ssl.CERT_NONE
 
+# لیست ۳۵ ارز معتبر و با نقدینگی بالا
 COINS = [
-    'BTC', 'ETH', 'BNB', 'SOL', 'XRP',
-    'ADA', 'DOGE', 'TRX', 'LINK', 'AVAX',
-    'DOT', 'MATIC', 'ATOM', 'NEAR', 'FIL',
-    'APT', 'ARB', 'OP', 'INJ', 'SUI'
+    'BTC', 'ETH', 'SOL', 'BNB', 'XRP',
+    'DOGE', 'ADA', 'TRX', 'AVAX', 'LINK',
+    'DOT', 'SUI', 'NEAR', 'APT', 'FET',
+    'RENDER', 'TAO', 'TIA', 'INJ', 'OP',
+    'ARB', 'MATIC', 'ATOM', 'FIL', 'AAVE',
+    'UNI', 'LDO', 'STX', 'GMX', 'PENDLE',
+    'PEPE', 'SHIB', 'WIF', 'FLOKI', 'BONK'
 ]
 
-# دامنه‌های پشتیبان بایننس برای دور زدن محدودیت آی‌پی GitHub Actions
 BINANCE_HOSTS = [
     "https://api.binance.com",
     "https://api1.binance.com",
@@ -29,385 +33,229 @@ BINANCE_HOSTS = [
     "https://api3.binance.com"
 ]
 
-
-def http(path, t=20, retries=2):
-    last_err = None
+def http(path, t=10):
     for host in BINANCE_HOSTS:
         url = f"{host}{path}" if path.startswith('/') else path
-        for attempt in range(retries):
-            try:
-                req = urllib.request.Request(url)
-                req.add_header('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)')
-                req.add_header('Accept', 'application/json')
-                with urllib.request.urlopen(req, context=CTX, timeout=t) as x:
-                    return json.loads(x.read().decode())
-            except Exception as e:
-                last_err = e
-                time.sleep(0.5)
-    raise last_err
-
+        try:
+            req = urllib.request.Request(url)
+            req.add_header('User-Agent', 'Mozilla/5.0')
+            with urllib.request.urlopen(req, context=CTX, timeout=t) as x:
+                return json.loads(x.read().decode())
+        except Exception:
+            continue
+    return None
 
 _cache = {}
-_cache_t = 0
-
-
-def tickers():
-    global _cache, _cache_t
-    if _cache and time.time() - _cache_t < 60:
-        return _cache
-    try:
-        d = http("/api/v3/ticker/24hr", t=25)
+def get_tickers():
+    global _cache
+    d = http("/api/v3/ticker/24hr", t=15)
+    if d and isinstance(d, list):
         _cache = {i['symbol']: i for i in d}
-        _cache_t = time.time()
-    except Exception as e:
-        print(f"  ⚠️ warn ticker: {e}")
     return _cache
 
-
 def klines(sym, tf):
-    try:
-        path = f"/api/v3/klines?symbol={sym}USDT&interval={tf}&limit=100"
-        d = http(path, t=15)
-        if not d or not isinstance(d, list):
-            return None
-            
-        closes = [float(c[4]) for c in d]
-        vols = [float(c[5]) for c in d]
-        t = tickers().get(f"{sym}USDT", {})
-        
-        return {
-            'p': closes,
-            'v': vols,
-            'price': float(t.get('lastPrice', closes[-1] if closes else 0)),
-            'chg': float(t.get('priceChangePercent', 0)),
-        }
-    except Exception as e:
-        print(f"  ⚠️ Error fetching klines for {sym} ({tf}): {e}")
+    d = http(f"/api/v3/klines?symbol={sym}USDT&interval={tf}&limit=60", t=10)
+    if not d or not isinstance(d, list):
         return None
+    
+    closes = [float(c[4]) for c in d]
+    highs = [float(c[2]) for c in d]
+    lows = [float(c[3]) for c in d]
+    vols = [float(c[5]) for c in d]
+    
+    t = _cache.get(f"{sym}USDT", {})
+    return {
+        'p': closes, 'h': highs, 'l': lows, 'v': vols,
+        'price': float(t.get('lastPrice', closes[-1] if closes else 0)),
+        'chg': float(t.get('priceChangePercent', 0)),
+    }
 
+# --------------------------------------------
+# 📊 اندیکاتورهای فنی
+# --------------------------------------------
 
 def ema(p, n):
-    if len(p) < n:
-        return None
+    if len(p) < n: return None
     k = 2 / (n + 1)
     e = sum(p[:n]) / n
-    for x in p[n:]:
-        e = x * k + e * (1 - k)
+    for x in p[n:]: e = x * k + e * (1 - k)
     return e
 
-
 def rsi(p, n=14):
-    if len(p) < n + 1:
-        return 50.0
-    gains, losses = [], []
-    for i in range(1, len(p)):
-        change = p[i] - p[i - 1]
-        gains.append(max(change, 0))
-        losses.append(max(-change, 0))
-
-    avg_gain = sum(gains[:n]) / n
-    avg_loss = sum(losses[:n]) / n
-
+    if len(p) < n + 1: return 50.0
+    gains = [max(p[i] - p[i-1], 0) for i in range(1, len(p))]
+    losses = [max(p[i-1] - p[i], 0) for i in range(1, len(p))]
+    avg_g = sum(gains[:n]) / n
+    avg_l = sum(losses[:n]) / n
     for i in range(n, len(gains)):
-        avg_gain = (avg_gain * (n - 1) + gains[i]) / n
-        avg_loss = (avg_loss * (n - 1) + losses[i]) / n
+        avg_g = (avg_g * (n - 1) + gains[i]) / n
+        avg_l = (avg_l * (n - 1) + losses[i]) / n
+    if avg_l == 0: return 100.0
+    return 100.0 - (100.0 / (1.0 + (avg_g / avg_l)))
 
-    if avg_loss == 0:
-        return 100.0
-    rs = avg_gain / avg_loss
-    return 100.0 - (100.0 / (1.0 + rs))
+def stoch_rsi(p, n=14):
+    rsi_vals = []
+    for i in range(n, len(p) + 1):
+        rsi_vals.append(rsi(p[:i], n))
+    if len(rsi_vals) < n: return 50.0
+    curr = rsi_vals[-1]
+    low_r, high_r = min(rsi_vals[-n:]), max(rsi_vals[-n:])
+    if high_r == low_r: return 50.0
+    return ((curr - low_r) / (high_r - low_r)) * 100
 
+def atr(h, l, c, n=14):
+    if len(c) < n + 1: return None
+    tr = [max(h[i] - l[i], abs(h[i] - c[i-1]), abs(l[i] - c[i-1])) for i in range(1, len(c))]
+    return sum(tr[-n:]) / n
 
-def macd_histogram(p):
-    if len(p) < 35:
-        return None
-
-    def calculate_ema_sequence(data, period):
+def macd_hist(p):
+    if len(p) < 35: return 0
+    def calc_ema(data, period):
         k = 2 / (period + 1)
-        val = sum(data[:period]) / period
-        res = [val]
+        v = sum(data[:period]) / period
+        res = [v]
         for x in data[period:]:
-            val = x * k + val * (1 - k)
-            res.append(val)
+            v = x * k + v * (1 - k)
+            res.append(v)
         return res
+    e12 = calc_ema(p, 12)
+    e26 = calc_ema(p, 26)
+    macd = [f - s for f, s in zip(e12[len(e12)-len(e26):], e26)]
+    sig = calc_ema(macd, 9)
+    return macd[-1] - sig[-1]
 
-    ema12 = calculate_ema_sequence(p, 12)
-    ema26 = calculate_ema_sequence(p, 26)
-
-    offset = len(ema12) - len(ema26)
-    macd_line = [f - s for f, s in zip(ema12[offset:], ema26)]
-    if len(macd_line) < 9:
-        return None
-
-    signal_line = calculate_ema_sequence(macd_line, 9)
-    return macd_line[-1] - signal_line[-1]
-
-
-def trend(tf_data):
-    if not tf_data:
-        return 'side'
-    e9, e21, e50 = tf_data.get('e9'), tf_data.get('e21'), tf_data.get('e50')
-    if not (e9 and e21 and e50):
-        return 'side'
-    if e9 > e21 > e50:
-        return 'up'
-    if e9 < e21 < e50:
-        return 'down'
-    return 'side'
-
+# --------------------------------------------
+# 🎯 تحلیل حرفه‌ای
+# --------------------------------------------
 
 def analyze(sym):
-    tfs = {'15m': '۱۵د', '1h': '۱س', '4h': '۴س', '1d': 'روز'}
+    tfs = {'1h': '۱س', '4h': '۴س', '1d': 'روز'}
     res = {}
 
-    for i, n in tfs.items():
-        k = klines(sym, i)
-        if not k or len(k['p']) < 50:
-            continue
+    for tf_code, tf_fa in tfs.items():
+        k = klines(sym, tf_code)
+        if not k or len(k['p']) < 40: continue
 
-        e9 = ema(k['p'], 9)
-        e21 = ema(k['p'], 21)
-        e50 = ema(k['p'], 50)
-        rr = rsi(k['p'])
-        h = macd_histogram(k['p'])
+        e9, e21, e50 = ema(k['p'], 9), ema(k['p'], 21), ema(k['p'], 50)
+        r_val = rsi(k['p'])
+        stoch = stoch_rsi(k['p'])
+        m_hist = macd_hist(k['p'])
+        atr_val = atr(k['h'], k['l'], k['p'])
 
-        va = sum(k['v'][-6:-1]) / 5 if len(k['v']) >= 6 else 1
-        vr = k['v'][-1] / va if va > 0 else 1
+        v_avg = sum(k['v'][-20:-1]) / 19 if len(k['v']) >= 20 else 1
+        v_rat = k['v'][-1] / v_avg if v_avg > 0 else 1
 
         bs = ss = 0
 
-        # امتیازدهی شاخص RSI
-        if 50 < rr < 65:
-            bs += 2
-        elif 35 < rr < 50:
-            ss += 2
-
-        # امتیازدهی MACD
-        if h is not None:
-            if h > 0:
-                bs += 2
-            else:
-                ss += 2
-
-        # امتیازدهی روند EMA
+        # ۱. روند بر اساس EMAها
         if e9 and e21 and e50:
-            if e9 > e21 > e50:
-                bs += 3
-            elif e9 < e21 < e50:
-                ss += 3
+            if e9 > e21 > e50: bs += 4
+            elif e9 < e21 < e50: ss += 4
 
-        # امتیازدهی حجم
-        if vr > 1.1:
-            if k['p'][-1] > k['p'][-2]:
-                bs += 2
-            else:
-                ss += 2
+        # ۲. شاخص RSI & Stoch RSI
+        if 45 < r_val < 65 and stoch < 80: bs += 2.5
+        elif 35 < r_val < 55 and stoch > 20: ss += 2.5
 
-        res[n] = {
-            'price': k['price'], 'chg': k['chg'], 'rsi': rr,
-            'e9': e9, 'e21': e21, 'e50': e50,
-            'vol': vr, 'bs': bs, 'ss': ss, 'macd': h,
+        # ۳. مکدی
+        if m_hist > 0: bs += 2
+        else: ss += 2
+
+        # ۴. تایید حجم
+        if v_rat > 1.2:
+            if k['p'][-1] > k['p'][-2]: bs += 2.5
+            else: ss += 2.5
+
+        res[tf_fa] = {
+            'price': k['price'], 'chg': k['chg'], 'rsi': r_val,
+            'e9': e9, 'e21': e21, 'e50': e50, 'vol': v_rat,
+            'bs': bs, 'ss': ss, 'atr': atr_val
         }
-        time.sleep(0.05)
 
-    if len(res) < 4:
-        return None
+    if len(res) < 3: return None
 
     t4, t1 = res.get('۴س'), res.get('روز')
-    if not t4 or not t1:
-        return None
+    if not t4 or not t1: return None
 
-    r4, r1 = trend(t4), trend(t1)
+    # تعیین جهت کلی با تایید تایم‌فریم بالا
+    if t4['bs'] >= 7 and t1['bs'] >= 5: d = 'buy'
+    elif t4['ss'] >= 7 and t1['ss'] >= 5: d = 'sell'
+    else: return None
 
-    if r4 == 'up' and r1 == 'up':
-        d = 'buy'
-    elif r4 == 'down' and r1 == 'down':
-        d = 'sell'
-    else:
-        return None
+    score = t4['bs'] if d == 'buy' else t4['ss']
+    if score < 7.5: return None
 
-    w = {'۱۵د': 0.5, '۱س': 1.0, '۴س': 2.0, 'روز': 3.0}
-    wb = sum(res[n]['bs'] * w.get(n, 1) for n in res)
-    ws = sum(res[n]['ss'] * w.get(n, 1) for n in res)
+    price = t4['price']
+    atr_val = t4['atr'] or (price * 0.02)
 
-    rsi4, rsi1 = t4['rsi'], t1['rsi']
-
+    # محاسبه Stop Loss & Take Profit بر اساس نوسانات ATR
     if d == 'buy':
-        ok = 38 < rsi4 < 72 and 38 < rsi1 < 72
-        sc = wb
+        sl = price - (atr_val * 1.5)
+        tp1 = price + (atr_val * 1.8)
+        tp2 = price + (atr_val * 3.2)
+        sig_name = "خرید قوی (LONG)" if score >= 9.5 else "خرید متوسط"
     else:
-        ok = 28 < rsi4 < 62 and 28 < rsi1 < 62
-        sc = ws
-
-    vol_ok = t4['vol'] >= 0.85
-
-    # حد نصاب منطقی برای صدور سیگنال
-    if d == 'buy':
-        if sc >= 12 and ok and vol_ok:
-            sig, act, st = "خرید قوی", "ورود", 'strong'
-        elif sc >= 8 and ok and vol_ok:
-            sig, act, st = "خرید متوسط", "بررسی", 'medium'
-        else:
-            return None
-    else:
-        if sc >= 12 and ok and vol_ok:
-            sig, act, st = "فروش قوی", "خروج", 'strong'
-        elif sc >= 8 and ok and vol_ok:
-            sig, act, st = "فروش متوسط", "بررسی", 'medium'
-        else:
-            return None
+        sl = price + (atr_val * 1.5)
+        tp1 = price - (atr_val * 1.8)
+        tp2 = price - (atr_val * 3.2)
+        sig_name = "فروش قوی (SHORT)" if score >= 9.5 else "فروش متوسط"
 
     return {
-        'sym': sym, 'tf': res, 'score': round(sc, 1),
-        'dir': d, 'sig': sig, 'act': act, 'st': st,
-        'time': datetime.now().strftime('%m-%d %H:%M'),
+        'sym': sym, 'dir': d, 'sig': sig_name, 'score': round(score, 1),
+        'price': price, 'chg': t4['chg'], 'rsi': t4['rsi'],
+        'vol': t4['vol'], 'sl': sl, 'tp1': tp1, 'tp2': tp2,
+        'time': datetime.now().strftime('%H:%M')
     }
 
-
-def send(msg):
-    if not TOKEN or not CHAT:
-        print("  ❌ Error: TELEGRAM_TOKEN or TELEGRAM_CHAT_ID is missing!")
-        return False
-    try:
-        url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-        d = json.dumps({
-            "chat_id": CHAT, "text": msg,
-            "parse_mode": "HTML", "disable_web_page_preview": True,
-        }).encode()
-        req = urllib.request.Request(url, data=d)
-        req.add_header('Content-Type', 'application/json')
-        with urllib.request.urlopen(req, context=CTX, timeout=25) as x:
-            return x.status == 200
-    except Exception as e:
-        print(f"  ⚠️ warn telegram: {e}")
-        return False
-
-
 def fp(n):
-    if n is None:
-        return "-"
-    if n >= 1000:
-        return f"{n:,.2f}"
-    if n >= 1:
-        return f"{n:,.4f}"
-    if n >= 0.01:
-        return f"{n:.6f}"
-    return f"{n:.8f}"
-
-
-def rsi_status(r):
-    if r > 70:
-        return "اشباع خرید"
-    if r < 30:
-        return "اشباع فروش"
-    if r > 60:
-        return "بالا"
-    if r < 40:
-        return "پایین"
-    return "خنثی"
-
-
-def vol_status(v):
-    if v > 2:
-        return "خیلی بالا"
-    if v > 1.5:
-        return "بالا"
-    if v > 1:
-        return "معمولی"
-    return "کم"
-
-
-def ema_status(e9, e21, e50):
-    if not (e9 and e21 and e50):
-        return "نامشخص"
-    if e9 > e21 > e50:
-        return "صعودی قوی"
-    if e9 < e21 < e50:
-        return "نزولی قوی"
-    return "مخلوط"
-
-
-def chg_status(c):
-    if c > 5:
-        return "رشد شدید"
-    if c > 2:
-        return "صعودی"
-    if c < -5:
-        return "ریزش شدید"
-    if c < -2:
-        return "نزولی"
-    return "خنثی"
-
+    if not n: return "-"
+    if n >= 1000: return f"{n:,.2f}"
+    if n >= 1: return f"{n:,.4f}"
+    return f"{n:.6f}"
 
 def fmt(a):
-    t4 = a['tf']['۴س']
-    t1 = a['tf']['روز']
-
-    icon = "🟢" if a['dir'] == 'buy' else "🔴"
-    strength_fa = "قوی" if a['st'] == 'strong' else "متوسط"
-
+    icon = "🟢 #LONG" if a['dir'] == 'buy' else "🔴 #SHORT"
     m = (
-        f"{icon} <b>{a['sym']}/USDT</b>\n\n"
-        f"🎯 سیگنال: <b>{a['sig']} {strength_fa}</b>\n"
-        f"📌 اقدام: {a['act']}\n"
-        f"📊 امتیاز: <b>{a['score']}</b>\n\n"
-        f"💰 قیمت: <b>{fp(t4['price'])}</b> دلار\n"
-        f"📈 تغییر ۲۴ ساعت: {t4['chg']:+.2f}% ({chg_status(t4['chg'])})\n\n"
-        f"━━━━━━━━━━━━━━━━━━━\n"
-        f"⏱ <b>تایم‌فریم ۴ ساعته</b>\n"
-        f"• RSI: {t4['rsi']:.1f} ({rsi_status(t4['rsi'])})\n"
-        f"• EMA9: {fp(t4['e9'])}\n"
-        f"• EMA21: {fp(t4['e21'])}\n"
-        f"• EMA50: {fp(t4['e50'])}\n"
-        f"• روند: {ema_status(t4['e9'], t4['e21'], t4['e50'])}\n"
-        f"• حجم: {t4['vol']:.1f}x ({vol_status(t4['vol'])})\n\n"
-        f"⏱ <b>تایم‌فریم روزانه</b>\n"
-        f"• RSI: {t1['rsi']:.1f} ({rsi_status(t1['rsi'])})\n"
-        f"• EMA9: {fp(t1['e9'])}\n"
-        f"• EMA21: {fp(t1['e21'])}\n"
-        f"• EMA50: {fp(t1['e50'])}\n"
-        f"• روند: {ema_status(t1['e9'], t1['e21'], t1['e50'])}\n\n"
-        f"━━━━━━━━━━━━━━━━━━━\n"
-        f"📅 {a['time']}"
+        f"{icon} | <b>{a['sym']}/USDT</b>\n\n"
+        f"🎯 سیگنال: <b>{a['sig']}</b>\n"
+        f"📊 قدر سیگنال: <b>{a['score']} / 11</b>\n"
+        f"💰 قیمت ورود: <b>{fp(a['price'])} USDT</b>\n"
+        f"📈 تغییر ۲۴h: {a['chg']:+.2f}%\n\n"
+        f"🎯 <b>تارگت‌ها و حد زیان پیشنهاد شده:</b>\n"
+        f"🔹 حد سود اول (TP1): <b>{fp(a['tp1'])}</b>\n"
+        f"🚀 حد سود دوم (TP2): <b>{fp(a['tp2'])}</b>\n"
+        f"🛑 حد زیان (SL): <b>{fp(a['sl'])}</b>\n\n"
+        f"📊 شاخص RSI: {a['rsi']:.1f} | حجم: {a['vol']:.1f}x\n"
+        f"⏰ زمان اسکن: {a['time']}"
     )
-    return m[:4000]
+    return m
 
-
-# ============================================
-# 🎯 اجرای اصلی
-# ============================================
+def send(msg):
+    if not TOKEN or not CHAT: return False
+    try:
+        url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+        d = json.dumps({"chat_id": CHAT, "text": msg, "parse_mode": "HTML"}).encode()
+        req = urllib.request.Request(url, data=d)
+        req.add_header('Content-Type', 'application/json')
+        with urllib.request.urlopen(req, context=CTX, timeout=10) as x:
+            return x.status == 200
+    except Exception: return False
 
 if __name__ == "__main__":
-    print("=" * 50)
-    print("Starting Crypto Bot Scan...")
-    print(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print("=" * 50)
-
-    # تست اولیه سلامت اتصال به تلگرام
-    test_sent = send("🤖 <b>تست ربات سیگنال</b>\n\nربات اجرا شد و در حال اسکن بازار است...")
-    if test_sent:
-        print("  ✅ Test message sent to Telegram successfully!")
-    else:
-        print("  ❌ Failed to send test message. Check TELEGRAM_TOKEN and TELEGRAM_CHAT_ID.")
+    print("🚀 Starting Fast VIP Crypto Scan...")
+    get_tickers()
+    
+    # اسکن همزمان ارزها با ۱۰ نخ پردازشی (سرعت بالا)
+    signals = []
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        results = executor.map(analyze, COINS)
+        for r in results:
+            if r: signals.append(r)
 
     sent_count = 0
-    valid_count = 0
-
-    tickers()
-
-    for s in COINS:
-        a = analyze(s)
-        if not a:
-            continue
-        valid_count += 1
-
-        if send(fmt(a)):
+    for s in signals:
+        if send(fmt(s)):
             sent_count += 1
-            print(f"  SENT: {s} | Signal: {a['sig']} ({a['score']})")
-            time.sleep(1)
+            time.sleep(0.5)
 
-        time.sleep(0.1)
-
-    print("-" * 50)
-    print(f"Scan Completed. Valid Signals: {valid_count} | Sent: {sent_count}")
-    print("=" * 50)
+    print(f"✅ Scan finished in seconds! Signals found & sent: {sent_count}")
+    
