@@ -1,6 +1,6 @@
 # ============================================
 # 🤖 ربات جامع سیگنال‌دهی کریپتو - تایم‌فریم ۴ ساعته (4H)
-# 🎯 همراه با تاییدیه اندیکاتور MACD، ATR، فیلتر حجم و پرایس‌اکشن
+# 🎯 با ۳۰ ارز برتر، تاییدیه MACD، ATR، RSI، EMA و پرایس‌اکشن
 # ============================================
 
 import json, time, os, ssl, urllib.request, warnings
@@ -14,12 +14,14 @@ CTX = ssl.create_default_context()
 CTX.check_hostname = False
 CTX.verify_mode = ssl.CERT_NONE
 
-# لیست ۲۰ ارز برتر و محبوب
+# لیست ۳۰ ارز محبوب و پرمعامله بازار
 COINS = [
     'BTC', 'ETH', 'SOL', 'BNB', 'XRP', 
     'ADA', 'DOGE', 'AVAX', 'LINK', 'DOT', 
     'NEAR', 'SUI', 'APT', 'ARB', 'OP',
-    'PEPE', 'FET', 'RNDR', 'INJ', 'MATIC'
+    'PEPE', 'FET', 'RNDR', 'INJ', 'MATIC',
+    'TON', 'NOT', 'SHIB', 'LTC', 'TRX',
+    'ATOM', 'TIA', 'WIF', 'SEI', 'STX'
 ]
 
 def http(url, t=10):
@@ -180,7 +182,7 @@ def analyze(sym):
     direction = None
     final_score = 0
     
-    # حد نصاب ۷ از ۱۳ برای ورود به معامله
+    # حد نصاب ۷ از ۱۳ برای صدور سیگنال ورود
     if score_buy >= 7 and score_buy > score_sell:
         direction = 'buy'
         final_score = score_buy
@@ -255,11 +257,10 @@ def fp(n):
     return f"{n:.5f}"
 
 def fmt(a):
-    icon = "🟢" if a['dir'] == 'buy' else "🔴"
     tv_link = f"https://www.tradingview.com/chart/?symbol=BINANCE:{a['sym']}USDT"
     
     return (
-        f"{icon} <b>#سیگنال_4ساعته_{a['sym']} | USDT</b>\n\n"
+        f"{a['icon']} <b>#سیگنال_4ساعته_{a['sym']} | USDT</b>\n\n"
         f"🎯 جهت معامله: <b>{a['sig']}</b>\n"
         f"📊 قدرت سیگنال: <b>{a['score']} / 13</b>\n"
         f"💰 قیمت ورود: <b>{fp(a['price'])} $</b>\n"
@@ -300,22 +301,22 @@ if __name__ == "__main__":
             
             msg = f"📊 <b>گزارش بازار کریپتو (۴ ساعته - {now})</b>\n\n"
             msg += f"• میانگین RSI ۴ ساعته بازار: <b>{avg_rsi_4h}</b>\n"
-            msg += "• وضعیت سیگنال: <i>هیچ ارزی تمام شرایط ورود معتبر در تایم ۴ ساعته را احراز نکرد.</i>\n\n"
+            msg += "• وضعیت سیگنال: <i>هیچ ارزی تمام شرایط ورود معتبر (امتیاز بالای ۷) را احراز نکرد.</i>\n\n"
             
             msg += "<pre>"
-            msg += f"{'نماد':<8} {'قیمت ($)':<13} {'RSI 4H':<10}\n"
+            msg += f"{'روند':<4} {'نماد':<7} {'قیمت ($)':<12} {'RSI':<6}\n"
             msg += "─" * 32 + "\n"
             
             for item in market_summary:
                 price_str = fp(item['price'])
-                msg += f"{item['sym']:<8} {price_str:<13} {item['rsi4h']:<10}\n"
+                msg += f"{item['icon']:<4} {item['sym']:<7} {price_str:<12} {item['rsi4h']:<6}\n"
                 
             msg += "</pre>\n"
-            msg += "🔍 اسکن بعدی انجام خواهد شد."
+            msg += "🔍 اسکن بعدی سر ۴ ساعت انجام می‌شود."
         else:
             msg = f"⚠️ <b>خطا در دریافت داده‌ها ({now})</b>\n\nاتصال به سرورهای بازار برقرار نشد."
 
         send(msg)
 
     print("پایان اسکن.")
-    
+        
