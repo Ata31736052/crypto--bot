@@ -1,32 +1,26 @@
-name: Run Crypto Bot
+name: Crypto Signal Bot
 
 on:
   schedule:
-    - cron: '0 */6 * * *'
-  workflow_dispatch:
+    # اجرای اتوماتیک هر ۱۵ دقیقه یک‌بار
+    - cron: '*/15 * * * *'
+  workflow_dispatch: # امکان اجرای دستی از تب Actions
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+
     steps:
-      - uses: actions/checkout@v5
-      - name: Setup Python
-        uses: actions/setup-python@v6
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-      - name: Run bot
+
+      - name: Run Crypto Bot
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: timeout 600 python bot.py
-
-  keepalive:
-    if: github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    permissions:
-      actions: write
-    steps:
-      - uses: liskin/gh-workflow-keepalive@v1
+        run: python main.py
