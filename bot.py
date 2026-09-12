@@ -1,17 +1,18 @@
 # ============================================
-# 🤖 ربات ارز دیجیتال - مخصوص GitHub Actions
+# 🤖 ربات ارز دیجیتال - نسخه مخصوص GitHub Actions
 # ============================================
 
 import json, time, os, ssl, urllib.request, warnings
 from datetime import datetime
 warnings.filterwarnings('ignore')
 
-# 🔑 دریافت اطلاعات از GitHub Secrets
+# 🔑 دریافت اطلاعات ربات از GitHub Secrets
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT = os.getenv("TELEGRAM_CHAT_ID")
 
 CTX = ssl.create_default_context()
 
+# لیست ارزها جهت اسکن
 COINS = [
     'BTC', 'ETH', 'BNB', 'SOL', 'XRP',
     'ADA', 'DOGE', 'TRX', 'LINK', 'AVAX',
@@ -160,27 +161,27 @@ def analyze(sym):
 
         bs = ss = 0
 
-        # RSI Analysis
+        # تحلیل RSI
         if 50 < rr < 65:
             bs += 2
         elif 35 < rr < 50:
             ss += 2
 
-        # MACD Analysis
+        # تحلیل MACD
         if h is not None:
             if h > 0:
                 bs += 2
             else:
                 ss += 2
 
-        # EMA Trend Analysis
+        # تحلیل روند EMA
         if e9 and e21 and e50:
             if e9 > e21 > e50:
                 bs += 3
             elif e9 < e21 < e50:
                 ss += 3
 
-        # Volume Spike
+        # افزایش حجم معاملات
         if vr > 1.3:
             if k['p'][-1] > k['p'][-2]:
                 bs += 2
@@ -357,7 +358,7 @@ def fmt(a):
 
 
 # ============================================
-# 🎯 اجرای تک‌منظوره برای GitHub Actions
+# 🎯 اجرای اسکن تک‌نوبتی
 # ============================================
 
 if __name__ == "__main__":
