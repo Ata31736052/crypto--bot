@@ -1,6 +1,5 @@
 # ============================================
-# 🤖 ربات جامع سیگنال‌دهی کریپتو - تایم‌فریم ۴ ساعته (4H) - نسخه نهایی
-# 🎯 با ۳۰ ارز برتر، تاییدیه MACD، ATR، RSI، EMA و پرایس‌اکشن
+# 🤖 ربات جامع و هوشمند سیگنال‌دهی کریپتو - نسخه حرفه‌ای 5-in-1
 # ============================================
 
 import json, time, os, ssl, urllib.request, warnings
@@ -9,12 +8,12 @@ warnings.filterwarnings('ignore')
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT = os.getenv("TELEGRAM_CHAT_ID")
+STATE_FILE = "signals_state.json"
 
 CTX = ssl.create_default_context()
 CTX.check_hostname = False
 CTX.verify_mode = ssl.CERT_NONE
 
-# لیست ۳۰ ارز محبوب و پرمعامله بازار (به‌روزرسانی شده با نماد GRAM)
 COINS = [
     'BTC', 'ETH', 'SOL', 'BNB', 'XRP', 
     'ADA', 'DOGE', 'AVAX', 'LINK', 'DOT', 
@@ -28,23 +27,35 @@ def http(url, t=10):
     try:
         req = urllib.request.Request(
             url, 
-            headers={
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
+            headers={'User-Agent': 'Mozilla/5.0'}
         )
         with urllib.request.urlopen(req, context=CTX, timeout=t) as x:
             return json.loads(x.read().decode())
     except Exception:
         return None
 
+def load_state():
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, 'r') as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_state(state):
+    try:
+        with open(STATE_FILE, 'w') as f:
+            json.dump(state, f, indent=2)
+    except Exception:
+        pass
+
 def get_ticker_price(sym):
-    # ۱. دریافت قیمت لحظه‌ای و دقیق از بایننس
     url_bn = f"https://data-api.binance.vision/api/v3/ticker/price?symbol={sym}USDT"
     d = http(url_bn)
     if d and isinstance(d, dict) and 'price' in d:
         return float(d['price'])
     
-    # ۲. سرور پشتیبان: دریافت قیمت لحظه‌ای از کوکوین
     url_kc = f"https://api.kucoin.com/api/v1/market/orderbook/level1?symbol={sym}-USDT"
     d_kc = http(url_kc)
     if d_kc and d_kc.get('code') == '200000' and isinstance(d_kc.get('data'), dict) and 'price' in d_kc['data']:
@@ -52,18 +63,16 @@ def get_ticker_price(sym):
         
     return None
 
-def klines(sym, tf='4h'):
-    # دریافت قیمت زنده و آنلاین بازار
-    live_price = get_ticker_price(sym)
+def klines(sym, tf='4h', limit=120):
+    live_price = get_ticker_price(sym) if tf == '4h' else None
     
-    # ۱. دریافت ۱۲۰ کندل از Binance برای محاسبه دقیق EMA50
-    url_bn = f"https://data-api.binance.vision/api/v3/klines?symbol={sym}USDT&interval={tf}&limit=120"
+    url_bn = f"https://data-api.binance.vision/api/v3/klines?symbol={sym}USDT&interval={tf}&limit={limit}"
     d = http(url_bn)
     if d and isinstance(d, list) and len(d) > 1:
         if not live_price:
             live_price = float(d[-1][4])
             
-        d = d[:-1] # حذف کندل جاری (در حال تشکیل) برای تحلیل دقیق تکنیکال
+        d = d[:-1]
         opens = [float(c[1]) for c in d]
         highs = [float(c[2]) for c in d]
         lows = [float(c[3]) for c in d]
@@ -71,11 +80,10 @@ def klines(sym, tf='4h'):
         vols = [float(c[5]) for c in d]
         return {'o': opens, 'h': highs, 'l': lows, 'p': closes, 'v': vols, 'price': live_price}
 
-    # ۲. سرور پشتیبان KuCoin
-    url_kc = f"https://api.kucoin.com/api/v1/market/candles?symbol={sym}-USDT&type=4hour"
+    url_kc = f"https://api.kucoin.com/api/v1/market/candles?symbol={sym}-USDT&type={tf if tf!='1d' else '1day'}"
     d = http(url_kc)
     if d and d.get('code') == '200000' and isinstance(d.get('data'), list) and len(d['data']) > 1:
-        data = d['data'][1:121] # حذف کندل جاری در کوکوین
+        data = d['data'][1:limit]
         data.reverse()
         
         if not live_price:
@@ -106,18 +114,13 @@ def macd(p, fast=12, slow=26, signal=9):
     if len(p) < slow + signal: return None, None, None
     ema_fast = ema_series(p, fast)
     ema_slow = ema_series(p, slow)
-    
-    # هم‌راستاسازی طول آرایه‌ها
     ema_fast = ema_fast[slow - fast:]
     macd_line = [f - s for f, s in zip(ema_fast, ema_slow)]
-    
     signal_line = ema_series(macd_line, signal)
     if not signal_line: return None, None, None
-    
     curr_macd = macd_line[-1]
     curr_signal = signal_line[-1]
     curr_hist = curr_macd - curr_signal
-    
     return curr_macd, curr_signal, curr_hist
 
 def rsi(p, n=14):
@@ -146,7 +149,17 @@ def atr(highs, lows, closes, n=14):
         tr_list.append(tr)
     return sum(tr_list[-n:]) / n
 
-def analyze(sym):
+def get_btc_macro_trend():
+    """۱. فیلتر روند بیت‌کوین در تایم‌فریم روزانه"""
+    k1d = klines('BTC', '1d', limit=60)
+    if not k1d:
+        return 'NEUTRAL'
+    e50 = ema(k1d['p'], 50)
+    if not e50:
+        return 'NEUTRAL'
+    return 'BULLISH' if k1d['price'] > e50 else 'BEARISH'
+
+def analyze(sym, btc_trend):
     k4h = klines(sym, '4h')
     if not k4h:
         return None
@@ -167,17 +180,14 @@ def analyze(sym):
     score_buy = 0
     score_sell = 0
 
-    # ۱. ترتیب میانگین‌های متحرک (EMA Trend)
     if e9 > e21: score_buy += 3
     if e21 > e50: score_buy += 2
     if e9 < e21: score_sell += 3
     if e21 < e50: score_sell += 2
 
-    # ۲. وضعیت اندیکاتور RSI
     if 45 < rsi4h < 68: score_buy += 3
     if 32 < rsi4h < 55: score_sell += 3
 
-    # ۳. تاییدیه اندیکاتور MACD
     macd_status = "خنثی"
     if hist_val > 0:
         score_buy += 2
@@ -186,16 +196,12 @@ def analyze(sym):
         score_sell += 2
         macd_status = "نزولی 🔴"
 
-    # ۴. فیلتر حجم معاملات (ترکیب حجم با کندل جهتی)
     avg_vol = sum(v4h[-21:-1]) / 20 if len(v4h) >= 21 else sum(v4h) / len(v4h)
     is_green_candle = p4h[-1] > o4h[-1]
     if v4h[-1] > avg_vol:
-        if is_green_candle:
-            score_buy += 1
-        else:
-            score_sell += 1
+        if is_green_candle: score_buy += 1
+        else: score_sell += 1
 
-    # ۵. الگوی کندلی بازگشتی (Pin Bar)
     body = abs(p4h[-1] - o4h[-1])
     candle_range = h4h[-1] - l4h[-1]
     if candle_range > 0:
@@ -207,26 +213,25 @@ def analyze(sym):
             score_sell += 2
 
     direction = None
-    final_score = 0
-    
-    # حد نصاب ۷ از ۱۳ برای صدور سیگنال ورود
-    if score_buy >= 7 and score_buy > score_sell:
+    if score_buy >= 7 and score_buy > score_sell and btc_trend != 'BEARISH':
         direction = 'buy'
         final_score = score_buy
-    elif score_sell >= 7 and score_sell > score_buy:
+    elif score_sell >= 7 and score_sell > score_buy and btc_trend != 'BULLISH':
         direction = 'sell'
         final_score = score_sell
 
     trend_icon = "🟢" if e9 > e21 else "🔴"
-
-    base_info = {
-        'sym': sym, 
-        'price': curr_price, 
-        'rsi4h': round(rsi4h, 1),
-        'icon': trend_icon
-    }
+    base_info = {'sym': sym, 'price': curr_price, 'rsi4h': round(rsi4h, 1), 'icon': trend_icon}
 
     if not direction:
+        return {'is_signal': False, **base_info}
+
+    # ۲. فیلتر حمایت و مقاومت (S/R Filter)
+    recent_high = max(h4h[-20:])
+    recent_low = min(l4h[-20:])
+    if direction == 'buy' and (recent_high - curr_price) < atr4h:
+        return {'is_signal': False, **base_info}
+    if direction == 'sell' and (curr_price - recent_low) < atr4h:
         return {'is_signal': False, **base_info}
 
     if direction == 'buy':
@@ -244,6 +249,13 @@ def analyze(sym):
     reward = abs(tp2 - curr_price)
     rr_ratio = round(reward / risk, 2) if risk > 0 else 2.0
 
+    # ۳. محاسبه حجم معامله بر اساس ۱٪ ریسک حساب ۱۰۰۰ دلاری
+    account_size = 1000.0
+    risk_amount = account_size * 0.01
+    stop_pct = risk / curr_price
+    position_value = risk_amount / stop_pct if stop_pct > 0 else account_size
+    leverage = max(1, min(10, int(position_value / account_size)))
+
     return {
         'is_signal': True,
         'sym': sym, 
@@ -258,6 +270,8 @@ def analyze(sym):
         'tp1': tp1, 
         'tp2': tp2,
         'rr': rr_ratio,
+        'pos_size': round(position_value, 1),
+        'leverage': leverage,
         'time': datetime.now().strftime('%H:%M'),
         'icon': trend_icon
     }
@@ -291,30 +305,37 @@ def fmt(a):
         f"🎯 جهت معامله: <b>{a['sig']}</b>\n"
         f"📊 قدرت سیگنال: <b>{a['score']} / 13</b>\n"
         f"💰 قیمت ورود: <b>{fp(a['price'])} $</b>\n"
-        f"⚖️ نسبت ریسک به ریوارد (R/R): <b>1:{a['rr']}</b>\n"
-        f"📏 دامنه نوسان (ATR 14): <b>{a['atr4h']} $</b>\n\n"
+        f"⚖️ نسبت R/R: <b>1:{a['rr']}</b>\n"
+        f"📐 اهرم پیشنهادی: <b>{a['leverage']}x</b> | حجم: <b>{a['pos_size']} $</b>\n\n"
         f"🛑 حد زیان (1.5x ATR): <b>{fp(a['sl'])} $</b>\n"
-        f"🎯 حد سود اول (2x ATR): <b>{fp(a['tp1'])} $</b>\n"
-        f"🚀 حد سود دوم (4x ATR): <b>{fp(a['tp2'])} $</b>\n\n"
-        f"📈 وضعیت RSI (4H): <b>{a['rsi4h']}</b>\n"
-        f"📊 وضعیت MACD: <b>{a['macd_status']}</b>\n"
+        f"🎯 حد سود اول: <b>{fp(a['tp1'])} $</b>\n"
+        f"🚀 حد سود دوم: <b>{fp(a['tp2'])} $</b>\n\n"
+        f"📈 وضعیت RSI: <b>{a['rsi4h']}</b> | MACD: <b>{a['macd_status']}</b>\n"
         f"🔗 <a href='{tv_link}'>مشاهده نمودار در TradingView</a>\n"
         f"📅 زمان ثبت: {a['time']}"
     )
 
 if __name__ == "__main__":
-    print("شروع اسکن بازار در تایم‌فریم ۴ ساعته...")
+    print("شروع اسکن پیشرفته بازار...")
+    state = load_state()
+    btc_trend = get_btc_macro_trend()
     
     signals = []
     market_summary = []
     
     for s in COINS:
-        a = analyze(s)
+        a = analyze(s, btc_trend)
         if a:
             if a['is_signal']:
-                signals.append(a)
+                # ۴. جلوگیری از ارسال سیگنال تکراری در صورت یکسان بودن جهت معامله
+                last_dir = state.get(s, {}).get('dir')
+                if last_dir != a['dir']:
+                    signals.append(a)
+                    state[s] = {'dir': a['dir'], 'time': a['time']}
             market_summary.append(a)
         time.sleep(0.1)
+
+    save_state(state)
 
     if signals:
         for sig in signals:
@@ -322,17 +343,17 @@ if __name__ == "__main__":
             time.sleep(0.3)
     else:
         now = datetime.now().strftime('%H:%M')
-        
         if market_summary:
             avg_rsi_4h = round(sum(item['rsi4h'] for item in market_summary) / len(market_summary), 1)
+            btc_icon = "🟢 صعودی" if btc_trend == 'BULLISH' else ("🔴 نزولی" if btc_trend == 'BEARISH' else "⚪️ خنثی")
             
             msg = f"📊 <b>گزارش بازار کریپتو (۴ ساعته - {now})</b>\n\n"
-            msg += f"• میانگین RSI ۴ ساعته بازار: <b>{avg_rsi_4h}</b>\n"
-            msg += "• وضعیت سیگنال: <i>هیچ ارزی تمام شرایط ورود معتبر (امتیاز بالای ۷) را احراز نکرد.</i>\n\n"
+            msg += f"🌐 روند کلان بیت‌کوین (1D): <b>{btc_icon}</b>\n"
+            msg += f"• میانگین RSI بازار: <b>{avg_rsi_4h}</b>\n"
+            msg += "• وضعیت: <i>سیگنال جدید و تاییدشده‌ای یافت نشد.</i>\n\n"
             
             for item in market_summary:
-                price_str = fp(item['price'])
-                msg += f"{item['icon']} <b>{item['sym']}</b>: {price_str}$ | RSI: {item['rsi4h']}\n"
+                msg += f"{item['icon']} <b>{item['sym']}</b>: {fp(item['price'])}$ | RSI: {item['rsi4h']}\n"
                 
             msg += "\n🔍 اسکن بعدی سر ۴ ساعت انجام می‌شود."
         else:
@@ -341,4 +362,4 @@ if __name__ == "__main__":
         send(msg)
 
     print("پایان اسکن.")
-                     
+            
