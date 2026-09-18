@@ -1,1 +1,26 @@
-{}
+{
+  "XRP": {
+    "dir": "buy",
+    "time": "21:09"
+  },
+  "BCH": {
+    "dir": "buy",
+    "time": "21:09"
+  },
+  "XLM": {
+    "dir": "buy",
+    "time": "21:09"
+  },
+  "UNI": {
+    "dir": "buy",
+    "time": "21:09"
+  },
+  "TRX": {
+    "dir": "buy",
+    "time": "21:09"
+  },
+  "INJ": {
+    "dir": "buy",
+    "time": "21:09"
+  }
+}
