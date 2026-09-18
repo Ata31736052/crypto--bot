@@ -1,5 +1,5 @@
 # ============================================
-# 🤖 ربات جامع و هوشمند سیگنال‌دهی کریپتو - نسخه Ultima 8-in-1 (60 Coins)
+# 🤖 ربات جامع و هوشمند سیگنال‌دهی کریپتو - نسخه Ultima 8-in-1 (Optimized Targets & 60 Coins)
 # ============================================
 
 import json, time, os, ssl, urllib.request, warnings
@@ -255,20 +255,23 @@ def analyze(sym, btc_trend):
     if direction == 'sell' and (curr_price - recent_low) < atr4h:
         return {'is_signal': False, **base_info}
 
+    # ============================================
+    # 🎯 تنظیمات جدید تارگت‌ها و حد زیان
+    # ============================================
     if direction == 'buy':
-        sl = curr_price - (1.5 * atr4h)
-        tp1 = curr_price + (2.0 * atr4h)
-        tp2 = curr_price + (4.0 * atr4h)
+        sl = curr_price - (1.0 * atr4h)   # حد زیان دقیق‌تر
+        tp1 = curr_price + (1.5 * atr4h)  # تارگت اول برای ریسک فری و سیو سود
+        tp2 = curr_price + (3.0 * atr4h)  # تارگت دوم اصلی
         sig_text = "خرید (LONG)"
     else:
-        sl = curr_price + (1.5 * atr4h)
-        tp1 = curr_price - (2.0 * atr4h)
-        tp2 = curr_price - (4.0 * atr4h)
+        sl = curr_price + (1.0 * atr4h)   # حد زیان دقیق‌تر
+        tp1 = curr_price - (1.5 * atr4h)  # تارگت اول برای ریسک فری و سیو سود
+        tp2 = curr_price - (3.0 * atr4h)  # تارگت دوم اصلی
         sig_text = "فروش (SHORT)"
 
     risk = abs(curr_price - sl)
     reward = abs(tp2 - curr_price)
-    rr_ratio = round(reward / risk, 2) if risk > 0 else 2.0
+    rr_ratio = round(reward / risk, 2) if risk > 0 else 3.0
 
     account_size = 1000.0
     risk_amount = account_size * 0.01
@@ -327,9 +330,9 @@ def fmt(a):
         f"💰 قیمت ورود: <b>{fp(a['price'])} $</b>\n"
         f"⚖️ نسبت R/R: <b>1:{a['rr']}</b>\n"
         f"📐 اهرم پیشنهادی: <b>{a['leverage']}x</b> | حجم: <b>{a['pos_size']} $</b>\n\n"
-        f"🛑 حد زیان (1.5x ATR): <b>{fp(a['sl'])} $</b>\n"
-        f"🎯 حد سود اول: <b>{fp(a['tp1'])} $</b>\n"
-        f"🚀 حد سود دوم: <b>{fp(a['tp2'])} $</b>\n\n"
+        f"🛑 حد زیان (1.0x ATR): <b>{fp(a['sl'])} $</b>\n"
+        f"🎯 حد سود اول (سیو سود): <b>{fp(a['tp1'])} $</b>\n"
+        f"🚀 حد سود دوم (اصلی): <b>{fp(a['tp2'])} $</b>\n\n"
         f"📈 وضعیت RSI: <b>{a['rsi4h']}</b> | MACD: <b>{a['macd_status']}</b>\n"
         f"🔗 <a href='{tv_link}'>مشاهده نمودار در TradingView</a>\n"
         f"📅 زمان ثبت: {a['time']}"
@@ -381,4 +384,3 @@ if __name__ == "__main__":
         send(msg)
 
     print("پایان اسکن.")
-                
