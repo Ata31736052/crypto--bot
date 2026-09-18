@@ -1,5 +1,5 @@
 # ============================================
-# 🤖 ربات جامع و هوشمند سیگنال‌دهی کریپتو - نسخه حرفه‌ای 5-in-1
+# 🤖 ربات جامع و هوشمند سیگنال‌دهی کریپتو - نسخه Ultima 8-in-1 (60 Coins)
 # ============================================
 
 import json, time, os, ssl, urllib.request, warnings
@@ -15,12 +15,22 @@ CTX.check_hostname = False
 CTX.verify_mode = ssl.CERT_NONE
 
 COINS = [
-    'BTC', 'ETH', 'SOL', 'BNB', 'XRP', 
-    'ADA', 'DOGE', 'AVAX', 'LINK', 'DOT', 
-    'NEAR', 'SUI', 'APT', 'ARB', 'OP',
-    'PEPE', 'FET', 'RNDR', 'INJ', 'MATIC',
-    'GRAM', 'NOT', 'SHIB', 'LTC', 'TRX',
-    'ATOM', 'TIA', 'WIF', 'SEI', 'STX'
+    # Top Market Cap & Major Coins
+    'BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'DOGE', 'AVAX', 'LINK', 'DOT',
+    'LTC', 'BCH', 'ETC', 'XLM', 'UNI', 'FIL', 'TRX', 'ATOM', 'NEAR', 'AAVE',
+    
+    # Layer 1 & Layer 2 Ecosystems
+    'SUI', 'APT', 'ARB', 'OP', 'MATIC', 'SEI', 'INJ', 'TIA', 'STX', 'SDA',
+    'FTM', 'ALGO', 'EGLD', 'ROSE', 'MINA', 'IMX', 'MNT', 'RON', 'CELO', 'FLOW',
+    
+    # AI & Big Data
+    'FET', 'RNDR', 'TAO', 'AGIX', 'OCEAN', 'AKT',
+    
+    # Popular Meme Coins & High Momentum
+    'PEPE', 'WIF', 'BONK', 'FLOKI', 'SHIB', 'MEME', 'NOT', 'ORDI', 'SATS', 'BOME',
+    
+    # Other Solid Altcoins
+    'RUNE', 'ICP', 'KAS', 'JUP'
 ]
 
 def http(url, t=10):
@@ -63,7 +73,7 @@ def get_ticker_price(sym):
         
     return None
 
-def klines(sym, tf='4h', limit=120):
+def klines(sym, tf='4h', limit=220):
     live_price = get_ticker_price(sym) if tf == '4h' else None
     
     url_bn = f"https://data-api.binance.vision/api/v3/klines?symbol={sym}USDT&interval={tf}&limit={limit}"
@@ -150,7 +160,6 @@ def atr(highs, lows, closes, n=14):
     return sum(tr_list[-n:]) / n
 
 def get_btc_macro_trend():
-    """۱. فیلتر روند بیت‌کوین در تایم‌فریم روزانه"""
     k1d = klines('BTC', '1d', limit=60)
     if not k1d:
         return 'NEUTRAL'
@@ -160,7 +169,7 @@ def get_btc_macro_trend():
     return 'BULLISH' if k1d['price'] > e50 else 'BEARISH'
 
 def analyze(sym, btc_trend):
-    k4h = klines(sym, '4h')
+    k4h = klines(sym, '4h', limit=220)
     if not k4h:
         return None
 
@@ -170,12 +179,19 @@ def analyze(sym, btc_trend):
     e9 = ema(p4h, 9)
     e21 = ema(p4h, 21)
     e50 = ema(p4h, 50)
+    e200 = ema(p4h, 200)
     rsi4h = rsi(p4h)
     atr4h = atr(h4h, l4h, p4h, 14)
     macd_val, signal_val, hist_val = macd(p4h)
 
-    if not (e9 and e21 and e50 and atr4h and macd_val is not None):
+    if not (e9 and e21 and e50 and e200 and atr4h and macd_val is not None):
         return None
+
+    body = abs(p4h[-1] - o4h[-1])
+    candle_range = h4h[-1] - l4h[-1]
+    if candle_range > 0 and (body / candle_range) < 0.15:
+        trend_icon = "🟢" if e9 > e21 else "🔴"
+        return {'is_signal': False, 'sym': sym, 'price': curr_price, 'rsi4h': round(rsi4h, 1), 'icon': trend_icon}
 
     score_buy = 0
     score_sell = 0
@@ -184,6 +200,11 @@ def analyze(sym, btc_trend):
     if e21 > e50: score_buy += 2
     if e9 < e21: score_sell += 3
     if e21 < e50: score_sell += 2
+
+    if curr_price > e200:
+        score_buy += 2
+    else:
+        score_sell += 2
 
     if 45 < rsi4h < 68: score_buy += 3
     if 32 < rsi4h < 55: score_sell += 3
@@ -198,12 +219,13 @@ def analyze(sym, btc_trend):
 
     avg_vol = sum(v4h[-21:-1]) / 20 if len(v4h) >= 21 else sum(v4h) / len(v4h)
     is_green_candle = p4h[-1] > o4h[-1]
-    if v4h[-1] > avg_vol:
+    if v4h[-1] > (1.5 * avg_vol):
+        if is_green_candle: score_buy += 2
+        else: score_sell += 2
+    elif v4h[-1] > avg_vol:
         if is_green_candle: score_buy += 1
         else: score_sell += 1
 
-    body = abs(p4h[-1] - o4h[-1])
-    candle_range = h4h[-1] - l4h[-1]
     if candle_range > 0:
         lower_shadow = min(p4h[-1], o4h[-1]) - l4h[-1]
         upper_shadow = h4h[-1] - max(p4h[-1], o4h[-1])
@@ -213,10 +235,10 @@ def analyze(sym, btc_trend):
             score_sell += 2
 
     direction = None
-    if score_buy >= 7 and score_buy > score_sell and btc_trend != 'BEARISH':
+    if score_buy >= 8 and score_buy > score_sell and btc_trend != 'BEARISH' and curr_price > e200:
         direction = 'buy'
         final_score = score_buy
-    elif score_sell >= 7 and score_sell > score_buy and btc_trend != 'BULLISH':
+    elif score_sell >= 8 and score_sell > score_buy and btc_trend != 'BULLISH' and curr_price < e200:
         direction = 'sell'
         final_score = score_sell
 
@@ -226,7 +248,6 @@ def analyze(sym, btc_trend):
     if not direction:
         return {'is_signal': False, **base_info}
 
-    # ۲. فیلتر حمایت و مقاومت (S/R Filter)
     recent_high = max(h4h[-20:])
     recent_low = min(l4h[-20:])
     if direction == 'buy' and (recent_high - curr_price) < atr4h:
@@ -249,7 +270,6 @@ def analyze(sym, btc_trend):
     reward = abs(tp2 - curr_price)
     rr_ratio = round(reward / risk, 2) if risk > 0 else 2.0
 
-    # ۳. محاسبه حجم معامله بر اساس ۱٪ ریسک حساب ۱۰۰۰ دلاری
     account_size = 1000.0
     risk_amount = account_size * 0.01
     stop_pct = risk / curr_price
@@ -303,7 +323,7 @@ def fmt(a):
     return (
         f"{a['icon']} <b>#سیگنال_4ساعته_{a['sym']} | USDT</b>\n\n"
         f"🎯 جهت معامله: <b>{a['sig']}</b>\n"
-        f"📊 قدرت سیگنال: <b>{a['score']} / 13</b>\n"
+        f"📊 قدرت سیگنال: <b>{a['score']} / 15</b>\n"
         f"💰 قیمت ورود: <b>{fp(a['price'])} $</b>\n"
         f"⚖️ نسبت R/R: <b>1:{a['rr']}</b>\n"
         f"📐 اهرم پیشنهادی: <b>{a['leverage']}x</b> | حجم: <b>{a['pos_size']} $</b>\n\n"
@@ -327,7 +347,6 @@ if __name__ == "__main__":
         a = analyze(s, btc_trend)
         if a:
             if a['is_signal']:
-                # ۴. جلوگیری از ارسال سیگنال تکراری در صورت یکسان بودن جهت معامله
                 last_dir = state.get(s, {}).get('dir')
                 if last_dir != a['dir']:
                     signals.append(a)
@@ -362,4 +381,4 @@ if __name__ == "__main__":
         send(msg)
 
     print("پایان اسکن.")
-            
+                
