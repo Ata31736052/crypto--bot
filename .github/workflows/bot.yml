@@ -4,7 +4,6 @@ on:
   schedule:
     # اجرای خودکار هر ۲ ساعت یک‌بار (سر ساعت‌های زوج به وقت UTC)
     - cron: '0 */2 * * *'
-  # امکان اجرای دستی از تب Actions
   workflow_dispatch:
 
 jobs:
