@@ -1,5 +1,5 @@
 # ============================================
-# 🤖 ربات هوشمند سیگنال‌دهی کریپتو - نسخه ۴ ساعته (LONG & SHORT Pro)
+# 🤖 ربات هوشمند سیگنال‌دهی کریپتو - نسخه ۴ ساعته فیلترشده (امتیاز بالای ۱۰)
 # ============================================
 
 import json, time, os, ssl, urllib.request, warnings
@@ -198,7 +198,7 @@ def analyze_tf(sym, tf='4h', btc_trend='NEUTRAL'):
     score_buy = 0
     score_sell = 0
 
-    # 1. سیستم میانگین‌های متحرک (EMA)
+    # 1. میانگین‌های متحرک
     if e9 > e21: score_buy += 3
     if e21 > e50: score_buy += 2
     if e9 < e21: score_sell += 3
@@ -227,8 +227,8 @@ def analyze_tf(sym, tf='4h', btc_trend='NEUTRAL'):
         if is_green_candle: score_buy += 2
         else: score_sell += 2
 
-    # حداقل امتیاز ۷ برای تایم‌فریم ۴ ساعته
-    min_score = 7
+    # 🎯 شرط جدید: فقط امتیاز ۱۰ به بالا پذیرفته می‌شود
+    min_score = 10
 
     direction = None
     if score_buy >= min_score and score_buy > score_sell and btc_trend != 'BEARISH':
@@ -241,7 +241,6 @@ def analyze_tf(sym, tf='4h', btc_trend='NEUTRAL'):
     if not direction:
         return {'is_signal': False, **base_info}
 
-    # محاسبه حد زیان و حد سود (ترکیب ATR و سقف/کف‌های اخیر)
     recent_high = max(h[-5:])
     recent_low = min(l[-5:])
 
@@ -315,11 +314,15 @@ def fp(n):
 
 def fmt(a):
     tv_link = f"https://www.tradingview.com/chart/?symbol=BINANCE:{a['sym']}USDT"
-    tf_tag = "🌊 [تایم‌فریم ۴ ساعته - روند اصلی]"
+    tf_tag = "🌊 [تایم‌فریم ۴ ساعته - سیگنال فیلترشده]"
     
+    badge = ""
+    if a['score'] >= 12:
+        badge = "\n🔥 <b>پتانسیل بسیار بالا (امتیاز بالای ۱۲)</b>"
+
     return (
         f"{a['icon']} <b>#سیگنال_{a['tf']}_{a['sym']} | USDT</b>\n"
-        f"<i>{tf_tag}</i>\n\n"
+        f"<i>{tf_tag}</i>{badge}\n\n"
         f"🎯 جهت معامله: <b>{a['sig']}</b>\n"
         f"📊 قدرت سیگنال: <b>{a['score']} / 15</b>\n"
         f"💰 قیمت ورود: <b>{fp(a['price'])} $</b>\n"
@@ -334,7 +337,7 @@ def fmt(a):
     )
 
 if __name__ == "__main__":
-    print("شروع اسکن ۴ ساعته (LONG & SHORT)...")
+    print("شروع اسکن ۴ ساعته فیلترشده (امتیاز >= ۱۰)...")
     state = load_state()
     btc_trend = get_btc_macro_trend()
     
@@ -356,15 +359,16 @@ if __name__ == "__main__":
         for sig in signals:
             send(fmt(sig))
             time.sleep(0.3)
-        print(f"تعداد {len(signals)} سیگنال جدید ۴ ساعته ارسال شد.")
+        print(f"تعداد {len(signals)} سیگنال با کیفیت بالای ۱۰ ارسال شد.")
     else:
         now = datetime.now().strftime('%H:%M')
         btc_icon = "🟢 صعودی" if btc_trend == 'BULLISH' else ("🔴 نزولی" if btc_trend == 'BEARISH' else "⚪️ خنثی")
         msg = f"📊 <b>گزارش اسکن بازار کریپتو ({now})</b>\n\n"
         msg += f"🌐 روند کلان بیت‌کوین (1D): <b>{btc_icon}</b>\n"
-        msg += "• وضعیت: <i>در تایم‌فریم ۴ ساعته هیچ سیگنال تاییدشده جدیدی (LONG یا SHORT) یافت نشد.</i>\n\n"
+        msg += "• وضعیت: <i>ارزی با امتیاز کیفیت بالای ۱۰ یافت نشد.</i>\n\n"
         msg += "🔍 اسکن بعدی سر ساعت انجام می‌شود."
         send(msg)
-        print("سیگنال جدیدی یافت نشد. گزارش خلاصه ارسال گردید.")
+        print("سیگنال قوی یافت نشد. گزارش خلاصه ارسال گردید.")
 
     print("پایان اسکن.")
+           
