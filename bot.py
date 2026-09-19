@@ -1,6 +1,5 @@
 # ============================================
-# 🤖 ربات جامع و هوشمند سیگنال‌دهی کریپتو - نسخه Ultimate Pro
-# (تایم‌فریم‌های تفکیک‌شده 1H و 4H + مدیریت خطای API + مدیریت حافظه)
+# 🤖 ربات جامع و هوشمند سیگنال‌دهی کریپتو - نسخه Ultimate Pro (اصلاح‌شده)
 # ============================================
 
 import json, time, os, ssl, urllib.request, warnings
@@ -35,7 +34,6 @@ COINS = [
 ]
 
 def http(url, t=10, retries=3):
-    """تابع ارسال درخواست HTTP با قابلیت تلاش مجدد در صورت خطا"""
     for i in range(retries):
         try:
             req = urllib.request.Request(
@@ -199,9 +197,6 @@ def analyze_tf(sym, tf, btc_trend):
     trend_icon = "🟢" if e9 > e21 else "🔴"
     base_info = {'sym': sym, 'tf': tf.upper(), 'price': curr_price, 'rsi': round(rsi_val, 1), 'icon': trend_icon}
 
-    if candle_range > 0 and (body / candle_range) < 0.15:
-        return {'is_signal': False, **base_info}
-
     score_buy = 0
     score_sell = 0
 
@@ -213,8 +208,8 @@ def analyze_tf(sym, tf, btc_trend):
     if curr_price > e200: score_buy += 2
     else: score_sell += 2
 
-    if 45 < rsi_val < 68: score_buy += 3
-    if 32 < rsi_val < 55: score_sell += 3
+    if 40 < rsi_val < 70: score_buy += 3
+    if 30 < rsi_val < 60: score_sell += 3
 
     macd_status = "خنثی"
     if hist_val > 0:
@@ -226,39 +221,26 @@ def analyze_tf(sym, tf, btc_trend):
 
     avg_vol = sum(v[-21:-1]) / 20 if len(v) >= 21 else sum(v) / len(v)
     is_green_candle = p[-1] > o[-1]
-    if v[-1] > (1.5 * avg_vol):
+    if v[-1] > (1.2 * avg_vol):
         if is_green_candle: score_buy += 2
         else: score_sell += 2
 
-    if candle_range > 0:
-        lower_shadow = min(p[-1], o[-1]) - l[-1]
-        upper_shadow = h[-1] - max(p[-1], o[-1])
-        if lower_shadow > (2 * body) and lower_shadow > (0.5 * candle_range): score_buy += 2
-        if upper_shadow > (2 * body) and upper_shadow > (0.5 * candle_range): score_sell += 2
-
-    min_score = 7 if tf == '1h' else 8
+    min_score = 6 if tf == '1h' else 7
 
     direction = None
-    if score_buy >= min_score and score_buy > score_sell and btc_trend != 'BEARISH' and curr_price > e200:
+    if score_buy >= min_score and score_buy > score_sell and btc_trend != 'BEARISH':
         direction = 'buy'
         final_score = score_buy
-    elif score_sell >= min_score and score_sell > score_buy and btc_trend != 'BULLISH' and curr_price < e200:
+    elif score_sell >= min_score and score_sell > score_buy and btc_trend != 'BULLISH':
         direction = 'sell'
         final_score = score_sell
 
     if not direction:
         return {'is_signal': False, **base_info}
 
-    recent_high = max(h[-20:])
-    recent_low = min(l[-20:])
-    if direction == 'buy' and (recent_high - curr_price) < atr_val:
-        return {'is_signal': False, **base_info}
-    if direction == 'sell' and (curr_price - recent_low) < atr_val:
-        return {'is_signal': False, **base_info}
-
-    atr_mult_sl = 0.8 if tf == '1h' else 1.0
-    atr_mult_tp1 = 1.2 if tf == '1h' else 1.5
-    atr_mult_tp2 = 2.5 if tf == '1h' else 3.0
+    atr_mult_sl = 1.0
+    atr_mult_tp1 = 1.5
+    atr_mult_tp2 = 3.0
 
     if direction == 'buy':
         sl = curr_price - (atr_mult_sl * atr_val)
@@ -356,7 +338,6 @@ if __name__ == "__main__":
     signals = []
     
     for s in COINS:
-        # ۱. اسکن تایم‌فریم ۱ ساعته
         a1h = analyze_tf(s, '1h', btc_trend)
         if a1h and a1h['is_signal']:
             state_key = f"{s}_1h"
@@ -364,7 +345,6 @@ if __name__ == "__main__":
                 signals.append(a1h)
                 state[state_key] = {'dir': a1h['dir'], 'time': a1h['time']}
 
-        # ۲. اسکن تایم‌فریم ۴ ساعته
         a4h = analyze_tf(s, '4h', btc_trend)
         if a4h and a4h['is_signal']:
             state_key = f"{s}_4h"
@@ -392,4 +372,3 @@ if __name__ == "__main__":
         print("سیگنال جدیدی یافت نشد. گزارش خلاصه ارسال گردید.")
 
     print("پایان اسکن.")
-    
