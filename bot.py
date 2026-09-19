@@ -1,5 +1,5 @@
 # =========================================================
-# Crypto Signal Bot - 4H Strategy for Nobitex-listed Coins
+# Crypto Signal Bot - Optimized 4H Strategy
 # Data source: Binance
 # Executed via GitHub Actions
 # =========================================================
@@ -19,16 +19,16 @@ from datetime import datetime, timezone
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-TIMEFRAME = "4h"
-KLINE_LIMIT = 300  # تعداد کافی کندل برای محاسبه دقیق EMA200
+TIMEFRAME = "4h"          # تنظیم روی تایم‌فریم ۴ ساعته
+KLINE_LIMIT = 300         # تعداد کندل‌ها برای محاسبه دقیق EMA200
 
-MIN_SCORE = 75           # حداقل امتیاز برای صدور سیگنال
-MIN_VOLUME_RATIO = 1.30  # حداقل ۳۰٪ افزایش حجم نسبت به میانگین ۲۰ کندل
+MIN_SCORE = 70            # حداقل امتیاز برای صدور سیگنال
+MIN_VOLUME_RATIO = 1.25   # حداقل ۲۵٪ افزایش حجم نسبت به ۲۰ کندل قبل
 
 ATR_PERIOD = 14
-SL_ATR_MULTIPLIER = 1.50
-TP1_RR = 1.50
-TP2_RR = 2.80
+SL_ATR_MULTIPLIER = 1.50   # حد زیان استاندارد ۴ ساعته
+TP1_RR = 1.50             # ریسک به بهای تارگت اول
+TP2_RR = 2.80             # ریسک به بهای تارگت دوم
 
 STATE_FILE = "signals_state.json"
 BINANCE_BASE = "https://data-api.binance.vision"
@@ -52,7 +52,7 @@ def http_get(url, params=None, retries=3):
 
 def send_telegram(message):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        print("[ERROR] کلیدهای تلگرام (TELEGRAM_TOKEN یا TELEGRAM_CHAT_ID) تنظیم نشده‌اند.")
+        print("[ERROR] کلیدهای تلگرام تنظیم نشده‌اند.")
         return False
 
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -72,15 +72,14 @@ def send_telegram(message):
 
 
 # =========================================================
-# 3. NOBITEX COINS & BINANCE SYMBOLS (EXPANDED LIST)
+# 3. NOBITEX COINS & BINANCE SYMBOLS
 # =========================================================
 
 def get_nobitex_coins():
-    """دریافت لیست جامع ارزهای فعال نوبیتکس با پشتیبانی کامل از لیست پیش‌فرض گسترش‌یافته"""
+    """دریافت لیست جامع ارزهای فعال نوبیتکس"""
     url = "https://api.nobitex.ir/v2/market/stats"
     data = http_get(url)
     
-    # لیست پیش‌فرض گسترش‌یافته به ۶۰ ارز اصلی نوبیتکس
     default_coins = [
         "BTC", "ETH", "SOL", "BNB", "XRP", "TON", "ADA", "DOGE", "AVAX", "LINK",
         "DOT", "LTC", "BCH", "ETC", "XLM", "UNI", "FIL", "TRX", "ATOM", "NEAR",
@@ -91,7 +90,7 @@ def get_nobitex_coins():
     ]
     
     if not data or "stats" not in data:
-        print(f"[WARNING] عدم اتصال به API نوبیتکس. استفاده از لیست پیش‌فرض گسترش‌یافته ({len(default_coins)} ارز).")
+        print(f"[WARNING] استفاده از لیست پیش‌فرض گسترش‌یافته ({len(default_coins)} ارز).")
         return default_coins
 
     coins = set()
@@ -99,11 +98,9 @@ def get_nobitex_coins():
         if market.endswith("-usdt") or market.endswith("-rls"):
             coins.add(market.split("-")[0].upper())
 
-    # نگاشت تغییر نام برندها در بایننس
     mapping = {"MATIC": "POL", "FET": "ASI"}
     updated_coins = [mapping.get(c, c) for c in coins]
 
-    # در صورت کوچک بودن لیست دریافتی، از لیست کامل استفاده کن
     if len(updated_coins) < 20:
         return default_coins
 
@@ -113,7 +110,7 @@ def get_nobitex_coins():
 def get_scan_coins():
     info = http_get(f"{BINANCE_BASE}/api/v3/exchangeInfo")
     if not info:
-        print("[ERROR] امکان دریافت اطلاعات بازار از بایننس وجود ندارد.")
+        print("[ERROR] عدم دریافت اطلاعات از بایننس.")
         return []
 
     binance_symbols = {
@@ -167,13 +164,11 @@ def get_klines(symbol):
 def add_indicators(df):
     df = df.copy()
 
-    # Moving Averages
     df["ema9"] = df["close"].ewm(span=9, adjust=False).mean()
     df["ema21"] = df["close"].ewm(span=21, adjust=False).mean()
     df["ema50"] = df["close"].ewm(span=50, adjust=False).mean()
     df["ema200"] = df["close"].ewm(span=200, adjust=False).mean()
 
-    # RSI
     delta = df["close"].diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
@@ -182,13 +177,11 @@ def add_indicators(df):
     rs = avg_gain / avg_loss.replace(0, np.nan)
     df["rsi"] = 100 - (100 / (1 + rs))
 
-    # MACD
     ema12 = df["close"].ewm(span=12, adjust=False).mean()
     ema26 = df["close"].ewm(span=26, adjust=False).mean()
     df["macd"] = ema12 - ema26
     df["macd_signal"] = df["macd"].ewm(span=9, adjust=False).mean()
 
-    # ATR & Volume
     tr = pd.concat([
         df["high"] - df["low"],
         (df["high"] - df["close"].shift()).abs(),
@@ -203,7 +196,7 @@ def add_indicators(df):
 
 
 # =========================================================
-# 5. STRATEGY ANALYSIS WITH ADVANCED FILTERS
+# 5. STRATEGY ANALYSIS
 # =========================================================
 
 def analyze_coin(df, symbol):
@@ -222,7 +215,7 @@ def analyze_coin(df, symbol):
     buy_score, sell_score = 0, 0
     reasons_buy, reasons_sell = [], []
 
-    # --- EMA Trend Filters ---
+    # Trend
     if price > last["ema200"]:
         buy_score += 20
         reasons_buy.append("روند کلی صعودی (Price > EMA200)")
@@ -237,35 +230,35 @@ def analyze_coin(df, symbol):
         sell_score += 15
         reasons_sell.append("تقاطع کوتاه‌مدت نزولی (EMA9 < EMA21)")
 
-    # --- RSI Logic ---
+    # RSI
     if 48 <= rsi <= 65:
         buy_score += 20
         reasons_buy.append(f"قدرت مناسب خریداران (RSI: {rsi:.1f})")
-    elif rsi < 30:
+    elif rsi < 32:
         buy_score += 15
         reasons_buy.append(f"اشباع فروش (RSI: {rsi:.1f})")
 
     if 35 <= rsi <= 52:
         sell_score += 20
         reasons_sell.append(f"تسلط فروشندگان (RSI: {rsi:.1f})")
-    elif rsi > 70:
+    elif rsi > 68:
         sell_score += 15
         reasons_sell.append(f"اشباع خرید (RSI: {rsi:.1f})")
 
-    # --- MACD Cross ---
+    # MACD
     if prev["macd"] <= prev["macd_signal"] and last["macd"] > last["macd_signal"]:
-        buy_score += 25
+        buy_score += 20
         reasons_buy.append("تقاطع صعودی MACD")
     elif last["macd"] > last["macd_signal"]:
         buy_score += 10
 
     if prev["macd"] >= prev["macd_signal"] and last["macd"] < last["macd_signal"]:
-        sell_score += 25
+        sell_score += 20
         reasons_sell.append("تقاطع نزولی MACD")
     elif last["macd"] < last["macd_signal"]:
         sell_score += 10
 
-    # --- Volume Confirmation ---
+    # Volume
     if volume_ratio >= MIN_VOLUME_RATIO:
         if last["close"] > last["open"]:
             buy_score += 20
@@ -274,39 +267,24 @@ def analyze_coin(df, symbol):
             sell_score += 20
             reasons_sell.append(f"افزایش حجم نزولی ({volume_ratio:.2f}x)")
 
-    # =========================================================
-    # ADVANCED CANDLE & OVEREXTENSION FILTERS
-    # =========================================================
+    # Breakout Filter
+    recent_high = df["high"].iloc[-11:-1].max()
+    recent_low = df["low"].iloc[-11:-1].min()
 
-    bullish_candle = last["close"] > last["open"]
-    bearish_candle = last["close"] < last["open"]
+    if last["close"] > recent_high:
+        buy_score += 15
+        reasons_buy.append("شکست سقف محلی (Breakout)")
+    if last["close"] < recent_low:
+        sell_score += 15
+        reasons_sell.append("شکست کف محلی (Breakdown)")
 
-    # ۱. فیلتر هم‌جهتی رنگ کندل با سیگنال
-    if not bullish_candle:
-        buy_score -= 15  # کسر امتیاز در صورت قرمز بودن کندل پایانی در خرید
-    if not bearish_candle:
-        sell_score -= 15 # کسر امتیاز در صورت سبز بودن کندل پایانی در فروش
-
-    # ۲. فیلتر نسبت بدنه کندل به کل رنج (جلوگیری از ورود روی کندل‌های بلاتکلیف)
-    candle_range = last["high"] - last["low"]
-    candle_body = abs(last["close"] - last["open"])
-
-    if candle_range > 0 and (candle_body / candle_range) < 0.35:
+    # Candle Direction Penalty
+    if last["close"] <= last["open"]:
         buy_score -= 10
+    if last["close"] >= last["open"]:
         sell_score -= 10
 
-    # ۳. فیلتر فاصله بیش از حد قیمت از EMA200 (Overextended Risk)
-    ema200_dist = abs(price - last["ema200"])
-    if ema200_dist > (atr * 3.5):
-        if price > last["ema200"]:
-            buy_score -= 15
-        else:
-            sell_score -= 15
-
-    # =========================================================
-    # FINAL DECISION & TARGET CALCULATION
-    # =========================================================
-
+    # Decision
     direction, score, reasons = None, 0, []
     
     if buy_score >= MIN_SCORE and buy_score > sell_score:
@@ -369,13 +347,13 @@ def save_state(state):
 # =========================================================
 
 def run_scan():
-    print(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] شروع اسکن بازار...")
+    print(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] شروع اسکن بازار ۴ ساعته...")
     
     coins = get_scan_coins()
     print(f"تعداد ارزهای مشترک با بایننس: {len(coins)}")
     
     if not coins:
-        print("[ERROR] هیچ ارزی برای اسکن پیدا نشد.")
+        print("[ERROR] ارزی یافت نشد.")
         return
 
     state = load_state()
@@ -424,4 +402,4 @@ def run_scan():
 
 if __name__ == "__main__":
     run_scan()
-        
+    
