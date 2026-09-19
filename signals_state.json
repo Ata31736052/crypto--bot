@@ -1,1 +1,142 @@
-
+{
+  "XRP_4h": {
+    "dir": "buy",
+    "time": "16:00"
+  },
+  "ADA_4h": {
+    "dir": "buy",
+    "time": "16:00"
+  },
+  "AVAX_4h": {
+    "dir": "buy",
+    "time": "16:00"
+  },
+  "LINK_4h": {
+    "dir": "buy",
+    "time": "16:00"
+  },
+  "DOT_4h": {
+    "dir": "buy",
+    "time": "16:00"
+  },
+  "LTC_4h": {
+    "dir": "buy",
+    "time": "16:00"
+  },
+  "BCH_4h": {
+    "dir": "buy",
+    "time": "16:00"
+  },
+  "ETC_4h": {
+    "dir": "buy",
+    "time": "16:00"
+  },
+  "XLM_4h": {
+    "dir": "buy",
+    "time": "16:00"
+  },
+  "TRX_4h": {
+    "dir": "buy",
+    "time": "16:01"
+  },
+  "ATOM_4h": {
+    "dir": "buy",
+    "time": "16:01"
+  },
+  "SUI_4h": {
+    "dir": "buy",
+    "time": "16:01"
+  },
+  "APT_4h": {
+    "dir": "buy",
+    "time": "16:01"
+  },
+  "ARB_4h": {
+    "dir": "buy",
+    "time": "16:01"
+  },
+  "SEI_4h": {
+    "dir": "buy",
+    "time": "16:01"
+  },
+  "INJ_4h": {
+    "dir": "buy",
+    "time": "16:01"
+  },
+  "STX_4h": {
+    "dir": "buy",
+    "time": "16:01"
+  },
+  "ALGO_4h": {
+    "dir": "buy",
+    "time": "16:01"
+  },
+  "EGLD_4h": {
+    "dir": "buy",
+    "time": "16:01"
+  },
+  "ROSE_4h": {
+    "dir": "buy",
+    "time": "16:01"
+  },
+  "MINA_4h": {
+    "dir": "buy",
+    "time": "16:01"
+  },
+  "IMX_4h": {
+    "dir": "buy",
+    "time": "16:01"
+  },
+  "CELO_4h": {
+    "dir": "buy",
+    "time": "16:01"
+  },
+  "FLOW_4h": {
+    "dir": "buy",
+    "time": "16:01"
+  },
+  "FET_4h": {
+    "dir": "buy",
+    "time": "16:01"
+  },
+  "RNDR_4h": {
+    "dir": "buy",
+    "time": "16:01"
+  },
+  "TAO_4h": {
+    "dir": "buy",
+    "time": "16:01"
+  },
+  "BONK_4h": {
+    "dir": "buy",
+    "time": "16:01"
+  },
+  "FLOKI_4h": {
+    "dir": "buy",
+    "time": "16:01"
+  },
+  "SHIB_4h": {
+    "dir": "buy",
+    "time": "16:01"
+  },
+  "MEME_4h": {
+    "dir": "buy",
+    "time": "16:01"
+  },
+  "NOT_4h": {
+    "dir": "buy",
+    "time": "16:01"
+  },
+  "BOME_4h": {
+    "dir": "buy",
+    "time": "16:01"
+  },
+  "ICP_4h": {
+    "dir": "buy",
+    "time": "16:02"
+  },
+  "JUP_4h": {
+    "dir": "buy",
+    "time": "16:02"
+  }
+}
