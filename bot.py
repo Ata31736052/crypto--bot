@@ -1,5 +1,5 @@
 # =========================================================
-# Crypto Signal Bot - Professional Edition (4H + Multi-TF + OBV)
+# Crypto Signal Bot - Balanced Pro Edition (4H + Multi-TF)
 # Data source: Binance
 # Executed via GitHub Actions
 # =========================================================
@@ -20,15 +20,15 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 TIMEFRAME = "4h"          # تایم‌فریم اصلی تحلیل
-KLINE_LIMIT = 300         # تعداد کندل‌ها برای محاسبات سنگین
+KLINE_LIMIT = 300         # تعداد کندل‌ها برای محاسبات
 
-MIN_SCORE = 75            # حداقل امتیاز سخت‌گیرانه‌تر برای سیگنال‌های باکیفیت
-MIN_VOLUME_RATIO = 1.30   # حداقل ۳۰٪ افزایش حجم نسبت به میانگین
+MIN_SCORE = 68            # امتیاز متوازن (نه خیلی سخت‌گیرانه، نه پرنویز)
+MIN_VOLUME_RATIO = 1.20   # حداقل ۲۰٪ افزایش حجم نسبت به میانگین
 
 ATR_PERIOD = 14
 SL_ATR_MULTIPLIER = 1.50   # حد زیان پویا بر اساس ATR
-TP1_RR = 1.60             # ریسک به ریوارد تارگت اول
-TP2_RR = 3.00             # ریسک به ریوارد تارگت دوم
+TP1_RR = 1.50             # ریسک به ریوارد تارگت اول
+TP2_RR = 2.80             # ریسک به ریوارد تارگت دوم
 
 STATE_FILE = "signals_state.json"
 BINANCE_BASE = "https://data-api.binance.vision"
@@ -121,7 +121,7 @@ def get_scan_coins():
 
 
 # =========================================================
-# 4. ADVANCED DATA & INDICATORS (WITH OBV & MULTI-TF)
+# 4. ADVANCED DATA & INDICATORS
 # =========================================================
 
 def get_klines(symbol, interval):
@@ -145,13 +145,11 @@ def get_klines(symbol, interval):
 def add_indicators(df):
     df = df.copy()
 
-    # Moving Averages
     df["ema9"] = df["close"].ewm(span=9, adjust=False).mean()
     df["ema21"] = df["close"].ewm(span=21, adjust=False).mean()
     df["ema50"] = df["close"].ewm(span=50, adjust=False).mean()
     df["ema200"] = df["close"].ewm(span=200, adjust=False).mean()
 
-    # RSI
     delta = df["close"].diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
@@ -160,13 +158,11 @@ def add_indicators(df):
     rs = avg_gain / avg_loss.replace(0, np.nan)
     df["rsi"] = 100 - (100 / (1 + rs))
 
-    # MACD
     ema12 = df["close"].ewm(span=12, adjust=False).mean()
     ema26 = df["close"].ewm(span=26, adjust=False).mean()
     df["macd"] = ema12 - ema26
     df["macd_signal"] = df["macd"].ewm(span=9, adjust=False).mean()
 
-    # ATR & Volume
     tr = pd.concat([
         df["high"] - df["low"],
         (df["high"] - df["close"].shift()).abs(),
@@ -177,7 +173,6 @@ def add_indicators(df):
     df["volume_avg20"] = df["volume"].rolling(20).mean()
     df["volume_ratio"] = df["volume"] / df["volume_avg20"]
 
-    # OBV (On-Balance Volume)
     obv = (np.sign(df["close"].diff()) * df["volume"]).fillna(0).cumsum()
     df["obv"] = obv
     df["obv_ema"] = df["obv"].ewm(span=20, adjust=False).mean()
@@ -186,24 +181,22 @@ def add_indicators(df):
 
 
 def check_daily_trend(symbol):
-    """بررسی روند تایم‌فریم روزانه برای تایید چندتایم‌فریمی"""
     df_daily = get_klines(symbol, "1d")
     if df_daily is None or len(df_daily) < 50:
         return "NEUTRAL"
     
-    last_d = df_daily.iloc[-1]
-    ema50_d = last_d["close"] # simplified or calculated
     ema200_d = df_daily["close"].ewm(span=200, adjust=False).mean().iloc[-1]
+    last_close = df_daily.iloc[-1]["close"]
     
-    if last_d["close"] > ema200_d:
+    if last_close > ema200_d:
         return "BULLISH"
-    elif last_d["close"] < ema200_d:
+    elif last_close < ema200_d:
         return "BEARISH"
     return "NEUTRAL"
 
 
 # =========================================================
-# 5. PROFESSIONAL STRATEGY ENGINE
+# 5. BALANCED STRATEGY ENGINE
 # =========================================================
 
 def analyze_coin(df, symbol):
@@ -222,46 +215,46 @@ def analyze_coin(df, symbol):
     buy_score, sell_score = 0, 0
     reasons_buy, reasons_sell = [], []
 
-    # --- 1. Multi-Timeframe Trend Filter ---
+    # --- Multi-TF Trend Score ---
     daily_trend = check_daily_trend(symbol)
     if daily_trend == "BULLISH":
-        buy_score += 15
-        reasons_buy.append("روند روزانه صعودی (Multi-TF Filter)")
+        buy_score += 12
+        reasons_buy.append("روند روزانه صعودی")
     elif daily_trend == "BEARISH":
-        sell_score += 15
-        reasons_sell.append("روند روزانه نزولی (Multi-TF Filter)")
+        sell_score += 12
+        reasons_sell.append("روند روزانه نزولی")
 
-    # --- 2. EMA Trend & Crossover ---
+    # --- EMA Trend & Crossover ---
     if price > last["ema200"]:
-        buy_score += 15
+        buy_score += 18
         reasons_buy.append("قیمت بالاتر از EMA200")
     else:
-        sell_score += 15
+        sell_score += 18
         reasons_sell.append("قیمت پایین‌تر از EMA200")
 
     if last["ema9"] > last["ema21"]:
-        buy_score += 10
-        reasons_buy.append("تقاطع EMA9 و EMA21 صعودی")
+        buy_score += 12
+        reasons_buy.append("تقاطع صعودی EMA9 و EMA21")
     else:
-        sell_score += 10
-        reasons_sell.append("تقاطع EMA9 و EMA21 نزولی")
+        sell_score += 12
+        reasons_sell.append("تقاطع نزولی EMA9 و EMA21")
 
-    # --- 3. RSI Momentum ---
-    if 50 <= rsi <= 68:
+    # --- RSI Momentum ---
+    if 45 <= rsi <= 70:
         buy_score += 15
-        reasons_buy.append(f"مومنتوم صعودی RSI ({rsi:.1f})")
-    elif rsi < 32:
-        buy_score += 15
+        reasons_buy.append(f"مومنتوم مناسب RSI ({rsi:.1f})")
+    elif rsi < 35:
+        buy_score += 12
         reasons_buy.append(f"اشباع فروش RSI ({rsi:.1f})")
 
-    if 32 <= rsi <= 50:
+    if 30 <= rsi <= 55:
         sell_score += 15
         reasons_sell.append(f"مومنتوم نزولی RSI ({rsi:.1f})")
-    elif rsi > 68:
-        sell_score += 15
+    elif rsi > 65:
+        sell_score += 12
         reasons_sell.append(f"اشباع خرید RSI ({rsi:.1f})")
 
-    # --- 4. MACD & OBV Confirmation ---
+    # --- MACD & OBV ---
     if prev["macd"] <= prev["macd_signal"] and last["macd"] > last["macd_signal"]:
         buy_score += 15
         reasons_buy.append("تقاطع صعودی MACD")
@@ -271,36 +264,32 @@ def analyze_coin(df, symbol):
 
     if last["obv"] > last["obv_ema"]:
         buy_score += 10
-        reasons_buy.append("تایید جریان پول (OBV صعودی)")
+        reasons_buy.append("جریان پول مثبت (OBV)")
     else:
         sell_score += 10
-        reasons_sell.append("تایید خروج پول (OBV نزولی)")
+        reasons_sell.append("جریان پول منفی (OBV)")
 
-    # --- 5. Volume Spike & Body Strength Filter ---
-    candle_body = abs(last["close"] - last["open"])
-    candle_range = last["high"] - last["low"]
-    body_ratio = candle_body / candle_range if candle_range > 0 else 0
-
-    if volume_ratio >= MIN_VOLUME_RATIO and body_ratio >= 0.50:
+    # --- Volume Spike ---
+    if volume_ratio >= MIN_VOLUME_RATIO:
         if last["close"] > last["open"]:
-            buy_score += 20
-            reasons_buy.append(f"حجم بالا ({volume_ratio:.2f}x) و بدنه کندل پرقدرت")
+            buy_score += 18
+            reasons_buy.append(f"افزایش حجم صعودی ({volume_ratio:.2f}x)")
         else:
-            sell_score += 20
-            reasons_sell.append(f"حجم بالا ({volume_ratio:.2f}x) و فشار فروش سنگین")
+            sell_score += 18
+            reasons_sell.append(f"افزایش حجم نزولی ({volume_ratio:.2f}x)")
 
-    # --- 6. Breakout Structure Check ---
+    # --- Breakout Structure ---
     recent_high = df["high"].iloc[-11:-1].max()
     recent_low = df["low"].iloc[-11:-1].min()
 
     if last["close"] > recent_high:
         buy_score += 15
-        reasons_buy.append("شکست سقف ساختار (Breakout)")
+        reasons_buy.append("شکست سقف محلی (Breakout)")
     if last["close"] < recent_low:
         sell_score += 15
-        reasons_sell.append("شکست کف ساختار (Breakdown)")
+        reasons_sell.append("شکست کف محلی (Breakdown)")
 
-    # --- Decision Core ---
+    # --- Decision ---
     direction, score, reasons = None, 0, []
     
     if buy_score >= MIN_SCORE and buy_score > sell_score:
@@ -359,7 +348,7 @@ def save_state(state):
 
 
 def run_scan():
-    print(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] شروع اسکن حرفه‌ای بازار (4H + Multi-TF)...")
+    print(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] شروع اسکن متوازن بازار (4H)...")
     
     coins = get_scan_coins()
     print(f"تعداد ارزهای قابل بررسی: {len(coins)}")
@@ -385,14 +374,14 @@ def run_scan():
 
         emoji = "🟢" if result["signal"] == "BUY" else "🔴"
         msg = (
-            f"{emoji} <b>سیگنال حرفه‌ای ۴ ساعته (Pro)</b>\n\n"
+            f"{emoji} <b>سیگنال جدید ۴ ساعته (Pro Balanced)</b>\n\n"
             f"<b>نماد:</b> #{result['symbol'].replace('USDT', '')}\n"
             f"<b>جهت:</b> {result['signal']}\n"
             f"<b>نقطه ورود:</b> {result['entry']:.6g}\n\n"
             f"🛑 <b>حد زیان (SL):</b> {result['stop_loss']:.6g}\n"
             f"🎯 <b>تارگت اول (TP1):</b> {result['tp1']:.6g}\n"
             f"🎯 <b>تارگت دوم (TP2):</b> {result['tp2']:.6g}\n\n"
-            f"📊 <b>امتیاز کیفیت:</b> {result['score']}/100\n"
+            f"📊 <b>امتیاز استراتژی:</b> {result['score']}/100\n"
             f"📈 <b>RSI:</b> {result['rsi']:.1f}\n"
             f"📦 <b>نسبت حجم:</b> {result['volume_ratio']:.2f}x\n\n"
             f"<b>دلایل تاییدیه:</b>\n" + "\n".join([f"• {r}" for r in result["reasons"]])
@@ -402,7 +391,7 @@ def run_scan():
             state[signal_key] = {"sent_at": datetime.now(timezone.utc).isoformat()}
             save_state(state)
             sent_count += 1
-            print(f"[SENT] سیگنال حرفه‌ای {symbol} ارسال شد.")
+            print(f"[SENT] سیگنال متوازن {symbol} ارسال شد.")
 
         time.sleep(0.2)
 
