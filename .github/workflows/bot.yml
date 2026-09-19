@@ -1,14 +1,14 @@
-name: Crypto Signal Bot
+name: Crypto Signal Bot Hourly
 
 on:
   schedule:
-    - cron: '0 * * * *'  # اجرای سر هر ساعت
-  workflow_dispatch:      # اجرای دستی
+    # اجرای سر هر ۱ ساعت (دقیقه ۰ از هر ساعت)
+    - cron: '0 * * * *'
+  workflow_dispatch:
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    
     permissions:
       contents: write
 
@@ -23,10 +23,6 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install Dependencies
-        run: |
-          python -m pip install --upgrade pip
-
       - name: Run Bot Script
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
@@ -35,15 +31,6 @@ jobs:
         run: |
           python bot.py
 
-      - name: Commit and Push State File
-        run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git pull origin main --rebase || true
-          git add signals_state.json
-          git commit -m "update: auto update signals state [skip ci]" || exit 0
-          git push origin main
-          
       - name: Commit and Push State File
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
