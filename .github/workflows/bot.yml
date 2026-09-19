@@ -1,62 +1,49 @@
-name: Crypto Signal Bot
+name: Crypto Signal Bot 4H
 
 on:
-
   schedule:
-    # اجرای تقریبی هر ساعت
-    - cron: '7 * * * *'
-
+    # اجرای خودکار هر ۲ ساعت یک‌بار (سر ساعت‌های زوج به وقت UTC)
+    - cron: '0 */2 * * *'
+  # امکان اجرای دستی از تب Actions
   workflow_dispatch:
 
 jobs:
-
   run-bot:
-
     runs-on: ubuntu-latest
 
-    permissions:
-      contents: write
-
     steps:
-
-      - name: Checkout Repository
+      - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.10'
+
+      - name: Cache signals state
+        uses: actions/cache@v4
+        with:
+          path: signals_state.json
+          key: state-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            state-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests pandas numpy
 
       - name: Run Crypto Bot
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python bot.py
+
+      - name: Commit and push updated state
         run: |
-          python bot.py
-
-      - name: Save State File
-        run: |
-
-          git config --local user.email \
-            "github-actions[bot]@users.noreply.github.com"
-
-          git config --local user.name \
-            "github-actions[bot]"
-
-          git add signals_state.json
-
-          if git diff --cached --quiet; then
-            echo "No state changes."
-            exit 0
-          fi
-
-          git commit -m "chore: update signal state [skip ci]"
-
-          git push origin main          git config --local user.name "github-actions[bot]"
-          git pull origin main --rebase || true
-          git add signals_state.json
-          git commit -m "update: auto update signals state [skip ci]" || exit 0
-          git push origin main
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add signals_state.json || true
+          git commit -m "Update signals state [skip ci]" || true
+          git push || true
           
