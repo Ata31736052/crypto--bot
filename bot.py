@@ -1,5 +1,5 @@
 # ============================================
-# 🤖 ربات جامع و هوشمند سیگنال‌دهی کریپتو - نسخه Ultimate Pro (اصلاح‌شده)
+# 🤖 ربات هوشمند سیگنال‌دهی کریپتو - نسخه ۴ ساعته (LONG & SHORT Pro)
 # ============================================
 
 import json, time, os, ssl, urllib.request, warnings
@@ -172,7 +172,7 @@ def get_btc_macro_trend():
         return 'NEUTRAL'
     return 'BULLISH' if k1d['price'] > e50 else 'BEARISH'
 
-def analyze_tf(sym, tf, btc_trend):
+def analyze_tf(sym, tf='4h', btc_trend='NEUTRAL'):
     k_data = klines(sym, tf, limit=220)
     if not k_data:
         return None
@@ -191,15 +191,14 @@ def analyze_tf(sym, tf, btc_trend):
     if not (e9 and e21 and e50 and e200 and atr_val and macd_val is not None):
         return None
 
-    body = abs(p[-1] - o[-1])
-    candle_range = h[-1] - l[-1]
-    
     trend_icon = "🟢" if e9 > e21 else "🔴"
     base_info = {'sym': sym, 'tf': tf.upper(), 'price': curr_price, 'rsi': round(rsi_val, 1), 'icon': trend_icon}
 
+    # محاسبه امتیاز خرید و فروش
     score_buy = 0
     score_sell = 0
 
+    # 1. سیستم میانگین‌های متحرک (EMA)
     if e9 > e21: score_buy += 3
     if e21 > e50: score_buy += 2
     if e9 < e21: score_sell += 3
@@ -208,9 +207,11 @@ def analyze_tf(sym, tf, btc_trend):
     if curr_price > e200: score_buy += 2
     else: score_sell += 2
 
-    if 40 < rsi_val < 70: score_buy += 3
-    if 30 < rsi_val < 60: score_sell += 3
+    # 2. شاخص RSI
+    if 42 < rsi_val < 68: score_buy += 3
+    if 32 < rsi_val < 58: score_sell += 3
 
+    # 3. اندیکاتور MACD
     macd_status = "خنثی"
     if hist_val > 0:
         score_buy += 2
@@ -219,13 +220,15 @@ def analyze_tf(sym, tf, btc_trend):
         score_sell += 2
         macd_status = "نزولی 🔴"
 
+    # 4. حجم معاملات
     avg_vol = sum(v[-21:-1]) / 20 if len(v) >= 21 else sum(v) / len(v)
     is_green_candle = p[-1] > o[-1]
-    if v[-1] > (1.2 * avg_vol):
+    if v[-1] > (1.25 * avg_vol):
         if is_green_candle: score_buy += 2
         else: score_sell += 2
 
-    min_score = 6 if tf == '1h' else 7
+    # حداقل امتیاز ۷ برای تایم‌فریم ۴ ساعته
+    min_score = 7
 
     direction = None
     if score_buy >= min_score and score_buy > score_sell and btc_trend != 'BEARISH':
@@ -238,19 +241,19 @@ def analyze_tf(sym, tf, btc_trend):
     if not direction:
         return {'is_signal': False, **base_info}
 
-    atr_mult_sl = 1.0
-    atr_mult_tp1 = 1.5
-    atr_mult_tp2 = 3.0
+    # محاسبه حد زیان و حد سود (ترکیب ATR و سقف/کف‌های اخیر)
+    recent_high = max(h[-5:])
+    recent_low = min(l[-5:])
 
     if direction == 'buy':
-        sl = curr_price - (atr_mult_sl * atr_val)
-        tp1 = curr_price + (atr_mult_tp1 * atr_val)
-        tp2 = curr_price + (atr_mult_tp2 * atr_val)
+        sl = min(curr_price - (1.2 * atr_val), recent_low)
+        tp1 = curr_price + (1.5 * abs(curr_price - sl))
+        tp2 = curr_price + (2.8 * abs(curr_price - sl))
         sig_text = "خرید (LONG)"
     else:
-        sl = curr_price + (atr_mult_sl * atr_val)
-        tp1 = curr_price - (atr_mult_tp1 * atr_val)
-        tp2 = curr_price - (atr_mult_tp2 * atr_val)
+        sl = max(curr_price + (1.2 * atr_val), recent_high)
+        tp1 = curr_price - (1.5 * abs(sl - curr_price))
+        tp2 = curr_price - (2.8 * abs(sl - curr_price))
         sig_text = "فروش (SHORT)"
 
     risk = abs(curr_price - sl)
@@ -262,7 +265,7 @@ def analyze_tf(sym, tf, btc_trend):
     stop_pct = risk / curr_price
     position_value = risk_amount / stop_pct if stop_pct > 0 else account_size
     
-    max_lev = 15 if tf == '1h' else 10
+    max_lev = 10
     leverage = max(1, min(max_lev, int(position_value / account_size)))
 
     return {
@@ -312,7 +315,7 @@ def fp(n):
 
 def fmt(a):
     tv_link = f"https://www.tradingview.com/chart/?symbol=BINANCE:{a['sym']}USDT"
-    tf_tag = "⚡️ [تایم‌فریم ۱ ساعته - اسکالپ/دی‌ترید]" if a['tf'] == '1H' else "🌊 [تایم‌فریم ۴ ساعته - روند اصلی]"
+    tf_tag = "🌊 [تایم‌فریم ۴ ساعته - روند اصلی]"
     
     return (
         f"{a['icon']} <b>#سیگنال_{a['tf']}_{a['sym']} | USDT</b>\n"
@@ -331,20 +334,13 @@ def fmt(a):
     )
 
 if __name__ == "__main__":
-    print("شروع اسکن هوشمند بازار...")
+    print("شروع اسکن ۴ ساعته (LONG & SHORT)...")
     state = load_state()
     btc_trend = get_btc_macro_trend()
     
     signals = []
     
     for s in COINS:
-        a1h = analyze_tf(s, '1h', btc_trend)
-        if a1h and a1h['is_signal']:
-            state_key = f"{s}_1h"
-            if state.get(state_key, {}).get('dir') != a1h['dir']:
-                signals.append(a1h)
-                state[state_key] = {'dir': a1h['dir'], 'time': a1h['time']}
-
         a4h = analyze_tf(s, '4h', btc_trend)
         if a4h and a4h['is_signal']:
             state_key = f"{s}_4h"
@@ -360,13 +356,13 @@ if __name__ == "__main__":
         for sig in signals:
             send(fmt(sig))
             time.sleep(0.3)
-        print(f"تعداد {len(signals)} سیگنال جدید ارسال شد.")
+        print(f"تعداد {len(signals)} سیگنال جدید ۴ ساعته ارسال شد.")
     else:
         now = datetime.now().strftime('%H:%M')
         btc_icon = "🟢 صعودی" if btc_trend == 'BULLISH' else ("🔴 نزولی" if btc_trend == 'BEARISH' else "⚪️ خنثی")
         msg = f"📊 <b>گزارش اسکن بازار کریپتو ({now})</b>\n\n"
         msg += f"🌐 روند کلان بیت‌کوین (1D): <b>{btc_icon}</b>\n"
-        msg += "• وضعیت: <i>در هر دو تایم‌فریم ۱H و ۴H سیگنال جدید و تاییدشده‌ای یافت نشد.</i>\n\n"
+        msg += "• وضعیت: <i>در تایم‌فریم ۴ ساعته هیچ سیگنال تاییدشده جدیدی (LONG یا SHORT) یافت نشد.</i>\n\n"
         msg += "🔍 اسکن بعدی سر ساعت انجام می‌شود."
         send(msg)
         print("سیگنال جدیدی یافت نشد. گزارش خلاصه ارسال گردید.")
