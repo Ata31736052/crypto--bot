@@ -1,413 +1,957 @@
-# ============================================
-# 🤖 ربات هوشمند و حرفه‌ای سیگنال‌دهی کریپتو (نسخه Pro - ۴ ساعته)
-# ============================================
+# ============================================================
+# 🤖 Crypto 4H Signal Bot - Final Pro
+# ============================================================
+# Strategy:
+# 4H closed candle + RSI + MACD + EMA + Volume + ATR
+# + Price Action + BTC Daily Trend + Duplicate Protection
+#
+# Telegram:
+# TELEGRAM_TOKEN
+# TELEGRAM_CHAT_ID
+#
+# Risk settings:
+# ACCOUNT_SIZE_USDT = 1000
+# RISK_PER_TRADE = 0.01   # 1%
+#
+# IMPORTANT:
+# This bot generates analytical signals.
+# It does NOT place trades automatically.
+# ============================================================
 
-import json, time, os, ssl, urllib.request, warnings
+import json
+import time
+import os
+import ssl
+import urllib.request
+import urllib.parse
 from datetime import datetime, timezone, timedelta
-warnings.filterwarnings('ignore')
 
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT = os.getenv("TELEGRAM_CHAT_ID")
+# ------------------------------------------------------------
+# SETTINGS
+# ------------------------------------------------------------
+
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
 STATE_FILE = "signals_state.json"
+
+TIMEFRAME = "4h"
+KLINE_LIMIT = 250
+
+# مدیریت ریسک
+ACCOUNT_SIZE_USDT = 1000.0
+RISK_PER_TRADE = 0.01       # 1 درصد
+MAX_POSITION_USDT = 1000.0
+
+# حداقل امتیاز لازم
+MIN_SCORE = 70
+
+# حداقل حجم نسبت به میانگین
+MIN_VOLUME_RATIO = 1.20
+
+# ATR
+ATR_PERIOD = 14
+
+# نسبت‌های حد ضرر و سود
+SL_ATR_MULTIPLIER = 1.30
+TP1_RR = 1.50
+TP2_RR = 2.80
+
+# اگر True باشد در صورت نبود سیگنال گزارش تلگرام می‌فرستد
+SEND_NO_SIGNAL_REPORT = False
+
+# منطقه زمانی ایران
+IRAN_TZ = timezone(timedelta(hours=3, minutes=30))
+
+# ------------------------------------------------------------
+# COINS
+# ------------------------------------------------------------
+
+REQUESTED_COINS = [
+    "BTC", "ETH", "SOL", "BNB", "XRP",
+    "ADA", "DOGE", "AVAX", "LINK", "DOT",
+    "LTC", "BCH", "ETC", "XLM", "UNI",
+    "FIL", "TRX", "ATOM", "NEAR", "AAVE",
+    "SUI", "APT", "ARB", "OP", "SEI",
+    "INJ", "TIA", "STX", "ALGO", "EGLD",
+    "ROSE", "MINA", "IMX", "MNT", "RON",
+    "CELO", "FLOW", "FET", "TAO", "AKT",
+    "PEPE", "WIF", "BONK", "FLOKI", "SHIB",
+    "MEME", "NOT", "ORDI", "BOME",
+    "RUNE", "ICP", "KAS", "JUP"
+]
+
+# ------------------------------------------------------------
+# HTTP
+# ------------------------------------------------------------
 
 CTX = ssl.create_default_context()
 CTX.check_hostname = False
 CTX.verify_mode = ssl.CERT_NONE
 
-IRAN_TZ = timezone(timedelta(hours=3, minutes=30))
 
-COINS = [
-    'BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'DOGE', 'AVAX', 'LINK', 'DOT',
-    'LTC', 'BCH', 'ETC', 'XLM', 'UNI', 'FIL', 'TRX', 'ATOM', 'NEAR', 'AAVE',
-    'SUI', 'APT', 'ARB', 'OP', 'MATIC', 'SEI', 'INJ', 'TIA', 'STX',
-    'FTM', 'ALGO', 'EGLD', 'ROSE', 'MINA', 'IMX', 'MNT', 'RON', 'CELO', 'FLOW',
-    'FET', 'RNDR', 'TAO', 'AGIX', 'OCEAN', 'AKT',
-    'PEPE', 'WIF', 'BONK', 'FLOKI', 'SHIB', 'MEME', 'NOT', 'ORDI', 'SATS', 'BOME',
-    'RUNE', 'ICP', 'KAS', 'JUP'
-]
+def http_get(url, timeout=15, retries=3):
 
-def http(url, t=10, retries=3):
-    for i in range(retries):
+    for attempt in range(retries):
+
         try:
+
             req = urllib.request.Request(
-                url, 
-                headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+                url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 CryptoSignalBot/1.0"
+                }
             )
-            with urllib.request.urlopen(req, context=CTX, timeout=t) as x:
-                return json.loads(x.read().decode())
-        except Exception:
-            if i < retries - 1:
-                time.sleep(0.5)
-            continue
+
+            with urllib.request.urlopen(
+                req,
+                context=CTX,
+                timeout=timeout
+            ) as response:
+
+                raw = response.read().decode("utf-8")
+                return json.loads(raw)
+
+        except Exception as e:
+
+            if attempt == retries - 1:
+                print(f"HTTP ERROR: {url}")
+                print(e)
+
+            time.sleep(0.7)
+
     return None
 
-def load_state():
-    if os.path.exists(STATE_FILE):
+
+# ------------------------------------------------------------
+# BINANCE SYMBOLS
+# ------------------------------------------------------------
+
+def get_available_usdt_symbols():
+
+    url = "https://data-api.binance.vision/api/v3/exchangeInfo"
+
+    data = http_get(url)
+
+    if not data:
+        return set()
+
+    symbols = set()
+
+    for item in data.get("symbols", []):
+
         try:
-            with open(STATE_FILE, 'r') as f:
-                return json.load(f)
+
+            if (
+                item.get("quoteAsset") == "USDT"
+                and item.get("status") == "TRADING"
+                and item.get("isSpotTradingAllowed", True)
+            ):
+                symbols.add(item["baseAsset"])
+
         except Exception:
-            return {}
-    return {}
+            continue
 
-def save_state(state):
-    try:
-        with open(STATE_FILE, 'w') as f:
-            json.dump(state, f, indent=2)
-    except Exception:
-        pass
+    return symbols
 
-def get_ticker_price(sym):
-    url_bn = f"https://data-api.binance.vision/api/v3/ticker/price?symbol={sym}USDT"
-    d = http(url_bn)
-    if d and isinstance(d, dict) and 'price' in d:
-        return float(d['price'])
-    
-    url_kc = f"https://api.kucoin.com/api/v1/market/orderbook/level1?symbol={sym}-USDT"
-    d_kc = http(url_kc)
-    if d_kc and d_kc.get('code') == '200000' and isinstance(d_kc.get('data'), dict) and 'price' in d_kc['data']:
-        return float(d_kc['data']['price'])
-        
-    return None
 
-def klines(sym, tf='4h', limit=220):
-    live_price = get_ticker_price(sym)
-    
-    url_bn = f"https://data-api.binance.vision/api/v3/klines?symbol={sym}USDT&interval={tf}&limit={limit}"
-    d = http(url_bn)
-    if d and isinstance(d, list) and len(d) > 1:
-        if not live_price:
-            live_price = float(d[-1][4])
-            
-        # حذف کندل بسته نشده جاری برای جلوگیری از خطای اندیکاتور
-        d = d[:-1]
-        opens = [float(c[1]) for c in d]
-        highs = [float(c[2]) for c in d]
-        lows = [float(c[3]) for c in d]
-        closes = [float(c[4]) for c in d]
-        vols = [float(c[5]) for c in d]
-        return {'o': opens, 'h': highs, 'l': lows, 'p': closes, 'v': vols, 'price': live_price}
+# ------------------------------------------------------------
+# KLINES
+# ------------------------------------------------------------
 
-    url_kc = f"https://api.kucoin.com/api/v1/market/candles?symbol={sym}-USDT&type={tf if tf!='1d' else '1day'}"
-    d = http(url_kc)
-    if d and d.get('code') == '200000' and isinstance(d.get('data'), list) and len(d['data']) > 1:
-        data = d['data'][1:limit]
-        data.reverse()
-        
-        if not live_price:
-            live_price = float(data[-1][2])
-            
-        opens = [float(c[1]) for c in data]
-        closes = [float(c[2]) for c in data]
-        highs = [float(c[3]) for c in data]
-        lows = [float(c[4]) for c in data]
-        vols = [float(c[5]) for c in data]
-        return {'o': opens, 'h': highs, 'l': lows, 'p': closes, 'v': vols, 'price': live_price}
+def get_klines(symbol, interval="4h", limit=250):
 
-    return None
+    encoded_symbol = urllib.parse.quote(symbol + "USDT")
 
-def ema_series(p, n):
-    if len(p) < n: return []
-    k = 2 / (n + 1)
-    emas = [sum(p[:n]) / n]
-    for x in p[n:]:
-        emas.append(x * k + emas[-1] * (1 - k))
-    return emas
-
-def ema(p, n):
-    s = ema_series(p, n)
-    return s[-1] if s else None
-
-def macd(p, fast=12, slow=26, signal=9):
-    if len(p) < slow + signal: return None, None, None
-    ema_fast = ema_series(p, fast)
-    ema_slow = ema_series(p, slow)
-    ema_fast = ema_fast[slow - fast:]
-    macd_line = [f - s for f, s in zip(ema_fast, ema_slow)]
-    signal_line = ema_series(macd_line, signal)
-    if not signal_line: return None, None, None
-    curr_macd = macd_line[-1]
-    curr_signal = signal_line[-1]
-    curr_hist = curr_macd - curr_signal
-    return curr_macd, curr_signal, curr_hist
-
-def rsi_series(p, n=14):
-    if len(p) < n + 1: return []
-    gains, losses = [], []
-    for i in range(1, len(p)):
-        chg = p[i] - p[i - 1]
-        gains.append(max(chg, 0))
-        losses.append(max(-chg, 0))
-    avg_g = sum(gains[:n]) / n
-    avg_l = sum(losses[:n]) / n
-    rsis = []
-    for i in range(n, len(gains)):
-        avg_g = (avg_g * (n - 1) + gains[i]) / n
-        avg_l = (avg_l * (n - 1) + losses[i]) / n
-        if avg_l == 0:
-            rsis.append(100.0)
-        else:
-            rsis.append(100.0 - (100.0 / (1.0 + (avg_g / avg_l))))
-    return rsis
-
-def rsi(p, n=14):
-    s = rsi_series(p, n)
-    return s[-1] if s else 50.0
-
-def atr(highs, lows, closes, n=14):
-    if len(closes) < n + 1: return None
-    tr_list = []
-    for i in range(1, len(closes)):
-        h = highs[i]
-        l = lows[i]
-        pc = closes[i - 1]
-        tr = max(h - l, abs(h - pc), abs(l - pc))
-        tr_list.append(tr)
-    return sum(tr_list[-n:]) / n
-
-def check_price_action(o, h, l, c):
-    if len(c) < 2: return "خنثی"
-    body = abs(c[-1] - o[-1])
-    candle_range = h[-1] - l[-1]
-    if candle_range == 0: return "خنثی"
-    
-    upper_wick = h[-1] - max(o[-1], c[-1])
-    lower_wick = min(o[-1], c[-1]) - l[-1]
-
-    if lower_wick > (2.0 * body) and lower_wick > (0.5 * candle_range):
-        return "پین‌بار صعودی 🟢"
-    if upper_wick > (2.0 * body) and upper_wick > (0.5 * candle_range):
-        return "پین‌بار نزولی 🔴"
-
-    if c[-1] > o[-1] and c[-2] < o[-2] and c[-1] > o[-2] and o[-1] < c[-2]:
-        return "انگالفینگ صعودی 🟢"
-    if c[-1] < o[-1] and c[-2] > o[-2] and c[-1] < o[-2] and o[-1] > c[-2]:
-        return "انگالفینگ نزولی 🔴"
-
-    return "تایید عادی"
-
-def check_rsi_divergence(p, rsi_vals):
-    if len(p) < 15 or len(rsi_vals) < 15: return "بدون واگرایی"
-    if p[-1] < min(p[-10:-1]) and rsi_vals[-1] > min(rsi_vals[-10:-1]):
-        return "واگرایی صعودی RSI 🟢"
-    if p[-1] > max(p[-10:-1]) and rsi_vals[-1] < max(rsi_vals[-10:-1]):
-        return "واگرایی نزولی RSI 🔴"
-    return "بدون واگرایی"
-
-def get_btc_macro_trend():
-    k1d = klines('BTC', '1d', limit=60)
-    if not k1d: return 'NEUTRAL'
-    e50 = ema(k1d['p'], 50)
-    if not e50: return 'NEUTRAL'
-    return 'BULLISH' if k1d['price'] > e50 else 'BEARISH'
-
-def analyze_tf(sym, tf='4h', btc_trend='NEUTRAL'):
-    k_data = klines(sym, tf, limit=220)
-    if not k_data: return None
-
-    p, h, l, o, v = k_data['p'], k_data['h'], k_data['l'], k_data['o'], k_data['v']
-    curr_price = k_data['price']
-    
-    e9, e21, e50, e200 = ema(p, 9), ema(p, 21), ema(p, 50), ema(p, 200)
-    rsi_vals = rsi_series(p)
-    rsi_val = rsi_vals[-1] if rsi_vals else 50.0
-    atr_val = atr(h, l, p, 14)
-    macd_val, signal_val, hist_val = macd(p)
-    pa_status = check_price_action(o, h, l, p)
-    div_status = check_rsi_divergence(p, rsi_vals)
-
-    if not (e9 and e21 and e50 and e200 and atr_val and macd_val is not None):
-        return None
-
-    trend_icon = "🟢" if e9 > e21 else "🔴"
-    base_info = {'sym': sym, 'tf': tf.upper(), 'price': curr_price, 'rsi': round(rsi_val, 1), 'icon': trend_icon}
-
-    score_buy, score_sell = 0, 0
-
-    if e9 > e21: score_buy += 3
-    if e21 > e50: score_buy += 2
-    if e9 < e21: score_sell += 3
-    if e21 < e50: score_sell += 2
-
-    if curr_price > e200: score_buy += 2
-    else: score_sell += 2
-
-    if 40 <= rsi_val <= 68: score_buy += 2
-    if 32 <= rsi_val <= 60: score_sell += 2
-
-    macd_status = "خنثی"
-    if hist_val > 0:
-        score_buy += 2
-        macd_status = "صعودی 🟢"
-    elif hist_val < 0:
-        score_sell += 2
-        macd_status = "نزولی 🔴"
-
-    avg_vol = sum(v[-21:-1]) / 20 if len(v) >= 21 else sum(v) / len(v)
-    vol_ratio = round(v[-1] / avg_vol, 2) if avg_vol > 0 else 1.0
-    if vol_ratio >= 1.2:
-        if p[-1] >= o[-1]: score_buy += 2
-        else: score_sell += 2
-
-    if "صعودی" in pa_status: score_buy += 2
-    if "نزولی" in pa_status: score_sell += 2
-
-    if "صعودی" in div_status: score_buy += 2
-    if "نزولی" in div_status: score_sell += 2
-
-    # آستانه ۱۰ برای شناسایی دقیق سیگنال‌ها
-    min_score = 10
-
-    direction = None
-    if score_buy >= min_score and score_buy > score_sell and btc_trend != 'BEARISH':
-        direction = 'buy'
-        final_score = score_buy
-    elif score_sell >= min_score and score_sell > score_buy and btc_trend != 'BULLISH':
-        direction = 'sell'
-        final_score = score_sell
-
-    if not direction:
-        return {'is_signal': False, **base_info}
-
-    recent_high = max(h[-5:])
-    recent_low = min(l[-5:])
-
-    if direction == 'buy':
-        sl = min(curr_price - (1.3 * atr_val), recent_low)
-        tp1 = curr_price + (1.5 * abs(curr_price - sl))
-        tp2 = curr_price + (2.8 * abs(curr_price - sl))
-        sig_text = "خرید (LONG)"
-    else:
-        sl = max(curr_price + (1.3 * atr_val), recent_high)
-        tp1 = curr_price - (1.5 * abs(sl - curr_price))
-        tp2 = curr_price - (2.8 * abs(sl - curr_price))
-        sig_text = "فروش (SHORT)"
-
-    risk = abs(curr_price - sl)
-    reward = abs(tp2 - curr_price)
-    rr_ratio = round(reward / risk, 2) if risk > 0 else 2.5
-
-    account_size = 1000.0
-    risk_amount = account_size * 0.01
-    stop_pct = risk / curr_price
-    position_value = risk_amount / stop_pct if stop_pct > 0 else account_size
-    
-    max_lev = 10
-    leverage = max(1, min(max_lev, int(position_value / account_size)))
-
-    now_ir = datetime.now(IRAN_TZ).strftime('%H:%M')
-
-    return {
-        'is_signal': True,
-        'sym': sym,
-        'tf': tf.upper(),
-        'price': curr_price, 
-        'dir': direction,
-        'sig': sig_text, 
-        'score': final_score,
-        'rsi': round(rsi_val, 1),
-        'macd_status': macd_status,
-        'pa_status': pa_status,
-        'div_status': div_status,
-        'vol_ratio': vol_ratio,
-        'atr': fp(atr_val),
-        'sl': sl, 
-        'tp1': tp1, 
-        'tp2': tp2,
-        'rr': rr_ratio,
-        'pos_size': round(position_value, 1),
-        'leverage': leverage,
-        'time': now_ir,
-        'icon': trend_icon
-    }
-
-def send(msg):
-    if not TOKEN or not CHAT: 
-        print("❌ Error: Telegram Token or Chat ID not found.")
-        return False
-    try:
-        url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-        d = json.dumps({
-            "chat_id": CHAT, 
-            "text": msg, 
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True
-        }).encode()
-        req = urllib.request.Request(url, data=d, headers={'Content-Type': 'application/json'})
-        with urllib.request.urlopen(req, context=CTX, timeout=10) as x:
-            return x.status == 200
-    except Exception as e:
-        print(f"❌ Telegram Send Error: {e}")
-        return False
-
-def fp(n):
-    if n >= 1000: return f"{n:,.2f}"
-    if n >= 1: return f"{n:,.4f}"
-    return f"{n:.6f}"
-
-def fmt(a):
-    tv_link = f"https://www.tradingview.com/chart/?symbol=BINANCE:{a['sym']}USDT"
-    tf_tag = "🚀 [سیگنال ۴ ساعته Pro - پایش ساعتی]"
-    
-    badge = ""
-    if a['score'] >= 12:
-        badge = "\n🔥 <b>سیگنال VIP (امتیاز بالای ۱۲ - فوق‌العاده قوی)</b>"
-
-    return (
-        f"{a['icon']} <b>#سیگنال_{a['tf']}_{a['sym']} | USDT</b>\n"
-        f"<i>{tf_tag}</i>{badge}\n\n"
-        f"🎯 جهت معامله: <b>{a['sig']}</b>\n"
-        f"📊 قدرت کل سیگنال: <b>{a['score']} / 18</b>\n"
-        f"💰 قیمت ورود: <b>{fp(a['price'])} $</b>\n"
-        f"⚖️ نسبت R/R: <b>1:{a['rr']}</b>\n"
-        f"📐 اهرم پیشنهادی: <b>{a['leverage']}x</b> | حجم پوزیشن: <b>{a['pos_size']} $</b>\n\n"
-        f"🛑 حد زیان (SL): <b>{fp(a['sl'])} $</b>\n"
-        f"🎯 حد سود اول (TP1): <b>{fp(a['tp1'])} $</b>\n"
-        f"🚀 حد سود دوم (TP2): <b>{fp(a['tp2'])} $</b>\n\n"
-        f"🔍 <b>تاییدکننده‌های حرفه‌ای:</b>\n"
-        f"• پرایس اکشن: <b>{a['pa_status']}</b>\n"
-        f"• واگرایی: <b>{a['div_status']}</b>\n"
-        f"• حجم معاملات: <b>{a['vol_ratio']}x نسبت به میانگین</b>\n"
-        f"• شاخص RSI: <b>{a['rsi']}</b> | مکدی: <b>{a['macd_status']}</b>\n\n"
-        f"🔗 <a href='{tv_link}'>مشاهده نمودار زنده در TradingView</a>\n"
-        f"📅 زمان ثبت (ایران): {a['time']}"
+    url = (
+        "https://data-api.binance.vision/api/v3/klines"
+        f"?symbol={encoded_symbol}"
+        f"&interval={interval}"
+        f"&limit={limit}"
     )
 
-if __name__ == "__main__":
-    print("شروع اسکن ساعتی بازار ۴ ساعته کریپتو...")
-    state = load_state()
-    btc_trend = get_btc_macro_trend()
-    
-    signals = []
-    
-    for s in COINS:
-        a4h = analyze_tf(s, '4h', btc_trend)
-        state_key = f"{s}_4h"
-        
-        if a4h and a4h['is_signal']:
-            # اگر این ارز قبلاً در همین جهت سیگنال نداده، آن را ارسال کن
-            if state.get(state_key, {}).get('dir') != a4h['dir']:
-                signals.append(a4h)
-                state[state_key] = {'dir': a4h['dir'], 'time': a4h['time']}
+    data = http_get(url)
 
-        time.sleep(0.08)
+    if not isinstance(data, list):
+        return None
 
-    save_state(state)
+    if len(data) < 50:
+        return None
 
-    if signals:
-        for sig in signals:
-            send(fmt(sig))
-            time.sleep(0.3)
-        print(f"تعداد {len(signals)} سیگنال ارسال شد.")
+    # حذف آخرین کندل چون هنوز ممکن است بسته نشده باشد
+    data = data[:-1]
+
+    candles = []
+
+    for c in data:
+
+        try:
+
+            candles.append({
+                "open_time": int(c[0]),
+                "open": float(c[1]),
+                "high": float(c[2]),
+                "low": float(c[3]),
+                "close": float(c[4]),
+                "volume": float(c[5]),
+                "close_time": int(c[6])
+            })
+
+        except Exception:
+            continue
+
+    return candles
+
+
+# ------------------------------------------------------------
+# INDICATORS
+# ------------------------------------------------------------
+
+def ema_series(values, period):
+
+    if len(values) < period:
+        return []
+
+    multiplier = 2 / (period + 1)
+
+    result = [
+        sum(values[:period]) / period
+    ]
+
+    for value in values[period:]:
+
+        result.append(
+            (value - result[-1]) * multiplier + result[-1]
+        )
+
+    return result
+
+
+def ema(values, period):
+
+    result = ema_series(values, period)
+
+    return result[-1] if result else None
+
+
+def rsi_series(values, period=14):
+
+    if len(values) <= period:
+        return []
+
+    gains = []
+    losses = []
+
+    for i in range(1, len(values)):
+
+        change = values[i] - values[i - 1]
+
+        gains.append(max(change, 0))
+        losses.append(max(-change, 0))
+
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+
+    result = []
+
+    if avg_loss == 0:
+        result.append(100.0)
     else:
-        now_ir = datetime.now(IRAN_TZ).strftime('%H:%M')
-        btc_icon = "🟢 صعودی" if btc_trend == 'BULLISH' else ("🔴 نزولی" if btc_trend == 'BEARISH' else "⚪️ خنثی")
-        msg = f"📊 <b>گزارش اسکن ساعتی ۴H ({now_ir} به وقت ایران)</b>\n\n"
-        msg += f"🌐 روند کلان بیت‌کوین (روزانه): <b>{btc_icon}</b>\n"
-        msg += "• وضعیت ۴ ساعته: <i>در این ساعت موقعیت جدیدی با شرایط حد نصاب ۱۰ احراز نگردید.</i>\n\n"
-        msg += "🔍 اسکن بعدی سر ساعت بعدی انجام خواهد شد."
-        send(msg)
-        print("سیگنال جدیدی یافت نشد؛ گزارش ارسال شد.")
+        rs = avg_gain / avg_loss
+        result.append(100 - (100 / (1 + rs)))
 
-    print("پایان اسکن.")
-    
+    for i in range(period, len(gains)):
+
+        avg_gain = (
+            avg_gain * (period - 1) + gains[i]
+        ) / period
+
+        avg_loss = (
+            avg_loss * (period - 1) + losses[i]
+        ) / period
+
+        if avg_loss == 0:
+            result.append(100.0)
+        else:
+            rs = avg_gain / avg_loss
+            result.append(100 - (100 / (1 + rs)))
+
+    return result
+
+
+def rsi(values, period=14):
+
+    result = rsi_series(values, period)
+
+    return result[-1] if result else 50.0
+
+
+def macd(values, fast=12, slow=26, signal=9):
+
+    if len(values) < 60:
+        return None
+
+    fast_ema = ema_series(values, fast)
+    slow_ema = ema_series(values, slow)
+
+    if not fast_ema or not slow_ema:
+        return None
+
+    # هم‌تراز کردن EMA سریع و کند
+    fast_ema = fast_ema[slow - fast:]
+
+    macd_line = []
+
+    for f, s in zip(fast_ema, slow_ema):
+        macd_line.append(f - s)
+
+    signal_line = ema_series(macd_line, signal)
+
+    if not signal_line:
+        return None
+
+    macd_now = macd_line[-1]
+    signal_now = signal_line[-1]
+
+    # مقدار قبلی برای تشخیص کراس
+    if len(macd_line) >= 2 and len(signal_line) >= 2:
+
+        macd_prev = macd_line[-2]
+        signal_prev = signal_line[-2]
+
+    else:
+
+        macd_prev = macd_now
+        signal_prev = signal_now
+
+    histogram = macd_now - signal_now
+
+    return {
+        "macd": macd_now,
+        "signal": signal_now,
+        "hist": histogram,
+        "prev_macd": macd_prev,
+        "prev_signal": signal_prev
+    }
+
+
+def atr(highs, lows, closes, period=14):
+
+    if len(closes) <= period:
+        return None
+
+    true_ranges = []
+
+    for i in range(1, len(closes)):
+
+        previous_close = closes[i - 1]
+
+        tr = max(
+            highs[i] - lows[i],
+            abs(highs[i] - previous_close),
+            abs(lows[i] - previous_close)
+        )
+
+        true_ranges.append(tr)
+
+    return sum(true_ranges[-period:]) / period
+
+
+# ------------------------------------------------------------
+# PRICE ACTION
+# ------------------------------------------------------------
+
+def price_action(opens, highs, lows, closes):
+
+    if len(closes) < 3:
+        return "NEUTRAL"
+
+    o = opens[-1]
+    h = highs[-1]
+    l = lows[-1]
+    c = closes[-1]
+
+    previous_o = opens[-2]
+    previous_c = closes[-2]
+
+    candle_range = h - l
+
+    if candle_range <= 0:
+        return "NEUTRAL"
+
+    body = abs(c - o)
+
+    upper_wick = h - max(o, c)
+    lower_wick = min(o, c) - l
+
+    # Bullish pin bar
+    if (
+        lower_wick > body * 2
+        and lower_wick > candle_range * 0.50
+    ):
+        return "BULLISH_PINBAR"
+
+    # Bearish pin bar
+    if (
+        upper_wick > body * 2
+        and upper_wick > candle_range * 0.50
+    ):
+        return "BEARISH_PINBAR"
+
+    # Bullish engulfing
+    if (
+        previous_c < previous_o
+        and c > o
+        and c >= previous_o
+        and o <= previous_c
+    ):
+        return "BULLISH_ENGULFING"
+
+    # Bearish engulfing
+    if (
+        previous_c > previous_o
+        and c < o
+        and c <= previous_o
+        and o >= previous_c
+    ):
+        return "BEARISH_ENGULFING"
+
+    if c > o:
+        return "BULLISH_CANDLE"
+
+    if c < o:
+        return "BEARISH_CANDLE"
+
+    return "NEUTRAL"
+
+
+# ------------------------------------------------------------
+# RSI DIVERGENCE - SIMPLE PIVOT METHOD
+# ------------------------------------------------------------
+
+def rsi_divergence(prices, rsi_values):
+
+    if len(prices) < 30 or len(rsi_values) < 30:
+        return "NONE"
+
+    # دو بازه اخیر
+    price_a = min(prices[-20:-10])
+    price_b = min(prices[-10:])
+
+    rsi_a = min(rsi_values[-20:-10])
+    rsi_b = min(rsi_values[-10:])
+
+    # Bullish divergence
+    if price_b < price_a and rsi_b > rsi_a:
+        return "BULLISH_DIVERGENCE"
+
+    price_a = max(prices[-20:-10])
+    price_b = max(prices[-10:])
+
+    rsi_a = max(rsi_values[-20:-10])
+    rsi_b = max(rsi_values[-10:])
+
+    # Bearish divergence
+    if price_b > price_a and rsi_b < rsi_a:
+        return "BEARISH_DIVERGENCE"
+
+    return "NONE"
+
+
+# ------------------------------------------------------------
+# BTC MACRO TREND
+# ------------------------------------------------------------
+
+def get_btc_macro_trend():
+
+    candles = get_klines("BTC", "1d", 100)
+
+    if not candles:
+        return "NEUTRAL"
+
+    closes = [x["close"] for x in candles]
+
+    e50 = ema(closes, 50)
+
+    if e50 is None:
+        return "NEUTRAL"
+
+    last_price = closes[-1]
+
+    # روند قوی‌تر با EMA20 و EMA50
+    e20 = ema(closes, 20)
+
+    if e20 is None:
+        return "NEUTRAL"
+
+    if last_price > e50 and e20 > e50:
+        return "BULLISH"
+
+    if last_price < e50 and e20 < e50:
+        return "BEARISH"
+
+    return "NEUTRAL"
+
+
+# ------------------------------------------------------------
+# ANALYSIS
+# ------------------------------------------------------------
+
+def analyze(symbol, btc_trend):
+
+    candles = get_klines(
+        symbol,
+        TIMEFRAME,
+        KLINE_LIMIT
+    )
+
+    if not candles:
+        return None
+
+    opens = [x["open"] for x in candles]
+    highs = [x["high"] for x in candles]
+    lows = [x["low"] for x in candles]
+    closes = [x["close"] for x in candles]
+    volumes = [x["volume"] for x in candles]
+
+    if len(closes) < 210:
+        return None
+
+    price = closes[-1]
+
+    # -------------------------
+    # EMA
+    # -------------------------
+
+    e9 = ema(closes, 9)
+    e21 = ema(closes, 21)
+    e50 = ema(closes, 50)
+    e200 = ema(closes, 200)
+
+    # -------------------------
+    # RSI
+    # -------------------------
+
+    rsi_values = rsi_series(closes, 14)
+
+    if not rsi_values:
+        return None
+
+    rsi_now = rsi_values[-1]
+
+    # -------------------------
+    # MACD
+    # -------------------------
+
+    macd_data = macd(closes)
+
+    if not macd_data:
+        return None
+
+    # -------------------------
+    # ATR
+    # -------------------------
+
+    atr_value = atr(
+        highs,
+        lows,
+        closes,
+        ATR_PERIOD
+    )
+
+    if not atr_value or atr_value <= 0:
+        return None
+
+    # -------------------------
+    # VOLUME
+    # -------------------------
+
+    if len(volumes) >= 21:
+
+        avg_volume = sum(
+            volumes[-21:-1]
+        ) / 20
+
+    else:
+
+        avg_volume = sum(volumes) / len(volumes)
+
+    volume_ratio = (
+        volumes[-1] / avg_volume
+        if avg_volume > 0
+        else 1
+    )
+
+    # -------------------------
+    # PRICE ACTION
+    # -------------------------
+
+    pa = price_action(
+        opens,
+        highs,
+        lows,
+        closes
+    )
+
+    # -------------------------
+    # DIVERGENCE
+    # -------------------------
+
+    div = rsi_divergence(
+        closes,
+        rsi_values
+    )
+
+    # ========================================================
+    # SCORE
+    # ========================================================
+
+    buy_score = 0
+    sell_score = 0
+
+    reasons_buy = []
+    reasons_sell = []
+
+    # --------------------------------------------------------
+    # EMA TREND
+    # --------------------------------------------------------
+
+    if e9 > e21:
+        buy_score += 15
+        reasons_buy.append("EMA9 > EMA21")
+
+    elif e9 < e21:
+        sell_score += 15
+        reasons_sell.append("EMA9 < EMA21")
+
+    if e21 > e50:
+        buy_score += 10
+        reasons_buy.append("EMA21 > EMA50")
+
+    elif e21 < e50:
+        sell_score += 10
+        reasons_sell.append("EMA21 < EMA50")
+
+    # --------------------------------------------------------
+    # EMA200
+    # --------------------------------------------------------
+
+    if price > e200:
+        buy_score += 10
+        reasons_buy.append("قیمت بالای EMA200")
+
+    elif price < e200:
+        sell_score += 10
+        reasons_sell.append("قیمت زیر EMA200")
+
+    # --------------------------------------------------------
+    # RSI
+    # --------------------------------------------------------
+
+    # خرید:
+    # RSI زیر 35 + برگشت = شرایط مطلوب
+    # RSI بین 40 تا 60 = روند سالم
+    if 30 <= rsi_now <= 38:
+
+        buy_score += 15
+        reasons_buy.append(
+            f"RSI مناسب برای برگشت ({rsi_now:.1f})"
+        )
+
+    elif 38 < rsi_now <= 55:
+
+        buy_score += 7
+        reasons_buy.append(
+            f"RSI صعودی/متعادل ({rsi_now:.1f})"
+        )
+
+    # فروش
+    if 62 <= rsi_now <= 70:
+
+        sell_score += 15
+        reasons_sell.append(
+            f"RSI مناسب برای اصلاح ({rsi_now:.1f})"
+        )
+
+    elif 55 <= rsi_now < 62:
+
+        sell_score += 7
+        reasons_sell.append(
+            f"RSI نزولی/متعادل ({rsi_now:.1f})"
+        )
+
+    # --------------------------------------------------------
+    # MACD
+    # --------------------------------------------------------
+
+    macd_now = macd_data["macd"]
+    signal_now = macd_data["signal"]
+
+    macd_prev = macd_data["prev_macd"]
+    signal_prev = macd_data["prev_signal"]
+
+    bullish_cross = (
+        macd_prev <= signal_prev
+        and macd_now > signal_now
+    )
+
+    bearish_cross = (
+        macd_prev >= signal_prev
+        and macd_now < signal_now
+    )
+
+    if bullish_cross:
+
+        buy_score += 20
+        reasons_buy.append("MACD Bullish Cross")
+
+    elif macd_now > signal_now:
+
+        buy_score += 10
+        reasons_buy.append("MACD مثبت")
+
+    if bearish_cross:
+
+        sell_score += 20
+        reasons_sell.append("MACD Bearish Cross")
+
+    elif macd_now < signal_now:
+
+        sell_score += 10
+        reasons_sell.append("MACD منفی")
+
+    # --------------------------------------------------------
+    # VOLUME
+    # --------------------------------------------------------
+
+    if volume_ratio >= MIN_VOLUME_RATIO:
+
+        if closes[-1] > opens[-1]:
+
+            buy_score += 15
+            reasons_buy.append(
+                f"حجم قوی {volume_ratio:.2f}x"
+            )
+
+        elif closes[-1] < opens[-1]:
+
+            sell_score += 15
+            reasons_sell.append(
+                f"حجم قوی {volume_ratio:.2f}x"
+            )
+
+    # --------------------------------------------------------
+    # PRICE ACTION
+    # --------------------------------------------------------
+
+    if pa in (
+        "BULLISH_PINBAR",
+        "BULLISH_ENGULFING"
+    ):
+
+        buy_score += 10
+        reasons_buy.append(pa)
+
+    if pa in (
+        "BEARISH_PINBAR",
+        "BEARISH_ENGULFING"
+    ):
+
+        sell_score += 10
+        reasons_sell.append(pa)
+
+    # --------------------------------------------------------
+    # RSI DIVERGENCE
+    # --------------------------------------------------------
+
+    if div == "BULLISH_DIVERGENCE":
+
+        buy_score += 10
+        reasons_buy.append("Bullish RSI Divergence")
+
+    elif div == "BEARISH_DIVERGENCE":
+
+        sell_score += 10
+        reasons_sell.append("Bearish RSI Divergence")
+
+    # ========================================================
+    # BTC FILTER
+    # ========================================================
+
+    # اگر BTC نزولی باشد، BUY خیلی سخت‌تر می‌شود
+    # اگر BTC صعودی باشد، SELL خیلی سخت‌تر می‌شود
+
+    if btc_trend == "BEARISH":
+
+        buy_score -= 15
+
+    elif btc_trend == "BULLISH":
+
+        sell_score -= 15
+
+    buy_score = max(0, buy_score)
+    sell_score = max(0, sell_score)
+
+    # ========================================================
+    # FINAL DECISION
+    # ========================================================
+
+    direction = None
+    score = 0
+
+    if (
+        buy_score >= MIN_SCORE
+        and buy_score > sell_score
+        and btc_trend != "BEARISH"
+    ):
+
+        direction = "BUY"
+        score = buy_score
+
+    elif (
+        sell_score >= MIN_SCORE
+        and sell_score > buy_score
+        and btc_trend != "BULLISH"
+    ):
+
+        direction = "SELL"
+        score = sell_score
+
+    else:
+
+        return {
+            "is_signal": False,
+            "symbol": symbol,
+            "price": price,
+            "rsi": rsi_now,
+            "btc_trend": btc_trend,
+            "buy_score": buy_score,
+            "sell_score": sell_score,
+            "candle_time": candles[-1]["close_time"]
+        }
+
+    # ========================================================
+    # SL / TP
+    # ========================================================
+
+    recent_high = max(highs[-5:])
+    recent_low = min(lows[-5:])
+
+    if direction == "BUY":
+
+        sl_by_atr = price - (
+            SL_ATR_MULTIPLIER * atr_value
+        )
+
+        sl = min(
+            sl_by_atr,
+            recent_low
+        )
+
+        risk = price - sl
+
+        tp1 = price + (
+            risk * TP1_RR
+        )
+
+        tp2 = price + (
+            risk * TP2_RR
+        )
+
+    else:
+
+        sl_by_atr = price + (
+            SL_ATR_MULTIPLIER * atr_value
+        )
+
+        sl = max(
+            sl_by_atr,
+            recent_high
+        )
+
+        risk = sl - price
+
+        tp1 = price - (
+            risk * TP1_RR
+        )
+
+        tp2 = price - (
+            risk * TP2_RR
+        )
+
+    if risk <= 0:
+        return None
+
+    # ========================================================
+    # POSITION SIZE
+    # ========================================================
+
+    risk_amount = (
+        ACCOUNT_SIZE_USDT *
+        RISK_PER_TRADE
+    )
+
+    stop_percent = risk / price
+
+    position_size = (
+        risk_amount / stop_percent
+        if stop_percent > 0
+        else 0
+    )
+
+    position_size = min(
+        position_size,
+        MAX_POSITION_USDT
+    )
+
+    stop_percent_display = (
+        stop_percent * 100
+    )
+
+    # R/R واقعی TP2
+    rr = (
+        abs(tp2 - price) / risk
+    )
+
+    return {
+
+        "is_signal": True,
+
+        "symbol": symbol,
+        "timeframe": TIMEFRAME,
+
+        "direction": direction,
+
+        "score": score,
+
+        "buy_score": buy_score,
+        "sell_score": sell_score,
+
+        "price": price,
+
+        "rsi": rsi_now,
+
+        "macd": macd_now,
+        "macd_signal": signal_now,
+
+        "volume_ratio": volume_ratio,
+
+        "price_action": pa,
+
+        "divergence": div,
+
+        "btc_trend": btc_trend,
+
+        "atr": atr_value,
+
+        "sl": sl,
+
+        "tp1": tp1,
+
+        "tp2": tp2,
+
+        "rr": rr,
+
+        "position_size": position_size,
+
+        "risk_amount": risk_
