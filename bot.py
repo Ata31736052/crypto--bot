@@ -1,9 +1,9 @@
 # ============================================
-# 🤖 ربات هوشمند سیگنال‌دهی کریپتو - نسخه ۴ ساعته فیلترشده (امتیاز بالای ۱۰)
+# 🤖 ربات هوشمند و حرفه‌ای سیگنال‌دهی کریپتو (نسخه Pro)
 # ============================================
 
 import json, time, os, ssl, urllib.request, warnings
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 warnings.filterwarnings('ignore')
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -14,22 +14,16 @@ CTX = ssl.create_default_context()
 CTX.check_hostname = False
 CTX.verify_mode = ssl.CERT_NONE
 
+# تنظیم منطقه زمانی رسمی ایران (UTC+3:30)
+IRAN_TZ = timezone(timedelta(hours=3, minutes=30))
+
 COINS = [
-    # Top Market Cap & Major Coins
     'BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'DOGE', 'AVAX', 'LINK', 'DOT',
     'LTC', 'BCH', 'ETC', 'XLM', 'UNI', 'FIL', 'TRX', 'ATOM', 'NEAR', 'AAVE',
-    
-    # Layer 1 & Layer 2 Ecosystems
     'SUI', 'APT', 'ARB', 'OP', 'MATIC', 'SEI', 'INJ', 'TIA', 'STX',
     'FTM', 'ALGO', 'EGLD', 'ROSE', 'MINA', 'IMX', 'MNT', 'RON', 'CELO', 'FLOW',
-    
-    # AI & Big Data
     'FET', 'RNDR', 'TAO', 'AGIX', 'OCEAN', 'AKT',
-    
-    # Popular Meme Coins & High Momentum
     'PEPE', 'WIF', 'BONK', 'FLOKI', 'SHIB', 'MEME', 'NOT', 'ORDI', 'SATS', 'BOME',
-    
-    # Other Solid Altcoins
     'RUNE', 'ICP', 'KAS', 'JUP'
 ]
 
@@ -137,8 +131,8 @@ def macd(p, fast=12, slow=26, signal=9):
     curr_hist = curr_macd - curr_signal
     return curr_macd, curr_signal, curr_hist
 
-def rsi(p, n=14):
-    if len(p) < n + 1: return 50.0
+def rsi_series(p, n=14):
+    if len(p) < n + 1: return []
     gains, losses = [], []
     for i in range(1, len(p)):
         chg = p[i] - p[i - 1]
@@ -146,11 +140,19 @@ def rsi(p, n=14):
         losses.append(max(-chg, 0))
     avg_g = sum(gains[:n]) / n
     avg_l = sum(losses[:n]) / n
+    rsis = []
     for i in range(n, len(gains)):
         avg_g = (avg_g * (n - 1) + gains[i]) / n
         avg_l = (avg_l * (n - 1) + losses[i]) / n
-    if avg_l == 0: return 100.0
-    return 100.0 - (100.0 / (1.0 + (avg_g / avg_l)))
+        if avg_l == 0:
+            rsis.append(100.0)
+        else:
+            rsis.append(100.0 - (100.0 / (1.0 + (avg_g / avg_l))))
+    return rsis
+
+def rsi(p, n=14):
+    s = rsi_series(p, n)
+    return s[-1] if s else 50.0
 
 def atr(highs, lows, closes, n=14):
     if len(closes) < n + 1: return None
@@ -163,30 +165,62 @@ def atr(highs, lows, closes, n=14):
         tr_list.append(tr)
     return sum(tr_list[-n:]) / n
 
+# 🔍 فیلتر پرایس اکشن (کندل پین‌بار و انگالفینگ)
+def check_price_action(o, h, l, c):
+    if len(c) < 2: return "خنثی"
+    body = abs(c[-1] - o[-1])
+    candle_range = h[-1] - l[-1]
+    if candle_range == 0: return "خنثی"
+    
+    upper_wick = h[-1] - max(o[-1], c[-1])
+    lower_wick = min(o[-1], c[-1]) - l[-1]
+
+    # پین‌بار صعودی / نزولی
+    if lower_wick > (2.5 * body) and lower_wick > (0.6 * candle_range):
+        return "پین‌بار صعودی 🟢"
+    if upper_wick > (2.5 * body) and upper_wick > (0.6 * candle_range):
+        return "پین‌بار نزولی 🔴"
+
+    # کندل انگالفینگ
+    if c[-1] > o[-1] and c[-2] < o[-2] and c[-1] > o[-2] and o[-1] < c[-2]:
+        return "انگالفینگ صعودی 🟢"
+    if c[-1] < o[-1] and c[-2] > o[-2] and c[-1] < o[-2] and o[-1] > c[-2]:
+        return "انگالفینگ نزولی 🔴"
+
+    return "تایید عادی"
+
+# 🔍 فیلتر واگرایی RSI
+def check_rsi_divergence(p, rsi_vals):
+    if len(p) < 15 or len(rsi_vals) < 15: return "بدون واگرایی"
+    # واگرایی معمولی صعودی (Bullish Divergence)
+    if p[-1] < min(p[-10:-1]) and rsi_vals[-1] > min(rsi_vals[-10:-1]):
+        return "واگرایی صعودی RSI 🟢"
+    # واگرایی معمولی نزولی (Bearish Divergence)
+    if p[-1] > max(p[-10:-1]) and rsi_vals[-1] < max(rsi_vals[-10:-1]):
+        return "واگرایی نزولی RSI 🔴"
+    return "بدون واگرایی"
+
 def get_btc_macro_trend():
     k1d = klines('BTC', '1d', limit=60)
-    if not k1d:
-        return 'NEUTRAL'
+    if not k1d: return 'NEUTRAL'
     e50 = ema(k1d['p'], 50)
-    if not e50:
-        return 'NEUTRAL'
+    if not e50: return 'NEUTRAL'
     return 'BULLISH' if k1d['price'] > e50 else 'BEARISH'
 
 def analyze_tf(sym, tf='4h', btc_trend='NEUTRAL'):
     k_data = klines(sym, tf, limit=220)
-    if not k_data:
-        return None
+    if not k_data: return None
 
     p, h, l, o, v = k_data['p'], k_data['h'], k_data['l'], k_data['o'], k_data['v']
     curr_price = k_data['price']
     
-    e9 = ema(p, 9)
-    e21 = ema(p, 21)
-    e50 = ema(p, 50)
-    e200 = ema(p, 200)
-    rsi_val = rsi(p)
+    e9, e21, e50, e200 = ema(p, 9), ema(p, 21), ema(p, 50), ema(p, 200)
+    rsi_vals = rsi_series(p)
+    rsi_val = rsi_vals[-1] if rsi_vals else 50.0
     atr_val = atr(h, l, p, 14)
     macd_val, signal_val, hist_val = macd(p)
+    pa_status = check_price_action(o, h, l, p)
+    div_status = check_rsi_divergence(p, rsi_vals)
 
     if not (e9 and e21 and e50 and e200 and atr_val and macd_val is not None):
         return None
@@ -194,11 +228,9 @@ def analyze_tf(sym, tf='4h', btc_trend='NEUTRAL'):
     trend_icon = "🟢" if e9 > e21 else "🔴"
     base_info = {'sym': sym, 'tf': tf.upper(), 'price': curr_price, 'rsi': round(rsi_val, 1), 'icon': trend_icon}
 
-    # محاسبه امتیاز خرید و فروش
-    score_buy = 0
-    score_sell = 0
+    score_buy, score_sell = 0, 0
 
-    # 1. میانگین‌های متحرک
+    # ۱. فیلتر روند و میانگین‌ها
     if e9 > e21: score_buy += 3
     if e21 > e50: score_buy += 2
     if e9 < e21: score_sell += 3
@@ -207,11 +239,11 @@ def analyze_tf(sym, tf='4h', btc_trend='NEUTRAL'):
     if curr_price > e200: score_buy += 2
     else: score_sell += 2
 
-    # 2. شاخص RSI
-    if 42 < rsi_val < 68: score_buy += 3
-    if 32 < rsi_val < 58: score_sell += 3
+    # ۲. فیلتر RSI
+    if 40 < rsi_val < 65: score_buy += 2
+    if 35 < rsi_val < 60: score_sell += 2
 
-    # 3. اندیکاتور MACD
+    # ۳. فیلتر مکدی
     macd_status = "خنثی"
     if hist_val > 0:
         score_buy += 2
@@ -220,15 +252,21 @@ def analyze_tf(sym, tf='4h', btc_trend='NEUTRAL'):
         score_sell += 2
         macd_status = "نزولی 🔴"
 
-    # 4. حجم معاملات
+    # ۴. فیلتر حجم هوشمند
     avg_vol = sum(v[-21:-1]) / 20 if len(v) >= 21 else sum(v) / len(v)
-    is_green_candle = p[-1] > o[-1]
-    if v[-1] > (1.25 * avg_vol):
-        if is_green_candle: score_buy += 2
+    vol_ratio = round(v[-1] / avg_vol, 2) if avg_vol > 0 else 1.0
+    if vol_ratio >= 1.5:
+        if p[-1] > o[-1]: score_buy += 2
         else: score_sell += 2
 
-    # 🎯 شرط جدید: فقط امتیاز ۱۰ به بالا پذیرفته می‌شود
-    min_score = 10
+    # ۵. فیلتر پرایس اکشن و واگرایی
+    if "صعودی" in pa_status: score_buy += 2
+    if "نزولی" in pa_status: score_sell += 2
+
+    if "صعودی" in div_status: score_buy += 2
+    if "نزولی" in div_status: score_sell += 2
+
+    min_score = 11  # ارتقای آستانه به ۱۱ برای فیلتر ده‌ها سیگنال کاذب
 
     direction = None
     if score_buy >= min_score and score_buy > score_sell and btc_trend != 'BEARISH':
@@ -244,28 +282,31 @@ def analyze_tf(sym, tf='4h', btc_trend='NEUTRAL'):
     recent_high = max(h[-5:])
     recent_low = min(l[-5:])
 
+    # محاسبه مدیریت ریسک حرفه‌ای بر اساس ATR
     if direction == 'buy':
-        sl = min(curr_price - (1.2 * atr_val), recent_low)
+        sl = min(curr_price - (1.5 * atr_val), recent_low)
         tp1 = curr_price + (1.5 * abs(curr_price - sl))
-        tp2 = curr_price + (2.8 * abs(curr_price - sl))
+        tp2 = curr_price + (3.0 * abs(curr_price - sl))
         sig_text = "خرید (LONG)"
     else:
-        sl = max(curr_price + (1.2 * atr_val), recent_high)
+        sl = max(curr_price + (1.5 * atr_val), recent_high)
         tp1 = curr_price - (1.5 * abs(sl - curr_price))
-        tp2 = curr_price - (2.8 * abs(sl - curr_price))
+        tp2 = curr_price - (3.0 * abs(sl - curr_price))
         sig_text = "فروش (SHORT)"
 
     risk = abs(curr_price - sl)
     reward = abs(tp2 - curr_price)
     rr_ratio = round(reward / risk, 2) if risk > 0 else 2.5
 
-    account_size = 1000.0
-    risk_amount = account_size * 0.01
+    account_size = 1000.0  # فرض سرمایه ۱۰۰۰ دلاری
+    risk_amount = account_size * 0.01  # مدیریت ریسک ۱ درصدی
     stop_pct = risk / curr_price
     position_value = risk_amount / stop_pct if stop_pct > 0 else account_size
     
     max_lev = 10
     leverage = max(1, min(max_lev, int(position_value / account_size)))
+
+    now_ir = datetime.now(IRAN_TZ).strftime('%H:%M')
 
     return {
         'is_signal': True,
@@ -277,6 +318,9 @@ def analyze_tf(sym, tf='4h', btc_trend='NEUTRAL'):
         'score': final_score,
         'rsi': round(rsi_val, 1),
         'macd_status': macd_status,
+        'pa_status': pa_status,
+        'div_status': div_status,
+        'vol_ratio': vol_ratio,
         'atr': fp(atr_val),
         'sl': sl, 
         'tp1': tp1, 
@@ -284,7 +328,7 @@ def analyze_tf(sym, tf='4h', btc_trend='NEUTRAL'):
         'rr': rr_ratio,
         'pos_size': round(position_value, 1),
         'leverage': leverage,
-        'time': datetime.now().strftime('%H:%M'),
+        'time': now_ir,
         'icon': trend_icon
     }
 
@@ -314,30 +358,34 @@ def fp(n):
 
 def fmt(a):
     tv_link = f"https://www.tradingview.com/chart/?symbol=BINANCE:{a['sym']}USDT"
-    tf_tag = "🌊 [تایم‌فریم ۴ ساعته - سیگنال فیلترشده]"
+    tf_tag = "🚀 [سیگنال حرفه‌ای و فیلترشده Pro]"
     
     badge = ""
-    if a['score'] >= 12:
-        badge = "\n🔥 <b>پتانسیل بسیار بالا (امتیاز بالای ۱۲)</b>"
+    if a['score'] >= 13:
+        badge = "\n🔥 <b>سیگنال VIP (امتیاز بالای ۱۳ - فوق‌العاده قوی)</b>"
 
     return (
         f"{a['icon']} <b>#سیگنال_{a['tf']}_{a['sym']} | USDT</b>\n"
         f"<i>{tf_tag}</i>{badge}\n\n"
         f"🎯 جهت معامله: <b>{a['sig']}</b>\n"
-        f"📊 قدرت سیگنال: <b>{a['score']} / 15</b>\n"
+        f"📊 قدرت کل سیگنال: <b>{a['score']} / 18</b>\n"
         f"💰 قیمت ورود: <b>{fp(a['price'])} $</b>\n"
         f"⚖️ نسبت R/R: <b>1:{a['rr']}</b>\n"
-        f"📐 اهرم پیشنهادی: <b>{a['leverage']}x</b> | حجم: <b>{a['pos_size']} $</b>\n\n"
-        f"🛑 حد زیان: <b>{fp(a['sl'])} $</b>\n"
-        f"🎯 حد سود اول (سیو سود): <b>{fp(a['tp1'])} $</b>\n"
-        f"🚀 حد سود دوم (اصلی): <b>{fp(a['tp2'])} $</b>\n\n"
-        f"📈 وضعیت RSI: <b>{a['rsi']}</b> | MACD: <b>{a['macd_status']}</b>\n"
-        f"🔗 <a href='{tv_link}'>مشاهده نمودار در TradingView</a>\n"
-        f"📅 زمان ثبت: {a['time']}"
+        f"📐 اهرم پیشنهادی: <b>{a['leverage']}x</b> | حجم پوزیشن: <b>{a['pos_size']} $</b>\n\n"
+        f"🛑 حد زیان (SL): <b>{fp(a['sl'])} $</b>\n"
+        f"🎯 حد سود اول (TP1): <b>{fp(a['tp1'])} $</b>\n"
+        f"🚀 حد سود دوم (TP2): <b>{fp(a['tp2'])} $</b>\n\n"
+        f"🔍 <b>تاییدکننده‌های حرفه‌ای:</b>\n"
+        f"• پرایس اکشن: <b>{a['pa_status']}</b>\n"
+        f"• واگرایی: <b>{a['div_status']}</b>\n"
+        f"• حجم معاملات: <b>{a['vol_ratio']}x نسبت به میانگین</b>\n"
+        f"• شاخص RSI: <b>{a['rsi']}</b> | مکدی: <b>{a['macd_status']}</b>\n\n"
+        f"🔗 <a href='{tv_link}'>مشاهده نمودار زنده در TradingView</a>\n"
+        f"📅 زمان ثبت (ایران): {a['time']}"
     )
 
 if __name__ == "__main__":
-    print("شروع اسکن ۴ ساعته فیلترشده (امتیاز >= ۱۰)...")
+    print("شروع اسکن حرفه‌ای و الگوریتمیک کریپتو...")
     state = load_state()
     btc_trend = get_btc_macro_trend()
     
@@ -359,16 +407,16 @@ if __name__ == "__main__":
         for sig in signals:
             send(fmt(sig))
             time.sleep(0.3)
-        print(f"تعداد {len(signals)} سیگنال با کیفیت بالای ۱۰ ارسال شد.")
+        print(f"تعداد {len(signals)} سیگنال با کیفیت بالای ۱۱ ارسال شد.")
     else:
-        now = datetime.now().strftime('%H:%M')
+        now_ir = datetime.now(IRAN_TZ).strftime('%H:%M')
         btc_icon = "🟢 صعودی" if btc_trend == 'BULLISH' else ("🔴 نزولی" if btc_trend == 'BEARISH' else "⚪️ خنثی")
-        msg = f"📊 <b>گزارش اسکن بازار کریپتو ({now})</b>\n\n"
-        msg += f"🌐 روند کلان بیت‌کوین (1D): <b>{btc_icon}</b>\n"
-        msg += "• وضعیت: <i>ارزی با امتیاز کیفیت بالای ۱۰ یافت نشد.</i>\n\n"
-        msg += "🔍 اسکن بعدی سر ساعت انجام می‌شود."
+        msg = f"📊 <b>گزارش اسکن الگوریتمیک کریپتو ({now_ir} به وقت ایران)</b>\n\n"
+        msg += f"🌐 روند جهت‌دهنده بیت‌کوین (روزانه): <b>{btc_icon}</b>\n"
+        msg += "• وضعیت بازار: <i>هیچ ارزی کلیه فیلترهای سخت‌گیرانه (حجم، پرایس اکشن، RSI و R/R) را احراز نکرد.</i>\n\n"
+        msg += "🔍 اسکن بعدی سر ساعت بعدی انجام خواهد شد."
         send(msg)
-        print("سیگنال قوی یافت نشد. گزارش خلاصه ارسال گردید.")
+        print("سیگنال قوی یافت نشد. گزارش ارسال گردید.")
 
     print("پایان اسکن.")
-           
+        
