@@ -72,23 +72,26 @@ def send_telegram(message):
 
 
 # =========================================================
-# 3. NOBITEX COINS & BINANCE SYMBOLS
+# 3. NOBITEX COINS & BINANCE SYMBOLS (EXPANDED LIST)
 # =========================================================
 
 def get_nobitex_coins():
-    """دریافت خودکار لیست ارزهای فعال نوبیتکس"""
+    """دریافت لیست جامع ارزهای فعال نوبیتکس با پشتیبانی کامل از لیست پیش‌فرض گسترش‌یافته"""
     url = "https://api.nobitex.ir/v2/market/stats"
     data = http_get(url)
     
-    # لیست رزرو در صورت عدم پاسخ‌گویی API نوبیتکس
+    # لیست پیش‌فرض گسترش‌یافته به ۶۰ ارز اصلی نوبیتکس
     default_coins = [
-        "BTC", "ETH", "SOL", "BNB", "XRP", "TON", "ADA", "DOGE", "AVAX", 
-        "LINK", "DOT", "LTC", "BCH", "ETC", "XLM", "UNI", "FIL", "TRX", 
-        "ATOM", "NEAR", "AAVE", "SUI", "APT", "ARB", "OP", "SEI", "INJ"
+        "BTC", "ETH", "SOL", "BNB", "XRP", "TON", "ADA", "DOGE", "AVAX", "LINK",
+        "DOT", "LTC", "BCH", "ETC", "XLM", "UNI", "FIL", "TRX", "ATOM", "NEAR",
+        "AAVE", "SUI", "APT", "ARB", "OP", "SEI", "INJ", "TIA", "STX", "ALGO",
+        "EGLD", "ROSE", "MINA", "IMX", "MNT", "RON", "CELO", "FLOW", "TAO", "AKT",
+        "PEPE", "WIF", "BONK", "FLOKI", "SHIB", "MEME", "NOT", "ORDI", "BOME", "RUNE",
+        "ICP", "JUP", "POL", "ASI", "KSM", "SAND", "MANA", "CRV", "LDO", "FET"
     ]
     
     if not data or "stats" not in data:
-        print("[WARNING] امکان دریافت لیست لحظه‌ای نوبیتکس نبود. استفاده از لیست پیش‌فرض.")
+        print(f"[WARNING] عدم اتصال به API نوبیتکس. استفاده از لیست پیش‌فرض گسترش‌یافته ({len(default_coins)} ارز).")
         return default_coins
 
     coins = set()
@@ -96,9 +99,15 @@ def get_nobitex_coins():
         if market.endswith("-usdt") or market.endswith("-rls"):
             coins.add(market.split("-")[0].upper())
 
-    # نگاشت تغییر نام برندهای کریپتویی در بایننس
+    # نگاشت تغییر نام برندها در بایننس
     mapping = {"MATIC": "POL", "FET": "ASI"}
-    return [mapping.get(c, c) for c in coins]
+    updated_coins = [mapping.get(c, c) for c in coins]
+
+    # در صورت کوچک بودن لیست دریافتی، از لیست کامل استفاده کن
+    if len(updated_coins) < 20:
+        return default_coins
+
+    return list(set(updated_coins))
 
 
 def get_scan_coins():
@@ -383,4 +392,4 @@ def run_scan():
 
 if __name__ == "__main__":
     run_scan()
-    
+        
