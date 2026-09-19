@@ -26,5 +26,41 @@
   "AAVE": {
     "dir": "buy",
     "time": "02:02"
+  },
+  "ADA": {
+    "dir": "buy",
+    "time": "08:00"
+  },
+  "AVAX": {
+    "dir": "buy",
+    "time": "08:00"
+  },
+  "ATOM": {
+    "dir": "buy",
+    "time": "08:00"
+  },
+  "ARB": {
+    "dir": "buy",
+    "time": "08:00"
+  },
+  "ALGO": {
+    "dir": "buy",
+    "time": "08:01"
+  },
+  "EGLD": {
+    "dir": "buy",
+    "time": "08:01"
+  },
+  "FET": {
+    "dir": "buy",
+    "time": "08:01"
+  },
+  "PEPE": {
+    "dir": "buy",
+    "time": "08:01"
+  },
+  "WIF": {
+    "dir": "buy",
+    "time": "08:01"
   }
 }
