@@ -203,7 +203,7 @@ def add_indicators(df):
 
 
 # =========================================================
-# 5. STRATEGY ANALYSIS
+# 5. STRATEGY ANALYSIS WITH ADVANCED FILTERS
 # =========================================================
 
 def analyze_coin(df, symbol):
@@ -274,7 +274,39 @@ def analyze_coin(df, symbol):
             sell_score += 20
             reasons_sell.append(f"افزایش حجم نزولی ({volume_ratio:.2f}x)")
 
-    # --- Final Decision ---
+    # =========================================================
+    # ADVANCED CANDLE & OVEREXTENSION FILTERS
+    # =========================================================
+
+    bullish_candle = last["close"] > last["open"]
+    bearish_candle = last["close"] < last["open"]
+
+    # ۱. فیلتر هم‌جهتی رنگ کندل با سیگنال
+    if not bullish_candle:
+        buy_score -= 15  # کسر امتیاز در صورت قرمز بودن کندل پایانی در خرید
+    if not bearish_candle:
+        sell_score -= 15 # کسر امتیاز در صورت سبز بودن کندل پایانی در فروش
+
+    # ۲. فیلتر نسبت بدنه کندل به کل رنج (جلوگیری از ورود روی کندل‌های بلاتکلیف)
+    candle_range = last["high"] - last["low"]
+    candle_body = abs(last["close"] - last["open"])
+
+    if candle_range > 0 and (candle_body / candle_range) < 0.35:
+        buy_score -= 10
+        sell_score -= 10
+
+    # ۳. فیلتر فاصله بیش از حد قیمت از EMA200 (Overextended Risk)
+    ema200_dist = abs(price - last["ema200"])
+    if ema200_dist > (atr * 3.5):
+        if price > last["ema200"]:
+            buy_score -= 15
+        else:
+            sell_score -= 15
+
+    # =========================================================
+    # FINAL DECISION & TARGET CALCULATION
+    # =========================================================
+
     direction, score, reasons = None, 0, []
     
     if buy_score >= MIN_SCORE and buy_score > sell_score:
