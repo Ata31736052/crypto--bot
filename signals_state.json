@@ -62,5 +62,209 @@
   "WIF": {
     "dir": "buy",
     "time": "08:01"
+  },
+  "BTC_4h": {
+    "dir": "buy",
+    "time": "11:46"
+  },
+  "ETH_4h": {
+    "dir": "buy",
+    "time": "11:46"
+  },
+  "SOL_4h": {
+    "dir": "buy",
+    "time": "11:46"
+  },
+  "BNB_4h": {
+    "dir": "buy",
+    "time": "11:46"
+  },
+  "XRP_4h": {
+    "dir": "buy",
+    "time": "11:46"
+  },
+  "ADA_4h": {
+    "dir": "buy",
+    "time": "11:46"
+  },
+  "DOGE_4h": {
+    "dir": "buy",
+    "time": "11:46"
+  },
+  "AVAX_4h": {
+    "dir": "buy",
+    "time": "11:46"
+  },
+  "LINK_4h": {
+    "dir": "buy",
+    "time": "11:47"
+  },
+  "DOT_4h": {
+    "dir": "buy",
+    "time": "11:47"
+  },
+  "LTC_4h": {
+    "dir": "buy",
+    "time": "11:47"
+  },
+  "BCH_4h": {
+    "dir": "buy",
+    "time": "11:47"
+  },
+  "ETC_4h": {
+    "dir": "buy",
+    "time": "11:47"
+  },
+  "XLM_4h": {
+    "dir": "buy",
+    "time": "11:47"
+  },
+  "UNI_4h": {
+    "dir": "buy",
+    "time": "11:47"
+  },
+  "FIL_4h": {
+    "dir": "buy",
+    "time": "11:47"
+  },
+  "TRX_4h": {
+    "dir": "buy",
+    "time": "11:47"
+  },
+  "ATOM_4h": {
+    "dir": "buy",
+    "time": "11:47"
+  },
+  "NEAR_4h": {
+    "dir": "buy",
+    "time": "11:47"
+  },
+  "AAVE_4h": {
+    "dir": "buy",
+    "time": "11:47"
+  },
+  "SUI_4h": {
+    "dir": "buy",
+    "time": "11:47"
+  },
+  "APT_4h": {
+    "dir": "buy",
+    "time": "11:47"
+  },
+  "ARB_4h": {
+    "dir": "buy",
+    "time": "11:47"
+  },
+  "OP_4h": {
+    "dir": "buy",
+    "time": "11:47"
+  },
+  "SEI_4h": {
+    "dir": "buy",
+    "time": "11:47"
+  },
+  "INJ_4h": {
+    "dir": "buy",
+    "time": "11:47"
+  },
+  "TIA_4h": {
+    "dir": "buy",
+    "time": "11:47"
+  },
+  "STX_4h": {
+    "dir": "buy",
+    "time": "11:47"
+  },
+  "FTM_4h": {
+    "dir": "buy",
+    "time": "11:47"
+  },
+  "ALGO_4h": {
+    "dir": "buy",
+    "time": "11:47"
+  },
+  "EGLD_4h": {
+    "dir": "buy",
+    "time": "11:47"
+  },
+  "ROSE_4h": {
+    "dir": "buy",
+    "time": "11:47"
+  },
+  "MINA_4h": {
+    "dir": "buy",
+    "time": "11:47"
+  },
+  "IMX_4h": {
+    "dir": "buy",
+    "time": "11:47"
+  },
+  "CELO_4h": {
+    "dir": "buy",
+    "time": "11:47"
+  },
+  "FLOW_4h": {
+    "dir": "buy",
+    "time": "11:47"
+  },
+  "FET_4h": {
+    "dir": "buy",
+    "time": "11:47"
+  },
+  "RNDR_4h": {
+    "dir": "buy",
+    "time": "11:47"
+  },
+  "TAO_4h": {
+    "dir": "buy",
+    "time": "11:48"
+  },
+  "PEPE_4h": {
+    "dir": "buy",
+    "time": "11:48"
+  },
+  "WIF_4h": {
+    "dir": "buy",
+    "time": "11:48"
+  },
+  "BONK_4h": {
+    "dir": "buy",
+    "time": "11:48"
+  },
+  "FLOKI_4h": {
+    "dir": "buy",
+    "time": "11:48"
+  },
+  "SHIB_4h": {
+    "dir": "buy",
+    "time": "11:48"
+  },
+  "MEME_4h": {
+    "dir": "buy",
+    "time": "11:48"
+  },
+  "NOT_4h": {
+    "dir": "buy",
+    "time": "11:48"
+  },
+  "ORDI_4h": {
+    "dir": "buy",
+    "time": "11:48"
+  },
+  "BOME_4h": {
+    "dir": "buy",
+    "time": "11:48"
+  },
+  "RUNE_4h": {
+    "dir": "buy",
+    "time": "11:48"
+  },
+  "ICP_4h": {
+    "dir": "buy",
+    "time": "11:48"
+  },
+  "JUP_4h": {
+    "dir": "buy",
+    "time": "11:48"
   }
 }
