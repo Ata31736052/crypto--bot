@@ -22,7 +22,6 @@ KLINE_LIMIT = 250
 MIN_SCORE = 70
 MIN_VOLUME_RATIO = 1.20
 
-# فقط برای محاسبه ریسک، معامله خودکار انجام نمی‌شود
 ACCOUNT_SIZE_USDT = 1000.0
 RISK_PER_TRADE = 0.01
 MAX_POSITION_USDT = 1000.0
@@ -33,75 +32,25 @@ SL_ATR_MULTIPLIER = 1.30
 TP1_RR = 1.50
 TP2_RR = 2.80
 
-SEND_NO_SIGNAL_REPORT = False
-
 IRAN_TZ = timezone(
     timedelta(hours=3, minutes=30)
 )
 
 CTX = ssl.create_default_context()
 
+NOBITEX_STATS_URL = (
+    "https://api.nobitex.ir/market/stats"
+)
 
-# ============================================================
-# COINS
-# ============================================================
+BINANCE_EXCHANGE_URL = (
+    "https://data-api.binance.vision"
+    "/api/v3/exchangeInfo"
+)
 
-REQUESTED_COINS = [
-    "BTC",
-    "ETH",
-    "SOL",
-    "BNB",
-    "XRP",
-    "TON",
-    "ADA",
-    "DOGE",
-    "AVAX",
-    "LINK",
-    "DOT",
-    "LTC",
-    "BCH",
-    "ETC",
-    "XLM",
-    "UNI",
-    "FIL",
-    "TRX",
-    "ATOM",
-    "NEAR",
-    "AAVE",
-    "SUI",
-    "APT",
-    "ARB",
-    "OP",
-    "SEI",
-    "INJ",
-    "TIA",
-    "STX",
-    "ALGO",
-    "EGLD",
-    "ROSE",
-    "MINA",
-    "IMX",
-    "MNT",
-    "RON",
-    "CELO",
-    "FLOW",
-    "FET",
-    "TAO",
-    "AKT",
-    "PEPE",
-    "WIF",
-    "BONK",
-    "FLOKI",
-    "SHIB",
-    "MEME",
-    "NOT",
-    "ORDI",
-    "BOME",
-    "RUNE",
-    "ICP",
-    "KAS",
-    "JUP",
-]
+BINANCE_KLINES_URL = (
+    "https://data-api.binance.vision"
+    "/api/v3/klines"
+)
 
 
 # ============================================================
@@ -118,7 +67,7 @@ def http_get(url, timeout=20, retries=3):
                 url,
                 headers={
                     "User-Agent":
-                    "Mozilla/5.0 CryptoSignalBot/2.0"
+                    "Mozilla/5.0 CryptoSignalBot/3.0"
                 }
             )
 
@@ -129,9 +78,7 @@ def http_get(url, timeout=20, retries=3):
             ) as response:
 
                 return json.loads(
-                    response.read().decode(
-                        "utf-8"
-                    )
+                    response.read().decode("utf-8")
                 )
 
         except Exception as error:
@@ -149,19 +96,94 @@ def http_get(url, timeout=20, retries=3):
 
 
 # ============================================================
+# NOBITEX COINS
+# ============================================================
+
+def get_nobitex_usdt_coins():
+
+    print("Getting active USDT markets from Nobitex...")
+
+    data = http_get(
+        NOBITEX_STATS_URL
+    )
+
+    if not isinstance(data, dict):
+        print("Nobitex response invalid.")
+        return []
+
+    stats = data.get("stats")
+
+    if not isinstance(stats, dict):
+        print("Nobitex stats not found.")
+        return []
+
+    coins = []
+
+    for market, info in stats.items():
+
+        try:
+
+            market = market.lower()
+
+            # فقط بازارهای USDT
+            if not market.endswith("-usdt"):
+                continue
+
+            parts = market.split("-")
+
+            if len(parts) != 2:
+                continue
+
+            coin = parts[0].upper()
+
+            if coin == "USDT":
+                continue
+
+            if isinstance(info, dict):
+
+                # بازار بسته نباشد
+                if info.get(
+                    "isClosed",
+                    False
+                ):
+                    continue
+
+            coins.append(coin)
+
+        except Exception:
+
+            continue
+
+    coins = sorted(
+        list(set(coins))
+    )
+
+    print(
+        f"Nobitex active USDT coins: "
+        f"{len(coins)}"
+    )
+
+    print(
+        ", ".join(coins)
+    )
+
+    return coins
+
+
+# ============================================================
 # BINANCE SYMBOLS
 # ============================================================
 
-def get_available_usdt_symbols():
+def get_binance_usdt_symbols():
 
-    url = (
-        "https://data-api.binance.vision"
-        "/api/v3/exchangeInfo"
+    print("Getting Binance symbols...")
+
+    data = http_get(
+        BINANCE_EXCHANGE_URL
     )
 
-    data = http_get(url)
-
     if not isinstance(data, dict):
+        print("Binance exchangeInfo invalid.")
         return set()
 
     result = set()
@@ -179,18 +201,17 @@ def get_available_usdt_symbols():
                 and
                 item.get("status")
                 == "TRADING"
-                and
-                item.get(
-                    "isSpotTradingAllowed",
-                    True
-                )
             ):
 
                 base = item.get(
                     "baseAsset"
                 )
 
-                if base:
+                symbol = item.get(
+                    "symbol"
+                )
+
+                if base and symbol:
                     result.add(
                         base.upper()
                     )
@@ -199,7 +220,56 @@ def get_available_usdt_symbols():
 
             continue
 
+    print(
+        f"Binance USDT symbols: "
+        f"{len(result)}"
+    )
+
     return result
+
+
+# ============================================================
+# FINAL COIN LIST
+# ============================================================
+
+def get_scan_coins():
+
+    nobitex_coins = (
+        get_nobitex_usdt_coins()
+    )
+
+    if not nobitex_coins:
+        print(
+            "ERROR: No Nobitex coins found."
+        )
+        return []
+
+    binance_coins = (
+        get_binance_usdt_symbols()
+    )
+
+    if not binance_coins:
+        print(
+            "ERROR: No Binance symbols found."
+        )
+        return []
+
+    coins = sorted(
+        set(nobitex_coins)
+        &
+        binance_coins
+    )
+
+    print(
+        f"Final scan list: "
+        f"{len(coins)} coins"
+    )
+
+    print(
+        ", ".join(coins)
+    )
+
+    return coins
 
 
 # ============================================================
@@ -217,16 +287,16 @@ def get_klines(
         "USDT"
     )
 
-    encoded_symbol = urllib.parse.quote(
-        symbol_name
-    )
+    params = urllib.parse.urlencode({
+        "symbol": symbol_name,
+        "interval": interval,
+        "limit": limit
+    })
 
     url = (
-        "https://data-api.binance.vision"
-        "/api/v3/klines"
-        f"?symbol={encoded_symbol}"
-        f"&interval={interval}"
-        f"&limit={limit}"
+        BINANCE_KLINES_URL
+        + "?"
+        + params
     )
 
     data = http_get(url)
@@ -237,18 +307,12 @@ def get_klines(
     if len(data) < 50:
         return None
 
-    # اگر آخرین کندل هنوز بسته نشده باشد حذف می‌شود
     now_ms = int(
         time.time() * 1000
     )
 
-    if (
-        data
-        and
-        isinstance(data[-1], list)
-        and
-        len(data[-1]) > 6
-    ):
+    # حذف کندل در حال تشکیل
+    if data:
 
         try:
 
@@ -260,7 +324,6 @@ def get_klines(
                 data = data[:-1]
 
         except Exception:
-
             pass
 
     candles = []
@@ -269,37 +332,17 @@ def get_klines(
 
         try:
 
-            candles.append(
-                {
-                    "open_time":
-                        int(candle[0]),
+            candles.append({
+                "open_time": int(candle[0]),
+                "open": float(candle[1]),
+                "high": float(candle[2]),
+                "low": float(candle[3]),
+                "close": float(candle[4]),
+                "volume": float(candle[5]),
+                "close_time": int(candle[6])
+            })
 
-                    "open":
-                        float(candle[1]),
-
-                    "high":
-                        float(candle[2]),
-
-                    "low":
-                        float(candle[3]),
-
-                    "close":
-                        float(candle[4]),
-
-                    "volume":
-                        float(candle[5]),
-
-                    "close_time":
-                        int(candle[6]),
-                }
-            )
-
-        except (
-            TypeError,
-            ValueError,
-            IndexError
-        ):
-
+        except Exception:
             continue
 
     if len(candles) < 50:
@@ -312,22 +355,18 @@ def get_klines(
 # EMA
 # ============================================================
 
-def ema_series(
-    values,
-    period
-):
+def ema_series(values, period):
 
     if len(values) < period:
         return []
 
     multiplier = (
-        2.0 /
-        (period + 1.0)
+        2.0 / (period + 1.0)
     )
 
     first_value = (
-        sum(values[:period]) /
-        period
+        sum(values[:period])
+        / period
     )
 
     result = [
@@ -342,17 +381,12 @@ def ema_series(
             + result[-1]
         )
 
-        result.append(
-            current
-        )
+        result.append(current)
 
     return result
 
 
-def ema(
-    values,
-    period
-):
+def ema(values, period):
 
     result = ema_series(
         values,
@@ -369,10 +403,7 @@ def ema(
 # RSI
 # ============================================================
 
-def rsi_series(
-    values,
-    period=14
-):
+def rsi_series(values, period=14):
 
     if len(values) <= period:
         return []
@@ -380,14 +411,11 @@ def rsi_series(
     gains = []
     losses = []
 
-    for i in range(
-        1,
-        len(values)
-    ):
+    for i in range(1, len(values)):
 
         change = (
-            values[i] -
-            values[i - 1]
+            values[i]
+            - values[i - 1]
         )
 
         gains.append(
@@ -399,19 +427,16 @@ def rsi_series(
         )
 
     avg_gain = (
-        sum(gains[:period]) /
-        period
+        sum(gains[:period])
+        / period
     )
 
     avg_loss = (
-        sum(losses[:period]) /
-        period
+        sum(losses[:period])
+        / period
     )
 
-    def calculate_rsi(
-        gain,
-        loss
-    ):
+    def calc(gain, loss):
 
         if loss == 0:
             return 100.0
@@ -419,13 +444,12 @@ def rsi_series(
         rs = gain / loss
 
         return (
-            100.0 -
-            100.0 /
-            (1.0 + rs)
+            100.0
+            - 100.0 / (1.0 + rs)
         )
 
     result = [
-        calculate_rsi(
+        calc(
             avg_gain,
             avg_loss
         )
@@ -438,22 +462,22 @@ def rsi_series(
 
         avg_gain = (
             (
-                avg_gain *
-                (period - 1)
+                avg_gain
+                * (period - 1)
             )
             + gains[i]
         ) / period
 
         avg_loss = (
             (
-                avg_loss *
-                (period - 1)
+                avg_loss
+                * (period - 1)
             )
             + losses[i]
         ) / period
 
         result.append(
-            calculate_rsi(
+            calc(
                 avg_gain,
                 avg_loss
             )
@@ -486,27 +510,22 @@ def macd(
         slow
     )
 
-    if not fast_values:
+    if not fast_values or not slow_values:
         return None
 
-    if not slow_values:
-        return None
-
-    # هم‌تراز کردن EMA سریع و کند
     fast_values = fast_values[
         slow - fast:
     ]
 
     macd_line = []
 
-    for fast_value, slow_value in zip(
+    for f, s in zip(
         fast_values,
         slow_values
     ):
 
         macd_line.append(
-            fast_value -
-            slow_value
+            f - s
         )
 
     signal_line = ema_series(
@@ -521,9 +540,6 @@ def macd(
         -len(signal_line):
     ]
 
-    if len(aligned_macd) < 2:
-        return None
-
     return {
         "macd":
             aligned_macd[-1],
@@ -535,7 +551,7 @@ def macd(
             aligned_macd[-2],
 
         "prev_signal":
-            signal_line[-2],
+            signal_line[-2]
     }
 
 
@@ -568,13 +584,13 @@ def atr(
             highs[i] - lows[i],
 
             abs(
-                highs[i] -
-                previous_close
+                highs[i]
+                - previous_close
             ),
 
             abs(
-                lows[i] -
-                previous_close
+                lows[i]
+                - previous_close
             )
         )
 
@@ -589,8 +605,7 @@ def atr(
         sum(
             true_ranges[-period:]
         )
-        /
-        period
+        / period
     )
 
 
@@ -613,33 +628,29 @@ def price_action(
     l = lows[-1]
     c = closes[-1]
 
-    previous_o = opens[-2]
-    previous_c = closes[-2]
+    po = opens[-2]
+    pc = closes[-2]
 
     candle_range = h - l
 
     if candle_range <= 0:
         return "NEUTRAL"
 
-    body = abs(
-        c - o
-    )
+    body = abs(c - o)
 
     upper_wick = (
-        h -
-        max(o, c)
+        h - max(o, c)
     )
 
     lower_wick = (
-        min(o, c) -
-        l
+        min(o, c) - l
     )
 
     if (
         lower_wick > body * 2
         and
-        lower_wick >
-        candle_range * 0.50
+        lower_wick
+        > candle_range * 0.50
     ):
 
         return "BULLISH_PINBAR"
@@ -647,32 +658,26 @@ def price_action(
     if (
         upper_wick > body * 2
         and
-        upper_wick >
-        candle_range * 0.50
+        upper_wick
+        > candle_range * 0.50
     ):
 
         return "BEARISH_PINBAR"
 
     if (
-        previous_c < previous_o
-        and
-        c > o
-        and
-        c >= previous_o
-        and
-        o <= previous_c
+        pc < po
+        and c > o
+        and c >= po
+        and o <= pc
     ):
 
         return "BULLISH_ENGULFING"
 
     if (
-        previous_c > previous_o
-        and
-        c < o
-        and
-        c <= previous_o
-        and
-        o >= previous_c
+        pc > po
+        and c < o
+        and c <= po
+        and o >= pc
     ):
 
         return "BEARISH_ENGULFING"
@@ -719,24 +724,20 @@ def rsi_divergence(
 
     if (
         min(new_price)
-        <
-        min(old_price)
+        < min(old_price)
         and
         min(new_rsi)
-        >
-        min(old_rsi)
+        > min(old_rsi)
     ):
 
         return "BULLISH_DIVERGENCE"
 
     if (
         max(new_price)
-        >
-        max(old_price)
+        > max(old_price)
         and
         max(new_rsi)
-        <
-        max(old_rsi)
+        < max(old_rsi)
     ):
 
         return "BEARISH_DIVERGENCE"
@@ -745,7 +746,7 @@ def rsi_divergence(
 
 
 # ============================================================
-# BTC DAILY TREND
+# BTC TREND
 # ============================================================
 
 def get_btc_macro_trend():
@@ -760,8 +761,8 @@ def get_btc_macro_trend():
         return "NEUTRAL"
 
     closes = [
-        candle["close"]
-        for candle in candles
+        x["close"]
+        for x in candles
     ]
 
     ema20 = ema(
@@ -807,10 +808,7 @@ def get_btc_macro_trend():
 # ANALYZE
 # ============================================================
 
-def analyze(
-    symbol,
-    btc_trend
-):
+def analyze(symbol, btc_trend):
 
     candles = get_klines(
         symbol,
@@ -819,9 +817,16 @@ def analyze(
     )
 
     if not candles:
+        print(
+            f"{symbol}: no candle data"
+        )
         return None
 
     if len(candles) < 210:
+        print(
+            f"{symbol}: not enough candles "
+            f"({len(candles)})"
+        )
         return None
 
     opens = [
@@ -851,25 +856,10 @@ def analyze(
 
     price = closes[-1]
 
-    ema9 = ema(
-        closes,
-        9
-    )
-
-    ema21 = ema(
-        closes,
-        21
-    )
-
-    ema50 = ema(
-        closes,
-        50
-    )
-
-    ema200 = ema(
-        closes,
-        200
-    )
+    ema9 = ema(closes, 9)
+    ema21 = ema(closes, 21)
+    ema50 = ema(closes, 50)
+    ema200 = ema(closes, 200)
 
     rsi_values = rsi_series(
         closes,
@@ -889,18 +879,12 @@ def analyze(
 
     if (
         ema9 is None
-        or
-        ema21 is None
-        or
-        ema50 is None
-        or
-        ema200 is None
-        or
-        atr_value is None
-        or
-        not rsi_values
-        or
-        not macd_data
+        or ema21 is None
+        or ema50 is None
+        or ema200 is None
+        or atr_value is None
+        or not rsi_values
+        or not macd_data
     ):
 
         return None
@@ -908,23 +892,16 @@ def analyze(
     rsi_now = rsi_values[-1]
 
     average_volume = (
-        sum(
-            volumes[-21:-1]
-        )
-        /
-        20
+        sum(volumes[-21:-1])
+        / 20
     )
 
-    if average_volume > 0:
-
-        volume_ratio = (
-            volumes[-1] /
-            average_volume
-        )
-
-    else:
-
-        volume_ratio = 1.0
+    volume_ratio = (
+        volumes[-1]
+        / average_volume
+        if average_volume > 0
+        else 1.0
+    )
 
     pa = price_action(
         opens,
@@ -938,24 +915,16 @@ def analyze(
         rsi_values
     )
 
-    # ========================================================
-    # SCORE
-    # ========================================================
-
     buy_score = 0
     sell_score = 0
 
     buy_reasons = []
     sell_reasons = []
 
-    # --------------------------------------------------------
-    # EMA 9 / 21
-    # --------------------------------------------------------
-
+    # EMA 9/21
     if ema9 > ema21:
 
         buy_score += 15
-
         buy_reasons.append(
             "EMA9 > EMA21"
         )
@@ -963,19 +932,14 @@ def analyze(
     elif ema9 < ema21:
 
         sell_score += 15
-
         sell_reasons.append(
             "EMA9 < EMA21"
         )
 
-    # --------------------------------------------------------
-    # EMA 21 / 50
-    # --------------------------------------------------------
-
+    # EMA 21/50
     if ema21 > ema50:
 
         buy_score += 10
-
         buy_reasons.append(
             "EMA21 > EMA50"
         )
@@ -983,19 +947,14 @@ def analyze(
     elif ema21 < ema50:
 
         sell_score += 10
-
         sell_reasons.append(
             "EMA21 < EMA50"
         )
 
-    # --------------------------------------------------------
-    # EMA 200
-    # --------------------------------------------------------
-
+    # EMA200
     if price > ema200:
 
         buy_score += 10
-
         buy_reasons.append(
             "قیمت بالای EMA200"
         )
@@ -1003,67 +962,54 @@ def analyze(
     elif price < ema200:
 
         sell_score += 10
-
         sell_reasons.append(
             "قیمت زیر EMA200"
         )
 
-    # --------------------------------------------------------
     # RSI
-    # --------------------------------------------------------
-
     if rsi_now < 30:
 
         buy_score += 15
-
         buy_reasons.append(
-            f"RSI اشباع فروش ({rsi_now:.1f})"
+            f"RSI اشباع فروش {rsi_now:.1f}"
         )
 
     elif rsi_now <= 38:
 
         buy_score += 15
-
         buy_reasons.append(
-            f"RSI ناحیه برگشت ({rsi_now:.1f})"
+            f"RSI برگشتی {rsi_now:.1f}"
         )
 
     elif rsi_now <= 55:
 
         buy_score += 7
-
         buy_reasons.append(
-            f"RSI متعادل ({rsi_now:.1f})"
+            f"RSI {rsi_now:.1f}"
         )
 
     if rsi_now > 70:
 
         sell_score += 15
-
         sell_reasons.append(
-            f"RSI اشباع خرید ({rsi_now:.1f})"
+            f"RSI اشباع خرید {rsi_now:.1f}"
         )
 
     elif rsi_now >= 62:
 
         sell_score += 15
-
         sell_reasons.append(
-            f"RSI ناحیه اصلاح ({rsi_now:.1f})"
+            f"RSI اصلاحی {rsi_now:.1f}"
         )
 
     elif rsi_now >= 55:
 
         sell_score += 7
-
         sell_reasons.append(
-            f"RSI متعادل ({rsi_now:.1f})"
+            f"RSI {rsi_now:.1f}"
         )
 
-    # --------------------------------------------------------
     # MACD
-    # --------------------------------------------------------
-
     macd_now = macd_data["macd"]
     signal_now = macd_data["signal"]
 
@@ -1090,7 +1036,6 @@ def analyze(
     if bullish_cross:
 
         buy_score += 20
-
         buy_reasons.append(
             "MACD Bullish Cross"
         )
@@ -1098,7 +1043,6 @@ def analyze(
     elif macd_now > signal_now:
 
         buy_score += 10
-
         buy_reasons.append(
             "MACD بالای Signal"
         )
@@ -1106,7 +1050,6 @@ def analyze(
     if bearish_cross:
 
         sell_score += 20
-
         sell_reasons.append(
             "MACD Bearish Cross"
         )
@@ -1114,47 +1057,35 @@ def analyze(
     elif macd_now < signal_now:
 
         sell_score += 10
-
         sell_reasons.append(
             "MACD زیر Signal"
         )
 
-    # --------------------------------------------------------
-    # VOLUME
-    # --------------------------------------------------------
-
+    # Volume
     if volume_ratio >= MIN_VOLUME_RATIO:
 
         if closes[-1] > opens[-1]:
 
             buy_score += 15
-
             buy_reasons.append(
-                f"حجم قوی {volume_ratio:.2f}x"
+                f"حجم {volume_ratio:.2f}x"
             )
 
         elif closes[-1] < opens[-1]:
 
             sell_score += 15
-
             sell_reasons.append(
-                f"حجم قوی {volume_ratio:.2f}x"
+                f"حجم {volume_ratio:.2f}x"
             )
 
-    # --------------------------------------------------------
-    # PRICE ACTION
-    # --------------------------------------------------------
-
+    # Price Action
     if pa in (
         "BULLISH_PINBAR",
         "BULLISH_ENGULFING"
     ):
 
         buy_score += 10
-
-        buy_reasons.append(
-            pa
-        )
+        buy_reasons.append(pa)
 
     elif pa in (
         "BEARISH_PINBAR",
@@ -1162,19 +1093,12 @@ def analyze(
     ):
 
         sell_score += 10
+        sell_reasons.append(pa)
 
-        sell_reasons.append(
-            pa
-        )
-
-    # --------------------------------------------------------
-    # DIVERGENCE
-    # --------------------------------------------------------
-
+    # Divergence
     if divergence == "BULLISH_DIVERGENCE":
 
         buy_score += 10
-
         buy_reasons.append(
             "Bullish RSI Divergence"
         )
@@ -1182,21 +1106,15 @@ def analyze(
     elif divergence == "BEARISH_DIVERGENCE":
 
         sell_score += 10
-
         sell_reasons.append(
             "Bearish RSI Divergence"
         )
 
-    # --------------------------------------------------------
-    # BTC FILTER
-    # --------------------------------------------------------
-
+    # BTC filter
     if btc_trend == "BEARISH":
-
         buy_score -= 15
 
     elif btc_trend == "BULLISH":
-
         sell_score -= 15
 
     buy_score = max(
@@ -1209,4 +1127,51 @@ def analyze(
         sell_score
     )
 
-    # =============================================
+    # Debug
+    print(
+        f"{symbol}: "
+        f"RSI={rsi_now:.1f} "
+        f"Volume={volume_ratio:.2f} "
+        f"BUY={buy_score} "
+        f"SELL={sell_score}"
+    )
+
+    # ========================================================
+    # SIGNAL
+    # ========================================================
+
+    if (
+        buy_score >= MIN_SCORE
+        and
+        buy_score > sell_score
+    ):
+
+        signal = "BUY"
+        score = buy_score
+        reasons = buy_reasons
+
+    elif (
+        sell_score >= MIN_SCORE
+        and
+        sell_score > buy_score
+    ):
+
+        signal = "SELL"
+        score = sell_score
+        reasons = sell_reasons
+
+    else:
+
+        return None
+
+    # ========================================================
+    # ENTRY / SL / TP
+    # ========================================================
+
+    entry = price
+
+    if signal == "BUY":
+
+        stop_loss = (
+            entry
+      
