@@ -2,34 +2,45 @@ name: Crypto Signal Bot
 
 on:
   schedule:
-    # اجرای اتوماتیک سر هر ساعت
-    - cron: '0 * * * *'
-  workflow_dispatch:
+    - cron: '0 * * * *'  # اجرای سر هر ساعت
+  workflow_dispatch:      # قابلیت اجرای دستی
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+    
+    # اعطای دسترسی نوشتن به Workflow
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
 
       - name: Run Bot Script
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python bot.py
-
-      - name: Commit and Push State Changes
         run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action Bot"
-          git add signals_state.json || true
-          git commit -m "Update signal state [skip ci]" || exit 0
-          git push
+          python bot.py
+
+      - name: Commit and Push State File
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git pull origin main --rebase || true
+          git add signals_state.json
+          git commit -m "update: auto update signals state [skip ci]" || exit 0
+          git push origin main
           
