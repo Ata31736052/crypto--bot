@@ -22,7 +22,7 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 TIMEFRAME = "4h"          # تایم‌فریم اصلی تحلیل
 KLINE_LIMIT = 300         # تعداد کندل‌ها برای محاسبات
 
-MIN_SCORE = 68            # امتیاز متوازن (نه خیلی سخت‌گیرانه، نه پرنویز)
+MIN_SCORE = 68            # امتیاز متوازن
 MIN_VOLUME_RATIO = 1.20   # حداقل ۲۰٪ افزایش حجم نسبت به میانگین
 
 ATR_PERIOD = 14
@@ -215,7 +215,6 @@ def analyze_coin(df, symbol):
     buy_score, sell_score = 0, 0
     reasons_buy, reasons_sell = [], []
 
-    # --- Multi-TF Trend Score ---
     daily_trend = check_daily_trend(symbol)
     if daily_trend == "BULLISH":
         buy_score += 12
@@ -224,7 +223,6 @@ def analyze_coin(df, symbol):
         sell_score += 12
         reasons_sell.append("روند روزانه نزولی")
 
-    # --- EMA Trend & Crossover ---
     if price > last["ema200"]:
         buy_score += 18
         reasons_buy.append("قیمت بالاتر از EMA200")
@@ -239,7 +237,6 @@ def analyze_coin(df, symbol):
         sell_score += 12
         reasons_sell.append("تقاطع نزولی EMA9 و EMA21")
 
-    # --- RSI Momentum ---
     if 45 <= rsi <= 70:
         buy_score += 15
         reasons_buy.append(f"مومنتوم مناسب RSI ({rsi:.1f})")
@@ -254,7 +251,6 @@ def analyze_coin(df, symbol):
         sell_score += 12
         reasons_sell.append(f"اشباع خرید RSI ({rsi:.1f})")
 
-    # --- MACD & OBV ---
     if prev["macd"] <= prev["macd_signal"] and last["macd"] > last["macd_signal"]:
         buy_score += 15
         reasons_buy.append("تقاطع صعودی MACD")
@@ -269,7 +265,6 @@ def analyze_coin(df, symbol):
         sell_score += 10
         reasons_sell.append("جریان پول منفی (OBV)")
 
-    # --- Volume Spike ---
     if volume_ratio >= MIN_VOLUME_RATIO:
         if last["close"] > last["open"]:
             buy_score += 18
@@ -278,7 +273,6 @@ def analyze_coin(df, symbol):
             sell_score += 18
             reasons_sell.append(f"افزایش حجم نزولی ({volume_ratio:.2f}x)")
 
-    # --- Breakout Structure ---
     recent_high = df["high"].iloc[-11:-1].max()
     recent_low = df["low"].iloc[-11:-1].min()
 
@@ -289,7 +283,6 @@ def analyze_coin(df, symbol):
         sell_score += 15
         reasons_sell.append("شکست کف محلی (Breakdown)")
 
-    # --- Decision ---
     direction, score, reasons = None, 0, []
     
     if buy_score >= MIN_SCORE and buy_score > sell_score:
@@ -393,11 +386,11 @@ def run_scan():
             sent_count += 1
             print(f"[SENT] سیگنال متوازن {symbol} ارسال شد.")
 
-        time.sleep(0.2)
+        # افزایش زمان انتظار برای جلوگیری از Rate Limit بایننس
+        time.sleep(0.5)
 
     print(f"اسکن پایان یافت. سیگنال‌های ارسال‌شده: {sent_count}")
 
 
 if __name__ == "__main__":
     run_scan()
-    
