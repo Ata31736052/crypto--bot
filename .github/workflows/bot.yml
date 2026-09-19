@@ -2,14 +2,12 @@ name: Crypto Signal Bot
 
 on:
   schedule:
-    # اجرای خودکار هر ۱ ساعت یک‌بار (می‌توانید به '0 */4 * * *' برای هر ۴ ساعت تغییر دهید)
+    # اجرای خودکار هر ۱ ساعت یک‌بار
     - cron: '0 * * * *'
-  workflow_dispatch: # امکان اجرای دستی برنامه از داخل گیت‌هاب
+  workflow_dispatch: # امکان اجرای دستی
 
 jobs:
   run-crypto-bot:
-    runs-policy:
-      concurrency: crypto-bot-group
     runs-on: ubuntu-latest
 
     steps:
