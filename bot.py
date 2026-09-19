@@ -80,7 +80,6 @@ def klines(sym, tf='4h', limit=220):
         if not live_price:
             live_price = float(d[-1][4])
             
-        d = d[:-1]  # حذف کندل ناتمام جاری برای جلوگیری از دیتای ناقص
         opens = [float(c[1]) for c in d]
         highs = [float(c[2]) for c in d]
         lows = [float(c[3]) for c in d]
@@ -91,7 +90,7 @@ def klines(sym, tf='4h', limit=220):
     url_kc = f"https://api.kucoin.com/api/v1/market/candles?symbol={sym}-USDT&type={tf if tf!='1d' else '1day'}"
     d = http(url_kc)
     if d and d.get('code') == '200000' and isinstance(d.get('data'), list) and len(d['data']) > 1:
-        data = d['data'][1:limit]
+        data = d['data'][:limit]
         data.reverse()
         
         if not live_price:
@@ -174,9 +173,9 @@ def check_price_action(o, h, l, c):
     upper_wick = h[-1] - max(o[-1], c[-1])
     lower_wick = min(o[-1], c[-1]) - l[-1]
 
-    if lower_wick > (2.5 * body) and lower_wick > (0.6 * candle_range):
+    if lower_wick > (2.0 * body) and lower_wick > (0.5 * candle_range):
         return "پین‌بار صعودی 🟢"
-    if upper_wick > (2.5 * body) and upper_wick > (0.6 * candle_range):
+    if upper_wick > (2.0 * body) and upper_wick > (0.5 * candle_range):
         return "پین‌بار نزولی 🔴"
 
     if c[-1] > o[-1] and c[-2] < o[-2] and c[-1] > o[-2] and o[-1] < c[-2]:
@@ -224,6 +223,7 @@ def analyze_tf(sym, tf='4h', btc_trend='NEUTRAL'):
 
     score_buy, score_sell = 0, 0
 
+    # ۱. فیلتر میانگین‌های متحرک
     if e9 > e21: score_buy += 3
     if e21 > e50: score_buy += 2
     if e9 < e21: score_sell += 3
@@ -232,9 +232,11 @@ def analyze_tf(sym, tf='4h', btc_trend='NEUTRAL'):
     if curr_price > e200: score_buy += 2
     else: score_sell += 2
 
-    if 40 < rsi_val < 65: score_buy += 2
-    if 35 < rsi_val < 60: score_sell += 2
+    # ۲. فیلتر RSI
+    if 40 <= rsi_val <= 68: score_buy += 2
+    if 32 <= rsi_val <= 60: score_sell += 2
 
+    # ۳. فیلتر MACD
     macd_status = "خنثی"
     if hist_val > 0:
         score_buy += 2
@@ -243,19 +245,22 @@ def analyze_tf(sym, tf='4h', btc_trend='NEUTRAL'):
         score_sell += 2
         macd_status = "نزولی 🔴"
 
+    # ۴. فیلتر حجم هوشمند
     avg_vol = sum(v[-21:-1]) / 20 if len(v) >= 21 else sum(v) / len(v)
     vol_ratio = round(v[-1] / avg_vol, 2) if avg_vol > 0 else 1.0
-    if vol_ratio >= 1.5:
-        if p[-1] > o[-1]: score_buy += 2
+    if vol_ratio >= 1.3:
+        if p[-1] >= o[-1]: score_buy += 2
         else: score_sell += 2
 
+    # ۵. فیلتر پرایس اکشن و واگرایی
     if "صعودی" in pa_status: score_buy += 2
     if "نزولی" in pa_status: score_sell += 2
 
     if "صعودی" in div_status: score_buy += 2
     if "نزولی" in div_status: score_sell += 2
 
-    min_score = 11
+    # 🎯 تنظیم آستانه به ۱۰ برای تعادل دقیق بین دقت و تعداد سیگنال
+    min_score = 10
 
     direction = None
     if score_buy >= min_score and score_buy > score_sell and btc_trend != 'BEARISH':
@@ -272,14 +277,14 @@ def analyze_tf(sym, tf='4h', btc_trend='NEUTRAL'):
     recent_low = min(l[-5:])
 
     if direction == 'buy':
-        sl = min(curr_price - (1.5 * atr_val), recent_low)
+        sl = min(curr_price - (1.3 * atr_val), recent_low)
         tp1 = curr_price + (1.5 * abs(curr_price - sl))
-        tp2 = curr_price + (3.0 * abs(curr_price - sl))
+        tp2 = curr_price + (2.8 * abs(curr_price - sl))
         sig_text = "خرید (LONG)"
     else:
-        sl = max(curr_price + (1.5 * atr_val), recent_high)
+        sl = max(curr_price + (1.3 * atr_val), recent_high)
         tp1 = curr_price - (1.5 * abs(sl - curr_price))
-        tp2 = curr_price - (3.0 * abs(sl - curr_price))
+        tp2 = curr_price - (2.8 * abs(sl - curr_price))
         sig_text = "فروش (SHORT)"
 
     risk = abs(curr_price - sl)
@@ -341,16 +346,16 @@ def send(msg):
 
 def fp(n):
     if n >= 1000: return f"{n:,.2f}"
-    if n >= 1: return f"{n:,.3f}"
-    return f"{n:.5f}"
+    if n >= 1: return f"{n:,.4f}"
+    return f"{n:.6f}"
 
 def fmt(a):
     tv_link = f"https://www.tradingview.com/chart/?symbol=BINANCE:{a['sym']}USDT"
     tf_tag = "🚀 [سیگنال ۴ ساعته Pro - پایش ساعتی]"
     
     badge = ""
-    if a['score'] >= 13:
-        badge = "\n🔥 <b>سیگنال VIP (امتیاز بالای ۱۳ - فوق‌العاده قوی)</b>"
+    if a['score'] >= 12:
+        badge = "\n🔥 <b>سیگنال VIP (امتیاز بالای ۱۲ - فوق‌العاده قوی)</b>"
 
     return (
         f"{a['icon']} <b>#سیگنال_{a['tf']}_{a['sym']} | USDT</b>\n"
@@ -381,32 +386,35 @@ if __name__ == "__main__":
     
     for s in COINS:
         a4h = analyze_tf(s, '4h', btc_trend)
+        state_key = f"{s}_4h"
+        
         if a4h and a4h['is_signal']:
-            state_key = f"{s}_4h"
-            # فقط در صورتی ارسال کن که جهت سیگنال جدید با قبلی متفاوت باشد
+            # ثبت سیگنال جدید در صورت عدم وجود سیگنال هم‌جهت قبلی
             if state.get(state_key, {}).get('dir') != a4h['dir']:
                 signals.append(a4h)
                 state[state_key] = {'dir': a4h['dir'], 'time': a4h['time']}
+        else:
+            # پاک کردن وضعیت قبلی در صورت خروج از شرایط سیگنال برای پذیرش سیگنال‌های بعدی
+            if state_key in state:
+                del state[state_key]
 
         time.sleep(0.08)
 
     save_state(state)
 
-    # ارسال سیگنال‌ها یا گزارش ساعتی
     if signals:
         for sig in signals:
             send(fmt(sig))
             time.sleep(0.3)
-        print(f"تعداد {len(signals)} سیگنال با کیفیت بالا ارسال گردید.")
+        print(f"تعداد {len(signals)} سیگنال جدید ارسال شد.")
     else:
         now_ir = datetime.now(IRAN_TZ).strftime('%H:%M')
         btc_icon = "🟢 صعودی" if btc_trend == 'BULLISH' else ("🔴 نزولی" if btc_trend == 'BEARISH' else "⚪️ خنثی")
         msg = f"📊 <b>گزارش اسکن ساعتی ۴H ({now_ir} به وقت ایران)</b>\n\n"
         msg += f"🌐 روند کلان بیت‌کوین (روزانه): <b>{btc_icon}</b>\n"
-        msg += "• وضعیت ۴ ساعته: <i>در اسکن این ساعت، فرصت جدیدی با استانداردهای فیلتر احراز نگردید.</i>\n\n"
+        msg += "• وضعیت ۴ ساعته: <i>در این ساعت موقعیت جدیدی با شرایط حد نصاب ۱۰ احراز نگردید.</i>\n\n"
         msg += "🔍 اسکن بعدی سر ساعت بعدی انجام خواهد شد."
         send(msg)
         print("سیگنال جدیدی یافت نشد؛ گزارش ساعتی به تلگرام ارسال گردید.")
 
     print("پایان اسکن.")
-    
