@@ -1,6 +1,6 @@
 # =========================================================
 # Crypto Signal Bot - Balanced Pro Edition (4H + Multi-TF)
-# Data source: Binance
+# Data source: Binance (Independent Fixed List)
 # Executed via GitHub Actions
 # =========================================================
 
@@ -72,37 +72,34 @@ def send_telegram(message):
 
 
 # =========================================================
-# 3. MARKET COINS DISCOVERY
+# 3. MARKET COINS DISCOVERY (No Nobitex Dependency)
 # =========================================================
 
-def get_nobitex_coins():
-    url = "https://api.nobitex.ir/v2/market/stats"
-    data = http_get(url)
-    
-    default_coins = [
+def get_scan_coins():
+    # لیست جامع ارزهای پرطرفدار و مستعد نوسان بازار
+    all_coins = [
         "BTC", "ETH", "SOL", "BNB", "XRP", "TON", "ADA", "DOGE", "AVAX", "LINK",
         "DOT", "LTC", "BCH", "ETC", "XLM", "UNI", "FIL", "TRX", "ATOM", "NEAR",
         "AAVE", "SUI", "APT", "ARB", "OP", "SEI", "INJ", "TIA", "STX", "ALGO",
-        "PEPE", "WIF", "BONK", "FLOKI", "SHIB", "MEME", "NOT", "ORDI", "BOME"
+        "PEPE", "WIF", "BONK", "FLOKI", "SHIB", "MEME", "NOT", "ORDI", "BOME",
+        "POL", "ASI", "RENDER", "ICP", "KAS", "IMX", "GRT", "HBAR", "ETENA", 
+        "PENDLE", "JUP", "PYTH", "W", "MANTA", "ALT", "STRK", "AXL", "PORTAL", 
+        "AEVO", "REZ", "BB", "IO", "ZK", "LISTA", "BANANA", "DOGS", "CATI", 
+        "HMSTR", "EIGEN", "SCR", "PNUT", "ACT", "GOAT", "CHZ", "SAND", "MANA", 
+        "GALA", "ENJ", "AXS", "THETA", "FTM", "SNX", "CRV", "MKR", "COMP", 
+        "1INCH", "SUSHI", "BAL", "ZRX", "LDO", "RPL", "SSV", "FXS", "DYDX", 
+        "GMX", "PERP", "OCEAN", "AGIX", "RLC", "AR", "STORJ", "SC", "HOT", 
+        "RVN", "ZIL", "IOST", "ONT", "ICX", "ZEC", "DASH", "KSM", "ZEN", "QTUM", 
+        "NEXO", "BAT", "SKL", "MINA", "FLOW", "MASK", "AGLD", "API3", "SUPER", 
+        "BICO", "GLMR", "MOVR", "ACA", "ASTR", "TLM", "DAR", "ALICE", "YGG", 
+        "GHST", "VOXEL", "RARE", "PROS", "STG", "LPT", "HIGH", "CVX", "MDT", "POLS"
     ]
     
-    if not data or "stats" not in data:
-        return default_coins
+    unique_coins = sorted(list(set(all_coins)))
 
-    coins = set()
-    for market in data["stats"].keys():
-        if market.endswith("-usdt") or market.endswith("-rls"):
-            coins.add(market.split("-")[0].upper())
-
-    mapping = {"MATIC": "POL", "FET": "ASI"}
-    updated_coins = [mapping.get(c, c) for c in coins]
-    return list(set(updated_coins)) if len(updated_coins) >= 20 else default_coins
-
-
-def get_scan_coins():
     info = http_get(f"{BINANCE_BASE}/api/v3/exchangeInfo")
     if not info:
-        return []
+        return [{"coin": c, "symbol": c + "USDT"} for c in unique_coins]
 
     binance_symbols = {
         item["symbol"] 
@@ -110,9 +107,8 @@ def get_scan_coins():
         if item.get("status") == "TRADING" and item.get("quoteAsset") == "USDT"
     }
 
-    nobitex_coins = get_nobitex_coins()
     result = []
-    for coin in nobitex_coins:
+    for coin in unique_coins:
         symbol = coin + "USDT"
         if symbol in binance_symbols:
             result.append({"coin": coin, "symbol": symbol})
@@ -386,7 +382,6 @@ def run_scan():
             sent_count += 1
             print(f"[SENT] سیگنال متوازن {symbol} ارسال شد.")
 
-        # افزایش زمان انتظار برای جلوگیری از Rate Limit بایننس
         time.sleep(0.5)
 
     print(f"اسکن پایان یافت. سیگنال‌های ارسال‌شده: {sent_count}")
@@ -394,3 +389,4 @@ def run_scan():
 
 if __name__ == "__main__":
     run_scan()
+        
