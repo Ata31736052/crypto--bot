@@ -1,16 +1,14 @@
 # =========================================================
-# Crypto Signal Bot - INSTITUTIONAL GRADE v5.0
-# Multi-TF | SMC | OrderBlocks | VWAP | BB | Backtest-Ready
+# Crypto Signal Bot - INSTITUTIONAL GRADE v5.0 FINAL
 # =========================================================
 
 import os, json, time, traceback
 import requests, pandas as pd, numpy as np
 from datetime import datetime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
 # ---------- SETTINGS ----------
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "8838013512:AAGcD8w9NrYSLPoFgGdZ-TEJat9njVxFI1E")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "90464197")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 TIMEFRAME_MAIN = "4h"
 TIMEFRAME_SUB = "1h"
@@ -32,28 +30,22 @@ DIVERGENCE_LOOKBACK = 30
 DIVERGENCE_MIN_GAP = 3
 DIVERGENCE_MAX_GAP = 20
 
-# Order Blocks / FVG
 OB_LOOKBACK = 50
 FVG_MIN_SIZE_ATR = 0.3
 
-# Volatility Regime
 VOL_REGIME_ATR_WINDOW = 50
-VOL_REGIME_THRESHOLD = 1.15  # ATR بالای 1.15 برابر میانگین = Trending
+VOL_REGIME_THRESHOLD = 1.15
 
-# Bollinger
 BB_PERIOD = 20
 BB_STD = 2.0
-BB_SQUEEZE_THRESHOLD = 0.5  # عرض باند کمتر از 50٪ میانگین = Squeeze
+BB_SQUEEZE_THRESHOLD = 0.5
 
-# Risk Management
 MAX_CONCURRENT_SIGNALS = 8
 MAX_DAILY_SIGNALS = 15
-COOLDOWN_AFTER_3_SL = 6  # ساعت
+COOLDOWN_AFTER_3_SL = 6
 
-# Multi-TF
 REQUIRE_DAILY_ALIGNMENT = True
 
-# Anomaly Detection
 ANOMALY_VOLUME_MULT = 5.0
 ANOMALY_ATR_MULT = 3.0
 
@@ -69,10 +61,7 @@ WEEKLY_REPORT_DAY = 6
 
 FUTURES_CACHE = {}
 FUTURES_CACHE_TTL = 3600
-
 PARALLEL_WORKERS = 5
-
-
 # ---------- UTILS ----------
 def log(msg):
     try:
@@ -152,8 +141,7 @@ def save_json(path, data):
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
         log("[SAVE ERROR] " + path + ": " + str(e))
-
-# ---------- DATA FETCHING ----------
+# ---------- DATA ----------
 def get_fear_greed_index():
     data = http_get("https://api.alternative.me/fng/?limit=1")
     try:
@@ -200,8 +188,7 @@ def get_futures_cached(symbol):
     data = get_futures_metrics(symbol)
     FUTURES_CACHE[symbol] = (now, data)
     return data
-
-
+# ---------- MARKET DISCOVERY ----------
 def get_scan_coins():
     all_coins = [
         "BTC", "ETH", "SOL", "BNB", "XRP", "TON", "ADA", "DOGE", "AVAX", "LINK",
@@ -248,8 +235,7 @@ def get_scan_coins():
         if symbol in binance_symbols and valid_volumes.get(symbol, 0) >= MIN_24H_USDT_VOLUME:
             result.append({"coin": coin, "symbol": symbol})
     return result
-
-
+# ---------- KLINES ----------
 def get_klines(symbol, interval, limit=None):
     if limit is None:
         limit = KLINE_LIMIT
@@ -273,7 +259,6 @@ def add_indicators(df):
     df["ema50"] = df["close"].ewm(span=50, adjust=False).mean()
     df["ema200"] = df["close"].ewm(span=200, adjust=False).mean()
 
-    # RSI
     delta = df["close"].diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
@@ -282,14 +267,12 @@ def add_indicators(df):
     rs = avg_gain / avg_loss.replace(0, np.nan)
     df["rsi"] = 100 - (100 / (1 + rs))
 
-    # MACD
     ema12 = df["close"].ewm(span=12, adjust=False).mean()
     ema26 = df["close"].ewm(span=26, adjust=False).mean()
     df["macd"] = ema12 - ema26
     df["macd_signal"] = df["macd"].ewm(span=9, adjust=False).mean()
     df["macd_hist"] = df["macd"] - df["macd_signal"]
 
-    # ATR
     tr = pd.concat([
         df["high"] - df["low"],
         (df["high"] - df["close"].shift()).abs(),
@@ -298,15 +281,12 @@ def add_indicators(df):
     df["atr"] = tr.rolling(ATR_PERIOD).mean()
     df["atr_avg50"] = df["atr"].rolling(VOL_REGIME_ATR_WINDOW).mean()
 
-    # Volume
     df["volume_avg20"] = df["volume"].rolling(20).mean()
     df["volume_ratio"] = df["volume"] / df["volume_avg20"].replace(0, np.nan)
 
-    # OBV
     df["obv"] = (np.sign(df["close"].diff()) * df["volume"]).fillna(0).cumsum()
     df["obv_ema"] = df["obv"].ewm(span=20, adjust=False).mean()
 
-    # Bollinger Bands
     df["bb_mid"] = df["close"].rolling(BB_PERIOD).mean()
     df["bb_std"] = df["close"].rolling(BB_PERIOD).std()
     df["bb_upper"] = df["bb_mid"] + BB_STD * df["bb_std"]
@@ -314,13 +294,11 @@ def add_indicators(df):
     df["bb_width"] = (df["bb_upper"] - df["bb_lower"]) / df["bb_mid"]
     df["bb_width_avg20"] = df["bb_width"].rolling(20).mean()
 
-    # VWAP (روزانه برای 4H معنی نداره، فقط برای 1H)
     typical = (df["high"] + df["low"] + df["close"]) / 3
     df["vwap_cum"] = (typical * df["volume"]).cumsum() / df["volume"].cumsum()
 
     return df
-
-
+# ---------- MULTI-TF ----------
 def get_btc_macro_trend():
     df_btc = get_klines("BTCUSDT", TIMEFRAME_MACRO)
     if df_btc is None or len(df_btc) < 200:
@@ -332,10 +310,9 @@ def get_btc_macro_trend():
 
 
 def check_daily_alignment(symbol, direction):
-    """چک می‌کنه تایم دیلی با جهت سیگنال هم‌جهته"""
     df = get_klines(symbol, TIMEFRAME_MACRO)
     if df is None or len(df) < 50:
-        return True  # اگه داده نبود، بذار رد بشه
+        return True
     df = add_indicators(df)
     last = df.iloc[-1]
     if not np.isfinite(last["ema50"]):
@@ -358,500 +335,7 @@ def check_1h_confirmation(symbol, direction):
         return last["ema9"] > last["ema21"] and 40 <= last["rsi"] <= 75
     else:
         return last["ema9"] < last["ema21"] and 25 <= last["rsi"] <= 60
-
-# ---------- SMART MONEY CONCEPTS ----------
-def find_swing_highs(df, lookback=3):
-    """پیدا کردن سقف‌های سوئینگ"""
-    highs = []
-    for i in range(lookback, len(df) - lookback):
-        window = df["high"].iloc[i-lookback:i+lookback+1]
-        if df["high"].iloc[i] == window.max():
-            highs.append({
-                "idx": i,
-                "price": float(df["high"].iloc[i]),
-                "time": df["close_time"].iloc[i]
-            })
-    return highs
-
-
-def find_swing_lows(df, lookback=3):
-    """پیدا کردن کف‌های سوئینگ"""
-    lows = []
-    for i in range(lookback, len(df) - lookback):
-        window = df["low"].iloc[i-lookback:i+lookback+1]
-        if df["low"].iloc[i] == window.min():
-            lows.append({
-                "idx": i,
-                "price": float(df["low"].iloc[i]),
-                "time": df["close_time"].iloc[i]
-            })
-    return lows
-
-
-def detect_bos_choch(df):
-    """
-    Break of Structure / Change of Character
-    BOS = ادامه‌ی روند (شکست سقف در روند صعودی)
-    CHoCH = تغییر روند (شکست کف در روند صعودی)
-    """
-    result = {"bos_bull": False, "bos_bear": False, "choch_bull": False, "choch_bear": False}
-    try:
-        highs = find_swing_highs(df, lookback=3)
-        lows = find_swing_lows(df, lookback=3)
-
-        if len(highs) < 2 or len(lows) < 2:
-            return result
-
-        last_close = float(df["close"].iloc[-1])
-        last_high = highs[-1]["price"]
-        prev_high = highs[-2]["price"]
-        last_low = lows[-1]["price"]
-        prev_low = lows[-2]["price"]
-
-        # BOS صعودی: سقف جدید بالاتر از سقف قبلی
-        if last_high > prev_high and last_close > last_high:
-            result["bos_bull"] = True
-        # BOS نزولی
-        if last_low < prev_low and last_close < last_low:
-            result["bos_bear"] = True
-
-        # CHoCH صعودی: روند نزولی بوده، حالا کف جدید بالاتر
-        if last_low > prev_low and prev_high < highs[-2]["price"] if len(highs) > 2 else False:
-            result["choch_bull"] = True
-        # CHoCH نزولی
-        if last_high < prev_high and last_low < prev_low:
-            result["choch_bear"] = True
-    except Exception:
-        pass
-    return result
-
-
-def find_order_blocks(df, direction):
-    """
-    Order Block: آخرین کندل مخالف قبل از حرکت قوی
-    برای BUY: آخرین کندل نزولی قبل از حرکت صعودی قوی
-    """
-    obs = []
-    try:
-        recent = df.tail(OB_LOOKBACK).reset_index(drop=True)
-        atr_last = float(df["atr"].iloc[-1])
-        if not np.isfinite(atr_last) or atr_last <= 0:
-            return obs
-
-        for i in range(len(recent) - 3, 5, -1):
-            candle = recent.iloc[i]
-            next_candles = recent.iloc[i+1:i+4]
-
-            if direction == "BUY":
-                # کندل نزولی + حرکت صعودی قوی بعدش
-                is_bearish = candle["close"] < candle["open"]
-                move_up = (next_candles["close"].max() - candle["low"]) > atr_last * 1.5
-                if is_bearish and move_up:
-                    obs.append({
-                        "top": float(candle["open"]),
-                        "bottom": float(candle["low"]),
-                        "mid": float((candle["open"] + candle["low"]) / 2),
-                        "idx": i,
-                    })
-                    if len(obs) >= 2:
-                        break
-            else:
-                is_bullish = candle["close"] > candle["open"]
-                move_down = (candle["high"] - next_candles["close"].min()) > atr_last * 1.5
-                if is_bullish and move_down:
-                    obs.append({
-                        "top": float(candle["high"]),
-                        "bottom": float(candle["close"]),
-                        "mid": float((candle["high"] + candle["close"]) / 2),
-                        "idx": i,
-                    })
-                    if len(obs) >= 2:
-                        break
-    except Exception:
-        pass
-    return obs
-
-
-def find_fair_value_gaps(df, direction):
-    """
-    FVG: گپ بین کندل i-1 و i+1
-    صعودی: low کندل فعلی > high کندل قبلی
-    """
-    fvgs = []
-    try:
-        recent = df.tail(OB_LOOKBACK).reset_index(drop=True)
-        atr_last = float(df["atr"].iloc[-1])
-        if not np.isfinite(atr_last) or atr_last <= 0:
-            return fvgs
-
-        for i in range(2, len(recent) - 1):
-            prev = recent.iloc[i-1]
-            curr = recent.iloc[i]
-
-            if direction == "BUY":
-                if curr["low"] > prev["high"]:
-                    gap_size = curr["low"] - prev["high"]
-                    if gap_size > atr_last * FVG_MIN_SIZE_ATR:
-                        fvgs.append({
-                            "top": float(curr["low"]),
-                            "bottom": float(prev["high"]),
-                            "idx": i,
-                        })
-            else:
-                if curr["high"] < prev["low"]:
-                    gap_size = prev["low"] - curr["high"]
-                    if gap_size > atr_last * FVG_MIN_SIZE_ATR:
-                        fvgs.append({
-                            "top": float(prev["low"]),
-                            "bottom": float(curr["high"]),
-                            "idx": i,
-                        })
-
-        if len(fvgs) > 3:
-            fvgs = fvgs[-3:]
-    except Exception:
-        pass
-    return fvgs
-
-
-def is_price_in_zone(price, zone):
-    return zone["bottom"] <= price <= zone["top"]
-
-
-def get_volatility_regime(df):
-    """تشخیص رژیم نوسان: Trending یا Ranging"""
-    try:
-        last = df.iloc[-1]
-        atr = float(last["atr"])
-        atr_avg = float(last["atr_avg50"])
-        if not np.isfinite(atr) or not np.isfinite(atr_avg) or atr_avg <= 0:
-            return "UNKNOWN"
-        ratio = atr / atr_avg
-        if ratio >= VOL_REGIME_THRESHOLD:
-            return "TRENDING"
-        else:
-            return "RANGING"
-    except Exception:
-        return "UNKNOWN"
-
-
-def detect_bb_squeeze(df):
-    """تشخیص Squeeze در بولینگر باندز"""
-    try:
-        last = df.iloc[-1]
-        width = float(last["bb_width"])
-        avg_width = float(last["bb_width_avg20"])
-        if not np.isfinite(width) or not np.isfinite(avg_width) or avg_width <= 0:
-            return False
-        return (width / avg_width) <= BB_SQUEEZE_THRESHOLD
-    except Exception:
-        return False
-
-
-def detect_anomaly(df):
-    """تشخیص شرایط غیرعادی"""
-    try:
-        last = df.iloc[-1]
-        vol_ratio = float(last["volume_ratio"])
-        atr = float(last["atr"])
-        atr_avg = float(last["atr_avg50"])
-        if not np.isfinite(vol_ratio):
-            return False
-        if vol_ratio >= ANOMALY_VOLUME_MULT:
-            return True
-        if np.isfinite(atr) and np.isfinite(atr_avg) and atr_avg > 0:
-            if (atr / atr_avg) >= ANOMALY_ATR_MULT:
-                return True
-        return False
-    except Exception:
-        return False
-
-
-def get_vwap_position(df):
-    """موقعیت قیمت نسبت به VWAP"""
-    try:
-        last = df.iloc[-1]
-        vwap = float(last["vwap_cum"])
-        price = float(last["close"])
-        if not np.isfinite(vwap):
-            return "UNKNOWN"
-        if price > vwap * 1.005:
-            return "ABOVE"
-        elif price < vwap * 0.995:
-            return "BELOW"
-        return "AT"
-    except Exception:
-        return "UNKNOWN"
-
-# ---------- ANALYZE ENGINE ----------
-def analyze_coin(df, symbol, btc_trend):
-    """
-    موتور تحلیل اصلی - ترکیب همه‌ی فاکتورها
-    """
-    df = add_indicators(df)
-    last = df.iloc[-1]
-    prev = df.iloc[-2]
-
-    try:
-        price = float(last["close"])
-        rsi = float(last["rsi"])
-        volume_ratio = float(last["volume_ratio"])
-        atr = float(last["atr"])
-        ema200 = float(last["ema200"])
-        ema50 = float(last["ema50"])
-    except (TypeError, ValueError):
-        return None
-
-    if not all(np.isfinite(x) for x in [price, rsi, atr, ema200, ema50]):
-        return None
-    if atr <= 0:
-        return None
-    if not np.isfinite(volume_ratio):
-        volume_ratio = 0.0
-
-    # ============ Anomaly Detection ============
-    is_anomaly = detect_anomaly(df)
-    if is_anomaly:
-        return {
-            "signal": "ANOMALY",
-            "symbol": symbol,
-            "entry": price,
-            "candle_time": last["close_time"].isoformat()
-        }
-
-    # ============ Volatility Regime ============
-    regime = get_volatility_regime(df)
-
-    # ============ Bollinger Squeeze ============
-    bb_squeeze = detect_bb_squeeze(df)
-
-    # ============ SMC Analysis ============
-    smc = detect_bos_choch(df)
-
-    # ============ VWAP ============
-    vwap_pos = get_vwap_position(df)
-
-    # ============ Scoring ============
-    buy_score, sell_score = 0, 0
-    reasons_buy, reasons_sell = [], []
-
-    # 1) EMA200 (روند کلان)
-    if price > ema200:
-        buy_score += 18
-        reasons_buy.append("بالای EMA200 (4H)")
-    else:
-        sell_score += 18
-        reasons_sell.append("پایین EMA200 (4H)")
-
-    # 2) EMA9/21 Cross
-    if last["ema9"] > last["ema21"]:
-        buy_score += 12
-        reasons_buy.append("تقاطع صعودی EMA 9/21")
-    else:
-        sell_score += 12
-        reasons_sell.append("تقاطع نزولی EMA 9/21")
-
-    # 3) EMA50
-    if price > ema50:
-        buy_score += 5
-    else:
-        sell_score += 5
-
-    # 4) RSI + Divergence
-    divergence_found = False
-    if rsi < 40 and has_bullish_divergence(df):
-        buy_score += 22
-        reasons_buy.append("واگرایی صعودی + RSI " + f"{rsi:.1f}")
-        divergence_found = True
-    elif rsi > 60 and has_bearish_divergence(df):
-        sell_score += 22
-        reasons_sell.append("واگرایی نزولی + RSI " + f"{rsi:.1f}")
-        divergence_found = True
-
-    if not divergence_found:
-        if 45 <= rsi <= 68:
-            buy_score += 10
-            reasons_buy.append("RSI مومنتوم (" + f"{rsi:.1f}" + ")")
-        elif 32 <= rsi <= 55:
-            sell_score += 10
-            reasons_sell.append("RSI مومنتوم (" + f"{rsi:.1f}" + ")")
-
-    # 5) MACD
-    if prev["macd"] <= prev["macd_signal"] and last["macd"] > last["macd_signal"]:
-        buy_score += 10
-        reasons_buy.append("تقاطع صعودی MACD")
-    elif prev["macd"] >= prev["macd_signal"] and last["macd"] < last["macd_signal"]:
-        sell_score += 10
-        reasons_sell.append("تقاطع نزولی MACD")
-    elif last["macd_hist"] > 0:
-        buy_score += 4
-    elif last["macd_hist"] < 0:
-        sell_score += 4
-
-    # 6) OBV
-    if last["obv"] > last["obv_ema"]:
-        buy_score += 6
-        reasons_buy.append("OBV مثبت")
-    else:
-        sell_score += 6
-        reasons_sell.append("OBV منفی")
-
-    # 7) Volume
-    if volume_ratio >= MIN_VOLUME_RATIO:
-        if last["close"] > last["open"]:
-            buy_score += 12
-            reasons_buy.append("حجم قوی (" + f"{volume_ratio:.2f}" + "x)")
-        else:
-            sell_score += 12
-            reasons_sell.append("حجم سنگین فروش (" + f"{volume_ratio:.2f}" + "x)")
-
-    # 8) SMC - BOS/CHoCH
-    if smc["bos_bull"]:
-        buy_score += 8
-        reasons_buy.append("BOS صعودی (شکست ساختار)")
-    if smc["bos_bear"]:
-        sell_score += 8
-        reasons_sell.append("BOS نزولی")
-    if smc["choch_bull"]:
-        buy_score += 6
-        reasons_buy.append("CHoCH صعودی (تغییر روند)")
-    if smc["choch_bear"]:
-        sell_score += 6
-        reasons_sell.append("CHoCH نزولی")
-
-    # 9) Volatility Regime Bonus
-    if regime == "TRENDING":
-        if buy_score > sell_score:
-            buy_score += 5
-            reasons_buy.append("رژیم Trending (تایید مومنتوم)")
-        elif sell_score > buy_score:
-            sell_score += 5
-            reasons_sell.append("رژیم Trending (تایید مومنتوم)")
-
-    # 10) BB Squeeze
-    if bb_squeeze:
-        if buy_score > sell_score:
-            buy_score += 4
-            reasons_buy.append("Squeeze بولینگر (انفجار نزدیک)")
-        elif sell_score > buy_score:
-            sell_score += 4
-            reasons_sell.append("Squeeze بولینگر")
-
-    # 11) VWAP
-    if vwap_pos == "ABOVE":
-        buy_score += 4
-        reasons_buy.append("بالای VWAP")
-    elif vwap_pos == "BELOW":
-        sell_score += 4
-        reasons_sell.append("پایین VWAP")
-
-    # ============ Direction Decision ============
-    direction, score, reasons = None, 0, []
-    if buy_score >= MIN_SCORE and buy_score > sell_score:
-        if btc_trend == "BEARISH" and symbol != "BTCUSDT":
-            return None
-        direction, score, reasons = "BUY", buy_score, reasons_buy
-    elif sell_score >= MIN_SCORE and sell_score > buy_score:
-        direction, score, reasons = "SELL", sell_score, reasons_sell
-    else:
-        return None
-
-    # ============ Multi-TF Confirmation ============
-    # Daily alignment
-    if REQUIRE_DAILY_ALIGNMENT:
-        if not check_daily_alignment(symbol, direction):
-            return None
-        score += 5
-        reasons.append("تاییدیه Daily (روند کلان)")
-
-    # 1H confirmation
-    if not check_1h_confirmation(symbol, direction):
-        return None
-    score += 5
-    reasons.append("تاییدیه 1H (Multi-TF)")
-
-    # ============ Order Blocks Analysis ============
-    ob_in_zone = False
-    obs = find_order_blocks(df, direction)
-    for ob in obs:
-        if is_price_in_zone(price, ob):
-            ob_in_zone = True
-            score += 8
-            reasons.append("ورود در ناحیه Order Block")
-            break
-
-    # ============ FVG Analysis ============
-    fvgs = find_fair_value_gaps(df, direction)
-    fvg_in_zone = False
-    for fvg in fvgs:
-        if is_price_in_zone(price, fvg):
-            fvg_in_zone = True
-            score += 6
-            reasons.append("ورود در Fair Value Gap")
-            break
-
-    # ============ Futures Data ============
-    funding_rate, open_interest, oi_change = get_futures_cached(symbol)
-    if direction == "BUY" and funding_rate < -0.001:
-        score += 4
-        reasons.append("فاندینگ مساعد (" + f"{funding_rate*100:.3f}" + "%)")
-    elif direction == "SELL" and funding_rate > 0.001:
-        score += 4
-        reasons.append("فاندینگ مساعد (" + f"{funding_rate*100:.3f}" + "%)")
-
-    # ============ SL/TP با منطق پیشرفته ============
-    # SL زیر نزدیک‌ترین Order Block یا ATR
-    if direction == "BUY":
-        atr_sl = price - (atr * SL_ATR_MULTIPLIER)
-        ob_sl = atr_sl
-        for ob in obs:
-            if ob["bottom"] < price:
-                candidate = ob["bottom"] - (atr * 0.2)
-                if candidate > atr_sl and candidate < price:
-                    ob_sl = candidate
-                    break
-        stop_loss = ob_sl if ob_sl != atr_sl else atr_sl
-        risk_per_unit = price - stop_loss
-        tp1 = price + (risk_per_unit * TP1_RR)
-        tp2 = price + (risk_per_unit * TP2_RR)
-    else:
-        atr_sl = price + (atr * SL_ATR_MULTIPLIER)
-        ob_sl = atr_sl
-        for ob in obs:
-            if ob["top"] > price:
-                candidate = ob["top"] + (atr * 0.2)
-                if candidate < atr_sl and candidate > price:
-                    ob_sl = candidate
-                    break
-        stop_loss = ob_sl if ob_sl != atr_sl else atr_sl
-        risk_per_unit = stop_loss - price
-        tp1 = price - (risk_per_unit * TP1_RR)
-        tp2 = price - (risk_per_unit * TP2_RR)
-
-    return {
-        "signal": direction,
-        "symbol": symbol,
-        "entry": price,
-        "score": score,
-        "rsi": rsi,
-        "volume_ratio": volume_ratio,
-        "funding_rate": funding_rate,
-        "open_interest": open_interest,
-        "oi_change_24h": oi_change,
-        "stop_loss": stop_loss,
-        "tp1": tp1,
-        "tp2": tp2,
-        "reasons": reasons,
-        "has_divergence": divergence_found,
-        "regime": regime,
-        "bb_squeeze": bb_squeeze,
-        "ob_in_zone": ob_in_zone,
-        "fvg_in_zone": fvg_in_zone,
-        "candle_time": last["close_time"].isoformat()
-    }
-
-
-# ---------- DIVERGENCE HELPERS ----------
+# ---------- DIVERGENCE ----------
 def find_local_minima(series, order=2):
     idxs = []
     vals = series.values
@@ -916,8 +400,426 @@ def has_bearish_divergence(df):
         return p2 > p1 and r2 < r1 - 2
     except Exception:
         return False
+# ---------- SMC ----------
+def find_swing_highs(df, lookback=3):
+    highs = []
+    for i in range(lookback, len(df) - lookback):
+        window = df["high"].iloc[i-lookback:i+lookback+1]
+        if df["high"].iloc[i] == window.max():
+            highs.append({"idx": i, "price": float(df["high"].iloc[i])})
+    return highs
 
-# ---------- STATE MANAGEMENT ----------
+
+def find_swing_lows(df, lookback=3):
+    lows = []
+    for i in range(lookback, len(df) - lookback):
+        window = df["low"].iloc[i-lookback:i+lookback+1]
+        if df["low"].iloc[i] == window.min():
+            lows.append({"idx": i, "price": float(df["low"].iloc[i])})
+    return lows
+
+
+def detect_bos_choch(df):
+    result = {"bos_bull": False, "bos_bear": False,
+              "choch_bull": False, "choch_bear": False}
+    try:
+        highs = find_swing_highs(df, lookback=3)
+        lows = find_swing_lows(df, lookback=3)
+        if len(highs) < 2 or len(lows) < 2:
+            return result
+
+        last_close = float(df["close"].iloc[-1])
+        last_high = highs[-1]["price"]
+        prev_high = highs[-2]["price"]
+        last_low = lows[-1]["price"]
+        prev_low = lows[-2]["price"]
+
+        if last_high > prev_high and last_close > last_high:
+            result["bos_bull"] = True
+        if last_low < prev_low and last_close < last_low:
+            result["bos_bear"] = True
+        if last_low > prev_low and prev_high < highs[-2]["price"] if len(highs) > 2 else False:
+            result["choch_bull"] = True
+        if last_high < prev_high and last_low < prev_low:
+            result["choch_bear"] = True
+    except Exception:
+        pass
+    return result
+
+
+def find_order_blocks(df, direction):
+    obs = []
+    try:
+        recent = df.tail(OB_LOOKBACK).reset_index(drop=True)
+        atr_last = float(df["atr"].iloc[-1])
+        if not np.isfinite(atr_last) or atr_last <= 0:
+            return obs
+
+        for i in range(len(recent) - 3, 5, -1):
+            candle = recent.iloc[i]
+            nxt = recent.iloc[i+1:i+4]
+
+            if direction == "BUY":
+                is_bearish = candle["close"] < candle["open"]
+                move_up = (nxt["close"].max() - candle["low"]) > atr_last * 1.5
+                if is_bearish and move_up:
+                    obs.append({
+                        "top": float(candle["open"]),
+                        "bottom": float(candle["low"]),
+                        "idx": i,
+                    })
+                    if len(obs) >= 2:
+                        break
+            else:
+                is_bullish = candle["close"] > candle["open"]
+                move_down = (candle["high"] - nxt["close"].min()) > atr_last * 1.5
+                if is_bullish and move_down:
+                    obs.append({
+                        "top": float(candle["high"]),
+                        "bottom": float(candle["close"]),
+                        "idx": i,
+                    })
+                    if len(obs) >= 2:
+                        break
+    except Exception:
+        pass
+    return obs
+
+
+def find_fair_value_gaps(df, direction):
+    fvgs = []
+    try:
+        recent = df.tail(OB_LOOKBACK).reset_index(drop=True)
+        atr_last = float(df["atr"].iloc[-1])
+        if not np.isfinite(atr_last) or atr_last <= 0:
+            return fvgs
+
+        for i in range(2, len(recent) - 1):
+            prev = recent.iloc[i-1]
+            curr = recent.iloc[i]
+
+            if direction == "BUY":
+                if curr["low"] > prev["high"]:
+                    gap_size = curr["low"] - prev["high"]
+                    if gap_size > atr_last * FVG_MIN_SIZE_ATR:
+                        fvgs.append({
+                            "top": float(curr["low"]),
+                            "bottom": float(prev["high"]),
+                            "idx": i,
+                        })
+            else:
+                if curr["high"] < prev["low"]:
+                    gap_size = prev["low"] - curr["high"]
+                    if gap_size > atr_last * FVG_MIN_SIZE_ATR:
+                        fvgs.append({
+                            "top": float(prev["low"]),
+                            "bottom": float(curr["high"]),
+                            "idx": i,
+                        })
+        if len(fvgs) > 3:
+            fvgs = fvgs[-3:]
+    except Exception:
+        pass
+    return fvgs
+
+
+def is_price_in_zone(price, zone):
+    return zone["bottom"] <= price <= zone["top"]
+# ---------- REGIME & ANOMALY ----------
+def get_volatility_regime(df):
+    try:
+        last = df.iloc[-1]
+        atr = float(last["atr"])
+        atr_avg = float(last["atr_avg50"])
+        if not np.isfinite(atr) or not np.isfinite(atr_avg) or atr_avg <= 0:
+            return "UNKNOWN"
+        ratio = atr / atr_avg
+        if ratio >= VOL_REGIME_THRESHOLD:
+            return "TRENDING"
+        return "RANGING"
+    except Exception:
+        return "UNKNOWN"
+
+
+def detect_bb_squeeze(df):
+    try:
+        last = df.iloc[-1]
+        width = float(last["bb_width"])
+        avg_width = float(last["bb_width_avg20"])
+        if not np.isfinite(width) or not np.isfinite(avg_width) or avg_width <= 0:
+            return False
+        return (width / avg_width) <= BB_SQUEEZE_THRESHOLD
+    except Exception:
+        return False
+
+
+def detect_anomaly(df):
+    try:
+        last = df.iloc[-1]
+        vol_ratio = float(last["volume_ratio"])
+        atr = float(last["atr"])
+        atr_avg = float(last["atr_avg50"])
+        if not np.isfinite(vol_ratio):
+            return False
+        if vol_ratio >= ANOMALY_VOLUME_MULT:
+            return True
+        if np.isfinite(atr) and np.isfinite(atr_avg) and atr_avg > 0:
+            if (atr / atr_avg) >= ANOMALY_ATR_MULT:
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def get_vwap_position(df):
+    try:
+        last = df.iloc[-1]
+        vwap = float(last["vwap_cum"])
+        price = float(last["close"])
+        if not np.isfinite(vwap):
+            return "UNKNOWN"
+        if price > vwap * 1.005:
+            return "ABOVE"
+        if price < vwap * 0.995:
+            return "BELOW"
+        return "AT"
+    except Exception:
+        return "UNKNOWN"
+# ---------- ANALYZE ENGINE ----------
+def analyze_coin(df, symbol, btc_trend):
+    df = add_indicators(df)
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
+
+    try:
+        price = float(last["close"])
+        rsi = float(last["rsi"])
+        volume_ratio = float(last["volume_ratio"])
+        atr = float(last["atr"])
+        ema200 = float(last["ema200"])
+        ema50 = float(last["ema50"])
+    except (TypeError, ValueError):
+        return None
+
+    if not all(np.isfinite(x) for x in [price, rsi, atr, ema200, ema50]):
+        return None
+    if atr <= 0:
+        return None
+    if not np.isfinite(volume_ratio):
+        volume_ratio = 0.0
+
+    is_anomaly = detect_anomaly(df)
+    if is_anomaly:
+        return {
+            "signal": "ANOMALY",
+            "symbol": symbol,
+            "entry": price,
+            "candle_time": last["close_time"].isoformat()
+        }
+
+    regime = get_volatility_regime(df)
+    bb_squeeze = detect_bb_squeeze(df)
+    smc = detect_bos_choch(df)
+    vwap_pos = get_vwap_position(df)
+
+    buy_score, sell_score = 0, 0
+    reasons_buy, reasons_sell = [], []
+
+    if price > ema200:
+        buy_score += 18
+        reasons_buy.append("بالای EMA200 (4H)")
+    else:
+        sell_score += 18
+        reasons_sell.append("پایین EMA200 (4H)")
+
+    if last["ema9"] > last["ema21"]:
+        buy_score += 12
+        reasons_buy.append("تقاطع صعودی EMA 9/21")
+    else:
+        sell_score += 12
+        reasons_sell.append("تقاطع نزولی EMA 9/21")
+
+    if price > ema50:
+        buy_score += 5
+    else:
+        sell_score += 5
+
+    divergence_found = False
+    if rsi < 40 and has_bullish_divergence(df):
+        buy_score += 22
+        reasons_buy.append("واگرایی صعودی + RSI " + f"{rsi:.1f}")
+        divergence_found = True
+    elif rsi > 60 and has_bearish_divergence(df):
+        sell_score += 22
+        reasons_sell.append("واگرایی نزولی + RSI " + f"{rsi:.1f}")
+        divergence_found = True
+
+    if not divergence_found:
+        if 45 <= rsi <= 68:
+            buy_score += 10
+            reasons_buy.append("RSI مومنتوم (" + f"{rsi:.1f}" + ")")
+        elif 32 <= rsi <= 55:
+            sell_score += 10
+            reasons_sell.append("RSI مومنتوم (" + f"{rsi:.1f}" + ")")
+
+    if prev["macd"] <= prev["macd_signal"] and last["macd"] > last["macd_signal"]:
+        buy_score += 10
+        reasons_buy.append("تقاطع صعودی MACD")
+    elif prev["macd"] >= prev["macd_signal"] and last["macd"] < last["macd_signal"]:
+        sell_score += 10
+        reasons_sell.append("تقاطع نزولی MACD")
+    elif last["macd_hist"] > 0:
+        buy_score += 4
+    elif last["macd_hist"] < 0:
+        sell_score += 4
+
+    if last["obv"] > last["obv_ema"]:
+        buy_score += 6
+        reasons_buy.append("OBV مثبت")
+    else:
+        sell_score += 6
+        reasons_sell.append("OBV منفی")
+
+    if volume_ratio >= MIN_VOLUME_RATIO:
+        if last["close"] > last["open"]:
+            buy_score += 12
+            reasons_buy.append("حجم قوی (" + f"{volume_ratio:.2f}" + "x)")
+        else:
+            sell_score += 12
+            reasons_sell.append("حجم سنگین فروش (" + f"{volume_ratio:.2f}" + "x)")
+
+    if smc["bos_bull"]:
+        buy_score += 8
+        reasons_buy.append("BOS صعودی (شکست ساختار)")
+    if smc["bos_bear"]:
+        sell_score += 8
+        reasons_sell.append("BOS نزولی")
+    if smc["choch_bull"]:
+        buy_score += 6
+        reasons_buy.append("CHoCH صعودی (تغییر روند)")
+    if smc["choch_bear"]:
+        sell_score += 6
+        reasons_sell.append("CHoCH نزولی")
+
+    if regime == "TRENDING":
+        if buy_score > sell_score:
+            buy_score += 5
+            reasons_buy.append("رژیم Trending (تایید مومنتوم)")
+        elif sell_score > buy_score:
+            sell_score += 5
+            reasons_sell.append("رژیم Trending (تایید مومنتوم)")
+
+    if bb_squeeze:
+        if buy_score > sell_score:
+            buy_score += 4
+            reasons_buy.append("Squeeze بولینگر (انفجار نزدیک)")
+        elif sell_score > buy_score:
+            sell_score += 4
+            reasons_sell.append("Squeeze بولینگر")
+
+    if vwap_pos == "ABOVE":
+        buy_score += 4
+        reasons_buy.append("بالای VWAP")
+    elif vwap_pos == "BELOW":
+        sell_score += 4
+        reasons_sell.append("پایین VWAP")
+
+    direction, score, reasons = None, 0, []
+    if buy_score >= MIN_SCORE and buy_score > sell_score:
+        if btc_trend == "BEARISH" and symbol != "BTCUSDT":
+            return None
+        direction, score, reasons = "BUY", buy_score, reasons_buy
+    elif sell_score >= MIN_SCORE and sell_score > buy_score:
+        direction, score, reasons = "SELL", sell_score, reasons_sell
+    else:
+        return None
+
+    if REQUIRE_DAILY_ALIGNMENT:
+        if not check_daily_alignment(symbol, direction):
+            return None
+        score += 5
+        reasons.append("تاییدیه Daily (روند کلان)")
+
+    if not check_1h_confirmation(symbol, direction):
+        return None
+    score += 5
+    reasons.append("تاییدیه 1H (Multi-TF)")
+
+    ob_in_zone = False
+    obs = find_order_blocks(df, direction)
+    for ob in obs:
+        if is_price_in_zone(price, ob):
+            ob_in_zone = True
+            score += 8
+            reasons.append("ورود در ناحیه Order Block")
+            break
+
+    fvgs = find_fair_value_gaps(df, direction)
+    fvg_in_zone = False
+    for fvg in fvgs:
+        if is_price_in_zone(price, fvg):
+            fvg_in_zone = True
+            score += 6
+            reasons.append("ورود در Fair Value Gap")
+            break
+
+    funding_rate, open_interest, oi_change = get_futures_cached(symbol)
+    if direction == "BUY" and funding_rate < -0.001:
+        score += 4
+        reasons.append("فاندینگ مساعد (" + f"{funding_rate*100:.3f}" + "%)")
+    elif direction == "SELL" and funding_rate > 0.001:
+        score += 4
+        reasons.append("فاندینگ مساعد (" + f"{funding_rate*100:.3f}" + "%)")
+
+    if direction == "BUY":
+        atr_sl = price - (atr * SL_ATR_MULTIPLIER)
+        ob_sl = atr_sl
+        for ob in obs:
+            if ob["bottom"] < price:
+                candidate = ob["bottom"] - (atr * 0.2)
+                if candidate > atr_sl and candidate < price:
+                    ob_sl = candidate
+                    break
+        stop_loss = ob_sl if ob_sl != atr_sl else atr_sl
+        risk_per_unit = price - stop_loss
+        tp1 = price + (risk_per_unit * TP1_RR)
+        tp2 = price + (risk_per_unit * TP2_RR)
+    else:
+        atr_sl = price + (atr * SL_ATR_MULTIPLIER)
+        ob_sl = atr_sl
+        for ob in obs:
+            if ob["top"] > price:
+                candidate = ob["top"] + (atr * 0.2)
+                if candidate < atr_sl and candidate > price:
+                    ob_sl = candidate
+                    break
+        stop_loss = ob_sl if ob_sl != atr_sl else atr_sl
+        risk_per_unit = stop_loss - price
+        tp1 = price - (risk_per_unit * TP1_RR)
+        tp2 = price - (risk_per_unit * TP2_RR)
+
+    return {
+        "signal": direction,
+        "symbol": symbol,
+        "entry": price,
+        "score": score,
+        "rsi": rsi,
+        "volume_ratio": volume_ratio,
+        "funding_rate": funding_rate,
+        "open_interest": open_interest,
+        "oi_change_24h": oi_change,
+        "stop_loss": stop_loss,
+        "tp1": tp1,
+        "tp2": tp2,
+        "reasons": reasons,
+        "has_divergence": divergence_found,
+        "regime": regime,
+        "bb_squeeze": bb_squeeze,
+        "ob_in_zone": ob_in_zone,
+        "fvg_in_zone": fvg_in_zone,
+        "candle_time": last["close_time"].isoformat()
+}
+# ---------- STATE ----------
 def load_state():
     state = load_json(STATE_FILE, {})
     cutoff = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
@@ -955,15 +857,14 @@ def save_history(history):
     save_json(HISTORY_FILE, history)
 
 
-# ---------- COOLDOWN / RISK MGMT ----------
+# ---------- COOLDOWN ----------
 def load_cooldown():
-    data = load_json(COOLDOWN_FILE, {
+    return load_json(COOLDOWN_FILE, {
         "consecutive_sl": 0,
         "cooldown_until": None,
         "daily_count": 0,
         "daily_date": None
     })
-    return data
 
 
 def save_cooldown(data):
@@ -979,7 +880,6 @@ def is_in_cooldown():
         until_dt = datetime.fromisoformat(cooldown_until)
         if datetime.now(timezone.utc) < until_dt:
             return True
-        # تموم شد، ریست کن
         cd["cooldown_until"] = None
         cd["consecutive_sl"] = 0
         save_cooldown(cd)
@@ -989,7 +889,6 @@ def is_in_cooldown():
 
 
 def register_sl_result():
-    """وقتی SL خورد، شمارنده زیاد می‌شه"""
     cd = load_cooldown()
     cd["consecutive_sl"] = cd.get("consecutive_sl", 0) + 1
     if cd["consecutive_sl"] >= 3:
@@ -1004,14 +903,12 @@ def register_sl_result():
 
 
 def register_tp_result():
-    """وقتی TP خورد، شمارنده SL ریست می‌شه"""
     cd = load_cooldown()
     cd["consecutive_sl"] = 0
     save_cooldown(cd)
 
 
 def check_daily_limit():
-    """حداکثر سیگنال روزانه"""
     cd = load_cooldown()
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     if cd.get("daily_date") != today:
@@ -1028,18 +925,12 @@ def increment_daily_count():
 
 
 def count_open_signals():
-    """تعداد سیگنال‌های باز"""
     history = load_history()
     return len([h for h in history if h.get("status") == "open"])
 
 
 # ---------- POSITION SIZING ----------
 def calculate_position_size(entry, stop_loss, score, account_size=1000, risk_per_trade_pct=1.0):
-    """
-    محاسبه‌ی حجم پوزیشن بر اساس ریسک
-    account_size: اندازه حساب فرضی
-    risk_per_trade_pct: درصد ریسک در هر معامله
-    """
     try:
         risk_amount = account_size * (risk_per_trade_pct / 100)
         risk_per_unit = abs(entry - stop_loss)
@@ -1056,16 +947,13 @@ def calculate_position_size(entry, stop_loss, score, account_size=1000, risk_per
         }
     except Exception:
         return None
-
-
-# ---------- MESSAGE BUILDER ----------
+# ---------- MESSAGE ----------
 def build_message(res, fng_val):
     is_strong = res['score'] >= STRONG_SCORE
     has_div = res.get("has_divergence", False)
     has_ob = res.get("ob_in_zone", False)
     has_fvg = res.get("fvg_in_zone", False)
 
-    # بج
     if has_div:
         emoji = "💎"
         badge = "سیگنال واگرایی (نایاب)"
@@ -1079,7 +967,6 @@ def build_message(res, fng_val):
         emoji = "🟢" if res['signal'] == "BUY" else "🔴"
         badge = "سیگنال معمولی (4H)"
 
-    # حجم
     if res['volume_ratio'] >= MIN_VOLUME_RATIO:
         vol_status = "قوی " + f"{res['volume_ratio']:.2f}" + "x"
     elif res['volume_ratio'] >= 1.0:
@@ -1087,7 +974,6 @@ def build_message(res, fng_val):
     else:
         vol_status = "ضعیف " + f"{res['volume_ratio']:.2f}" + "x"
 
-    # OI
     oi_change = res['oi_change_24h']
     if oi_change > 5:
         oi_status = "+" + f"{oi_change:.1f}" + "%"
@@ -1096,7 +982,6 @@ def build_message(res, fng_val):
     else:
         oi_status = f"{oi_change:+.1f}" + "%"
 
-    # Regime
     regime = res.get("regime", "UNKNOWN")
     if regime == "TRENDING":
         regime_emoji = "🚀 Trending"
@@ -1105,18 +990,14 @@ def build_message(res, fng_val):
     else:
         regime_emoji = "❓ Unknown"
 
-    # Squeeze
     squeeze_text = " ⚡ Squeeze" if res.get("bb_squeeze") else ""
 
-    # دلایل
     reasons_text = "\n".join(["• " + r for r in res["reasons"]])
 
-    # درصدها
     risk_pct = abs(res['entry'] - res['stop_loss']) / res['entry'] * 100
     reward1_pct = abs(res['tp1'] - res['entry']) / res['entry'] * 100
     reward2_pct = abs(res['tp2'] - res['entry']) / res['entry'] * 100
 
-    # Position Sizing
     pos = calculate_position_size(res['entry'], res['stop_loss'], res['score'])
     if pos:
         pos_text = (
@@ -1126,7 +1007,7 @@ def build_message(res, fng_val):
     else:
         pos_text = ""
 
-    return (
+    msg = (
         emoji + " <b>" + badge + "</b>\n\n"
         "<b>نماد:</b> #" + res['symbol'].replace('USDT', '') + "\n"
         "<b>جهت:</b> " + res['signal'] + "\n"
@@ -1134,15 +1015,16 @@ def build_message(res, fng_val):
         "🛑 <b>SL:</b> " + f"{res['stop_loss']:.6g}" + " (-" + f"{risk_pct:.2f}" + "%)\n"
         "🎯 <b>TP1:</b> " + f"{res['tp1']:.6g}" + " (+" + f"{reward1_pct:.2f}" + "%)\n"
         "🎯 <b>TP2:</b> " + f"{res['tp2']:.6g}" + " (+" + f"{reward2_pct:.2f}" + "%)\n\n"
-        pos_text +
-        "📊 <b>امتیاز:</b> " + str(res['score']) + "/100 | <b>RSI:</b> " + f"{res['rsi']:.1f}" + "\n"
-        "📦 <b>حجم:</b> " + vol_status + "\n"
-        "⚡ <b>فاندینگ:</b> " + f"{res['funding_rate']*100:.4f}" + "%\n"
-        "💼 <b>OI:</b> " + format_num(res['open_interest']) + " | " + oi_status + "\n"
-        "🌊 <b>رژیم بازار:</b> " + regime_emoji + squeeze_text + "\n"
-        "😱 <b>ترس و طمع:</b> " + str(fng_val) + "\n\n"
-        "<b>دلایل:</b>\n" + reasons_text
+        + pos_text
+        + "📊 <b>امتیاز:</b> " + str(res['score']) + "/100 | <b>RSI:</b> " + f"{res['rsi']:.1f}" + "\n"
+        + "📦 <b>حجم:</b> " + vol_status + "\n"
+        + "⚡ <b>فاندینگ:</b> " + f"{res['funding_rate']*100:.4f}" + "%\n"
+        + "💼 <b>OI:</b> " + format_num(res['open_interest']) + " | " + oi_status + "\n"
+        + "🌊 <b>رژیم بازار:</b> " + regime_emoji + squeeze_text + "\n"
+        + "😱 <b>ترس و طمع:</b> " + str(fng_val) + "\n\n"
+        + "<b>دلایل:</b>\n" + reasons_text
     )
+    return msg
 
 
 def build_anomaly_message(res):
@@ -1153,7 +1035,8 @@ def build_anomaly_message(res):
         "حجم یا نوسان غیرطبیعی شناسایی شد.\n"
         "ممکنه دام (Trap) یا خبر مهم باشه.\n\n"
         "🚫 سیگنال معاملاتی صادر نشد."
-)
+    )
+
 
 # ---------- TRACKING ----------
 def get_current_price(symbol):
@@ -1290,14 +1173,9 @@ def build_stats_report(stats, title):
         "🛡️ SL ریسک صفر: " + str(stats['sl_zero']) + "\n\n"
         "📈 نرخ موفقیت: " + f"{stats['win_rate']:.1f}" + "%\n"
         "💰 سود فرضی: " + f"{stats['pnl_r']:+.2f}" + "R"
-    )
-
-
+        )
 # ---------- PARALLEL SCAN ----------
 def process_single_coin(item, btc_trend, fng_val, state, history_lock):
-    """
-    پردازش یه کوین به‌صورت مستقل (برای موازی‌سازی)
-    """
     symbol = item["symbol"]
     try:
         df = get_klines(symbol, TIMEFRAME_MAIN)
@@ -1308,11 +1186,9 @@ def process_single_coin(item, btc_trend, fng_val, state, history_lock):
         if not res:
             return None
 
-        # Anomaly handling
         if res.get("signal") == "ANOMALY":
             return {"type": "anomaly", "data": res}
 
-        # Check state
         key = symbol + "_" + res['signal'] + "_" + res['candle_time']
         if key in state:
             return None
@@ -1359,7 +1235,6 @@ def run_scan():
     div_count = 0
     anomaly_count = 0
 
-    # موازی‌سازی
     results = []
     with ThreadPoolExecutor(max_workers=PARALLEL_WORKERS) as executor:
         futures = {
@@ -1374,7 +1249,6 @@ def run_scan():
             except Exception as e:
                 log("[FUTURE ERROR] " + str(e))
 
-    # پردازش نتایج
     for r in results:
         if r["type"] == "anomaly":
             anomaly_count += 1
@@ -1435,6 +1309,7 @@ def run_scan():
     except Exception as e:
         log("[TRACK ERROR] " + str(e))
 
+
 # ---------- REPORT SCHEDULING ----------
 def should_send_daily_report(now):
     return now.hour == DAILY_REPORT_HOUR and now.minute < 30
@@ -1446,12 +1321,10 @@ def should_send_weekly_report(now):
             and now.minute < 30)
 
 
-# ---------- GITHUB ACTIONS MAIN (single run) ----------
+# ---------- MAIN ----------
 def main_github_actions():
-    """حالت GitHub Actions: یه بار اجرا می‌شه و می‌ره"""
     log("=" * 50)
-    log("🤖 ربات INSTITUTIONAL GRADE v5 فعال شد")
-    log("حالت: GitHub Actions (single run)")
+    log("ربات INSTITUTIONAL GRADE v5 - GitHub Actions")
     log("=" * 50)
 
     try:
@@ -1459,22 +1332,17 @@ def main_github_actions():
 
         now = datetime.now(timezone.utc)
         today_key = now.strftime("%Y-%m-%d")
-
         cooldown = load_cooldown()
 
-        # گزارش هفتگی
         if should_send_weekly_report(now):
-            last_weekly = cooldown.get("last_weekly_report")
-            if last_weekly != today_key:
+            if cooldown.get("last_weekly_report") != today_key:
                 log("[REPORT] گزارش هفتگی...")
                 send_telegram(build_stats_report(compute_stats(7), "هفتگی"))
                 cooldown["last_weekly_report"] = today_key
                 save_cooldown(cooldown)
 
-        # گزارش روزانه
         if should_send_daily_report(now):
-            last_daily = cooldown.get("last_daily_report")
-            if last_daily != today_key:
+            if cooldown.get("last_daily_report") != today_key:
                 log("[REPORT] گزارش روزانه...")
                 send_telegram(build_stats_report(compute_stats(1), "روزانه"))
                 cooldown["last_daily_report"] = today_key
@@ -1485,12 +1353,9 @@ def main_github_actions():
         log(traceback.format_exc())
 
 
-# ---------- PYDROID MAIN (continuous) ----------
 def main_pydroid_loop():
-    """حالت Pydroid: حلقه‌ی بی‌نهایت"""
     log("=" * 50)
-    log("🤖 ربات INSTITUTIONAL GRADE v5 فعال شد")
-    log("حالت: Pydroid (continuous)")
+    log("ربات INSTITUTIONAL GRADE v5 - Pydroid")
     log("=" * 50)
 
     last_daily = None
@@ -1517,7 +1382,7 @@ def main_pydroid_loop():
             consecutive_errors = 0
 
         except KeyboardInterrupt:
-            log("\n[STOP] ربات متوقف شد.")
+            log("\n[STOP]")
             break
         except SystemExit:
             log("[STOP]")
@@ -1532,15 +1397,12 @@ def main_pydroid_loop():
                 consecutive_errors = 0
 
         try:
-            time.sleep(1800)  # 30 دقیقه
+            time.sleep(1800)
         except KeyboardInterrupt:
             break
 
 
-# ---------- ENTRY POINT ----------
 if __name__ == "__main__":
-    # اگه توی GitHub Actions هستیم، یه بار اجرا کن
-    # اگه توی Pydroid هستیم، حلقه‌ی بی‌نهایت
     if os.getenv("GITHUB_ACTIONS") == "true":
         main_github_actions()
     else:
