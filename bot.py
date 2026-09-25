@@ -584,8 +584,8 @@ def analyze_coin(df, symbol):
             tp1 = close - (risk * TP1_RR)
             tp2 = close - (risk * TP2_RR)
             
-        return {
+        result_dict = {
             "symbol": symbol,
             "direction": direction,
             "score": score,
-         
+  
