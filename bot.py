@@ -1,6 +1,6 @@
 # =========================================================
-# Crypto Signal Bot - Clean & Optimized Pro Edition (v2.0)
-# Data source: Binance (Independent Fixed List)
+# Crypto Signal Bot - Institutional Ultimate Edition (v3.0)
+# Data source: Binance (Spot + Futures Derivatives)
 # Executed via GitHub Actions
 # =========================================================
 
@@ -19,13 +19,13 @@ from datetime import datetime, timezone
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-TIMEFRAME_MAIN = "4h"     # تایم‌فریم اصلی تحلیل (بهترین انتخاب برای اسوینگ)
+TIMEFRAME_MAIN = "4h"     # تایم‌فریم اصلی تحلیل (سوینگ)
 TIMEFRAME_SUB = "1h"      # تایم‌فریم تاییدیه چندگانه (Multi-TF)
 KLINE_LIMIT = 500         # تعداد کندل‌ها برای محاسبات دقیق EMA200
 
-MIN_SCORE = 62            # آستانه امتیاز متوازن برای کیفیت و تعداد سیگنال
-MIN_VOLUME_RATIO = 1.20   # حداقل ۲۰٪ افزایش حجم نسبت به میانگین
-MIN_24H_USDT_VOLUME = 5_000_000  # حداقل حجم معاملات ۲۴ ساعته (۵ میلیون دلار)
+MIN_SCORE = 68            # آستانه امتیاز سخت‌گیرانه‌تر برای سیگنال‌های درجه‌یک
+MIN_VOLUME_RATIO = 1.30   # حداقل ۳۰٪ افزایش حجم نسبت به میانگین
+MIN_24H_USDT_VOLUME = 10_000_000  # حداقل حجم معاملات ۲۴ ساعته (۱۰ میلیون دلار)
 
 ATR_PERIOD = 14
 SL_ATR_MULTIPLIER = 1.50   # حد زیان پویا بر اساس ATR
@@ -33,7 +33,8 @@ TP1_RR = 1.50             # ریسک به ریوارد تارگت اول
 TP2_RR = 2.80             # ریسک به ریوارد تارگت دوم
 
 STATE_FILE = "signals_state.json"
-BINANCE_BASE = "https://data-api.binance.vision"
+BINANCE_SPOT_BASE = "https://data-api.binance.vision"
+BINANCE_FUTURES_BASE = "https://fapi.binance.com"
 
 
 # =========================================================
@@ -44,7 +45,6 @@ def http_get(url, params=None, retries=3):
     for attempt in range(retries):
         try:
             response = requests.get(url, params=params, timeout=20)
-            # مدیریت خطای Rate Limit (کد ۴۲۹ بایننس)
             if response.status_code == 429:
                 print("[WARNING] محدودیت نرخ درخواست (Rate Limit). در حال مکث...")
                 time.sleep(5)
@@ -79,7 +79,20 @@ def send_telegram(message):
 
 
 # =========================================================
-# 3. MARKET COINS DISCOVERY & VOLUME FILTER
+# 3. DERIVATIVES & MARKET METRICS (NEW)
+# =========================================================
+
+def get_futures_metrics(symbol):
+    try:
+        pi = http_get(f"{BINANCE_FUTURES_BASE}/fapi/v1/premiumIndex", params={"symbol": symbol})
+        funding_rate = float(pi.get("lastFundingRate", 0)) if pi else 0.0
+        return funding_rate
+    except:
+        return 0.0
+
+
+# =========================================================
+# 4. MARKET COINS DISCOVERY & VOLUME FILTER
 # =========================================================
 
 def get_scan_coins():
@@ -103,7 +116,7 @@ def get_scan_coins():
     
     unique_coins = sorted(list(set(all_coins)))
 
-    tickers = http_get(f"{BINANCE_BASE}/api/v3/ticker/24hr")
+    tickers = http_get(f"{BINANCE_SPOT_BASE}/api/v3/ticker/24hr")
     valid_volumes = {}
     if tickers:
         for t in tickers:
@@ -114,7 +127,7 @@ def get_scan_coins():
                 except:
                     pass
 
-    info = http_get(f"{BINANCE_BASE}/api/v3/exchangeInfo")
+    info = http_get(f"{BINANCE_SPOT_BASE}/api/v3/exchangeInfo")
     if not info:
         return [{"coin": c, "symbol": c + "USDT"} for c in unique_coins]
 
@@ -136,12 +149,12 @@ def get_scan_coins():
 
 
 # =========================================================
-# 4. TECHNICAL INDICATORS & DATA
+# 5. TECHNICAL INDICATORS & DATA
 # =========================================================
 
 def get_klines(symbol, interval):
     params = {"symbol": symbol, "interval": interval, "limit": KLINE_LIMIT}
-    data = http_get(f"{BINANCE_BASE}/api/v3/klines", params=params)
+    data = http_get(f"{BINANCE_SPOT_BASE}/api/v3/klines", params=params)
     if not data or len(data) < 210:
         return None
 
@@ -223,7 +236,7 @@ def check_1h_confirmation(symbol, direction):
 
 
 # =========================================================
-# 5. STRATEGY ENGINE
+# 6. STRATEGY ENGINE
 # =========================================================
 
 def analyze_coin(df, symbol, btc_trend):
@@ -313,6 +326,15 @@ def analyze_coin(df, symbol, btc_trend):
     reasons.append("تاییدیه مومنتوم ۱ ساعته (Multi-TF)")
     score += 5
 
+    # فیلتر فاندینگ ریت (برای بهینه‌سازی دقیق‌تر)
+    funding_rate = get_futures_metrics(symbol)
+    if direction == "BUY" and funding_rate < 0:
+        score += 5
+        reasons.append(f"فاندینگ ریت منفی مساعد ({funding_rate*100:.3f}%)")
+    elif direction == "SELL" and funding_rate > 0:
+        score += 5
+        reasons.append(f"فاندینگ ریت مثبت مساعد ({funding_rate*100:.3f}%)")
+
     if direction == "BUY":
         stop_loss = price - (atr * SL_ATR_MULTIPLIER)
         risk = price - stop_loss
@@ -331,6 +353,7 @@ def analyze_coin(df, symbol, btc_trend):
         "score": score,
         "rsi": rsi,
         "volume_ratio": volume_ratio,
+        "funding_rate": funding_rate,
         "stop_loss": stop_loss,
         "tp1": tp1,
         "tp2": tp2,
@@ -340,11 +363,10 @@ def analyze_coin(df, symbol, btc_trend):
 
 
 # =========================================================
-# 6. STATE HANDLING & MAIN RUNNER
+# 7. STATE HANDLING & MAIN RUNNER
 # =========================================================
 
 def clean_old_states(state):
-    """پاکسازی خودکار سیگنال‌های قدیمی‌تر از ۴۸ ساعت برای جلوگیری از حجیم شدن فایل State"""
     now = datetime.now(timezone.utc)
     cleaned = {}
     for k, v in state.items():
@@ -374,7 +396,7 @@ def save_state(state):
 
 
 def run_scan():
-    print(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] شروع اسکن بهینه بازار...")
+    print(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] شروع اسکن سازمانی بازار...")
     
     btc_macro_trend = get_btc_macro_trend()
     print(f"روند کلان بیت‌کوین: {btc_macro_trend}")
@@ -403,16 +425,16 @@ def run_scan():
 
         emoji = "🟢" if result["signal"] == "BUY" else "🔴"
         msg = (
-            f"{emoji} <b>سیگنال جدید (Pro Clean Edition)</b>\n\n"
+            f"{emoji} <b>سیگنال سازمانی (Institutional 4H)</b>\n\n"
             f"<b>نماد:</b> #{result['symbol'].replace('USDT', '')}\n"
             f"<b>جهت:</b> {result['signal']}\n"
             f"<b>نقطه ورود:</b> {result['entry']:.6g}\n\n"
             f"🛑 <b>حد زیان (SL):</b> {result['stop_loss']:.6g}\n"
             f"🎯 <b>تارگت اول (TP1):</b> {result['tp1']:.6g}\n"
             f"🎯 <b>تارگت دوم (TP2):</b> {result['tp2']:.6g}\n\n"
-            f"📊 <b>امتیاز استراتژی:</b> {result['score']}/95\n"
-            f"📈 <b>RSI:</b> {result['rsi']:.1f}\n"
-            f"📦 <b>نسبت حجم:</b> {result['volume_ratio']:.2f}x\n\n"
+            f"📊 <b>امتیاز استراتژی:</b> {result['score']}/100\n"
+            f"📈 <b>RSI:</b> {result['rsi']:.1f} | 📦 <b>حجم:</b> {result['volume_ratio']:.2f}x\n"
+            f"⚡ <b>فاندینگ ریت:</b> {result['funding_rate']*100:.4f}%\n\n"
             f"<b>دلایل تاییدیه:</b>\n" + "\n".join([f"• {r}" for r in result["reasons"]])
         )
 
@@ -422,7 +444,6 @@ def run_scan():
             sent_count += 1
             print(f"[SENT] سیگنال {symbol} ارسال شد.")
 
-        # تاخیر ایمن‌تر برای جلوگیری از خطای Rate Limit در گیت‌هاب اکشنز
         time.sleep(0.5)
 
     print(f"اسکن پایان یافت. سیگنال‌های ارسال‌شده: {sent_count}")
@@ -430,4 +451,3 @@ def run_scan():
 
 if __name__ == "__main__":
     run_scan()
-        
