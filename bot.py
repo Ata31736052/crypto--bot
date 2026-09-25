@@ -1,5 +1,5 @@
 # =========================================================
-# Crypto Signal Bot - Clean & Optimized Pro Edition
+# Crypto Signal Bot - Clean & Optimized Pro Edition (v2.0)
 # Data source: Binance (Independent Fixed List)
 # Executed via GitHub Actions
 # =========================================================
@@ -44,6 +44,11 @@ def http_get(url, params=None, retries=3):
     for attempt in range(retries):
         try:
             response = requests.get(url, params=params, timeout=20)
+            # مدیریت خطای Rate Limit (کد ۴۲۹ بایننس)
+            if response.status_code == 429:
+                print("[WARNING] محدودیت نرخ درخواست (Rate Limit). در حال مکث...")
+                time.sleep(5)
+                continue
             response.raise_for_status()
             return response.json()
         except Exception:
@@ -338,11 +343,26 @@ def analyze_coin(df, symbol, btc_trend):
 # 6. STATE HANDLING & MAIN RUNNER
 # =========================================================
 
+def clean_old_states(state):
+    """پاکسازی خودکار سیگنال‌های قدیمی‌تر از ۴۸ ساعت برای جلوگیری از حجیم شدن فایل State"""
+    now = datetime.now(timezone.utc)
+    cleaned = {}
+    for k, v in state.items():
+        try:
+            sent_at = datetime.fromisoformat(v["sent_at"])
+            if (now - sent_at).total_seconds() < 86400 * 2:
+                cleaned[k] = v
+        except:
+            pass
+    return cleaned
+
+
 def load_state():
     if os.path.exists(STATE_FILE):
         try:
             with open(STATE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+                state = json.load(f)
+                return clean_old_states(state)
         except Exception:
             return {}
     return {}
@@ -402,10 +422,12 @@ def run_scan():
             sent_count += 1
             print(f"[SENT] سیگنال {symbol} ارسال شد.")
 
-        time.sleep(0.3)
+        # تاخیر ایمن‌تر برای جلوگیری از خطای Rate Limit در گیت‌هاب اکشنز
+        time.sleep(0.5)
 
     print(f"اسکن پایان یافت. سیگنال‌های ارسال‌شده: {sent_count}")
 
 
 if __name__ == "__main__":
     run_scan()
+        
