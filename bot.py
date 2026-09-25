@@ -1,5 +1,5 @@
 # =========================================================
-# Crypto Signal Bot - Part 1: Imports, Configs & Utils
+# Crypto Signal Bot - Optimized Part 1
 # =========================================================
 
 import os, json, time, traceback
@@ -48,7 +48,7 @@ BINANCE_FUTURES_BASE = "https://fapi.binance.com"
 
 FUTURES_CACHE = {}
 FUTURES_CACHE_TTL = 3600
-PARALLEL_WORKERS = 5
+PARALLEL_WORKERS = 15  # افزایش سرعت پردازش موازی
 
 # ---------- UTILS ----------
 def log(msg):
@@ -58,18 +58,18 @@ def log(msg):
         pass
 
 
-def http_get(url, params=None, retries=3, timeout=25):
+def http_get(url, params=None, retries=2, timeout=10):  # بهینه‌سازی تایم‌اوت و تلاش مجدد برای جلوگیری از معطلی
     for attempt in range(retries):
         try:
             r = requests.get(url, params=params, timeout=timeout)
             if r.status_code == 429:
-                time.sleep((2 ** attempt) * 3)
+                time.sleep(1)
                 continue
             r.raise_for_status()
             return r.json()
         except Exception:
             if attempt < retries - 1:
-                time.sleep(2)
+                time.sleep(1)
     return None
 
 
@@ -87,15 +87,15 @@ def send_telegram(text, retries=3):
     }
     for attempt in range(retries):
         try:
-            res = requests.post(url, json=payload, timeout=(10, 45))
+            res = requests.post(url, json=payload, timeout=(10, 30))
             if res.status_code == 200:
                 return True
             if res.status_code == 429:
-                time.sleep(int(res.headers.get("Retry-After", 5)))
+                time.sleep(2)
                 continue
             return False
         except Exception:
-            time.sleep(3)
+            time.sleep(2)
     return False
 
 
@@ -119,9 +119,7 @@ def save_json(path, data):
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
         log("[SAVE ERROR] " + path + ": " + str(e))
-# =========================================================
-# Crypto Signal Bot - Part 2: Data, Indicators & Analysis Engine
-# =========================================================
+
 
 # ---------- DATA ----------
 def get_fear_greed_index():
@@ -144,16 +142,6 @@ def get_futures_metrics(symbol):
         oi_data = http_get(BINANCE_FUTURES_BASE + "/fapi/v1/openInterest", params={"symbol": symbol})
         if oi_data and isinstance(oi_data, dict):
             open_interest = float(oi_data.get("openInterest", 0) or 0)
-
-        oi_hist = http_get(
-            "https://www.binance.com/futures/data/openInterestHist",
-            params={"symbol": symbol, "period": "4h", "limit": 25}
-        )
-        if oi_hist and isinstance(oi_hist, list) and len(oi_hist) >= 2:
-            first = float(oi_hist[0].get("sumOpenInterest", 0) or 0)
-            last = float(oi_hist[-1].get("sumOpenInterest", 0) or 0)
-            if first > 0:
-                oi_change = ((last - first) / first) * 100
     except Exception as e:
         log(f"[FUTURES ERROR] {symbol}: {str(e)}")
         
@@ -181,9 +169,7 @@ def get_scan_coins():
         "PENDLE", "JUP", "PYTH", "W", "MANTA", "ALT", "STRK", "AXL",
         "AEVO", "REZ", "BB", "IO", "ZK", "LISTA", "DOGS", "CATI",
         "HMSTR", "EIGEN", "SCR", "PNUT", "ACT", "GOAT", "CHZ", "SAND", "MANA",
-        "GALA", "ENJ", "AXS", "THETA", "FTM", "SNX", "CRV", "MKR", "COMP",
-        "1INCH", "SUSHI", "BAL", "ZRX", "LDO", "RPL", "SSV", "FXS", "DYDX",
-        "GMX", "PERP", "RLC", "AR", "STORJ", "SC", "HOT"
+        "GALA", "ENJ", "AXS", "THETA", "FTM", "SNX", "CRV", "MKR", "COMP"
     ]
     unique_coins = sorted(set(all_coins))
 
@@ -221,7 +207,7 @@ def get_klines(symbol, interval, limit=None):
         limit = KLINE_LIMIT
     params = {"symbol": symbol, "interval": interval, "limit": limit}
     data = http_get(BINANCE_SPOT_BASE + "/api/v3/klines", params=params)
-    if not data or len(data) < 210:
+    if not data or len(data) < 200:
         return None
     columns = ["open_time", "open", "high", "low", "close", "volume",
                "close_time", "q_vol", "trades", "tb_base", "tb_quote", "ignore"]
@@ -296,7 +282,9 @@ def check_1h_confirmation(symbol, direction):
         return last["ema9"] > last["ema21"] and 40 <= last["rsi"] <= 75
     else:
         return last["ema9"] < last["ema21"] and 25 <= last["rsi"] <= 60
-
+        # =========================================================
+# Crypto Signal Bot - Optimized Part 2: SMC, Analysis & Main
+# =========================================================
 
 # ---------- SMC & DIVERGENCE ----------
 def find_local_minima(series, order=2):
@@ -350,7 +338,7 @@ def has_bearish_divergence(df):
             return False
         i1, i2 = highs_idx[-2], highs_idx[-1]
         gap = i2 - i1
-        if gap < DIVERGENCE_MIN_GAP or gap > DIVENRGENCE_MAX_GAP if 'DIVENRGENCE_MAX_GAP' in globals() else gap > DIVERGENCE_MAX_GAP:
+        if gap < DIVERGENCE_MIN_GAP or gap > DIVERGENCE_MAX_GAP:
             return False
         p1, p2 = recent.loc[i1, "high"], recent.loc[i2, "high"]
         r1, r2 = recent.loc[i1, "rsi"], recent.loc[i2, "rsi"]
@@ -471,9 +459,7 @@ def analyze_coin(df, symbol):
             return None
             
         funding_rate, open_interest, oi_change = get_futures_cached(symbol)
-        if open_interest <= 0:
-            return None
-            
+        
         if direction == "BUY":
             sl = close - (atr * SL_ATR_MULTIPLIER)
             risk = close - sl
@@ -495,10 +481,9 @@ def analyze_coin(df, symbol):
     except Exception as e:
         log(f"[ANALYZE ERROR] {symbol}: {str(e)}")
         return None
-            # =========================================================
-# Crypto Signal Bot - Part 3: Main Execution Loop
-# =========================================================
 
+
+# ---------- MAIN EXECUTION ----------
 def main():
     log("=== Crypto Signal Bot Started ===")
     coins = get_scan_coins()
@@ -551,4 +536,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
