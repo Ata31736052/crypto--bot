@@ -1,5 +1,6 @@
+
 # =========================================================
-# Crypto Signal Bot - INSTITUTIONAL GRADE v5.2 FINAL
+# Crypto Signal Bot - INSTITUTIONAL GRADE v5.3 FINAL
 # =========================================================
 
 import os, json, time, traceback
@@ -445,7 +446,7 @@ def detect_bos_choch(df):
             result["bos_bull"] = True
         if last_low < prev_low and last_close < last_low:
             result["bos_bear"] = True
-        if last_close > prev_high and last_low > prev_low:
+        if last_close > prev_high and last_low > prev_high:
             result["choch_bull"] = True
         if last_close < prev_low and last_high < prev_high:
             result["choch_bear"] = True
@@ -591,4 +592,4 @@ def analyze_coin(df, symbol):
             
         obs = find_order_blocks(df, direction)
         fvgs = find_fair_value_gaps(df, direction)
-  
+ 
