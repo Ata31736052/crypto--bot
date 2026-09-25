@@ -1,5 +1,5 @@
 # =========================================================
-# Crypto Signal Bot - INSTITUTIONAL GRADE v5.4 FINAL
+# Crypto Signal Bot - INSTITUTIONAL GRADE v5.4 CLEAN
 # =========================================================
 
 import os, json, time, traceback
@@ -584,8 +584,8 @@ def analyze_coin(df, symbol):
             tp1 = close - (risk * TP1_RR)
             tp2 = close - (risk * TP2_RR)
             
-        result_dict = {
+        return {
             "symbol": symbol,
             "direction": direction,
             "score": score,
-  
+         
