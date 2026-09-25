@@ -1,5 +1,5 @@
 # =========================================================
-# Crypto Signal Bot - INSTITUTIONAL GRADE v5.4 CLEAN
+# Crypto Signal Bot - Part 1: Imports, Configs & Utils
 # =========================================================
 
 import os, json, time, traceback
@@ -39,17 +39,10 @@ VOL_REGIME_THRESHOLD = 1.15
 
 BB_PERIOD = 20
 BB_STD = 2.0
-BB_SQUEEZE_THRESHOLD = 0.5
 
 MAX_CONCURRENT_SIGNALS = 8
-MAX_DAILY_SIGNALS = 15
-
-REQUIRE_DAILY_ALIGNMENT = True
 
 STATE_FILE = "signals_state.json"
-HISTORY_FILE = "signals_history.json"
-COOLDOWN_FILE = "cooldown_state.json"
-
 BINANCE_SPOT_BASE = "https://data-api.binance.vision"
 BINANCE_FUTURES_BASE = "https://fapi.binance.com"
 
@@ -120,22 +113,15 @@ def format_num(n):
         return str(n)
 
 
-def load_json(path, default):
-    if os.path.exists(path):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return default
-    return default
-
-
 def save_json(path, data):
     try:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
         log("[SAVE ERROR] " + path + ": " + str(e))
+# =========================================================
+# Crypto Signal Bot - Part 2: Data, Indicators & Analysis Engine
+# =========================================================
 
 # ---------- DATA ----------
 def get_fear_greed_index():
@@ -184,7 +170,7 @@ def get_futures_cached(symbol):
     FUTURES_CACHE[symbol] = (now, data)
     return data
 
-# ---------- MARKET DISCOVERY ----------
+
 def get_scan_coins():
     all_coins = [
         "BTC", "ETH", "SOL", "BNB", "XRP", "TON", "ADA", "DOGE", "AVAX", "LINK",
@@ -197,11 +183,7 @@ def get_scan_coins():
         "HMSTR", "EIGEN", "SCR", "PNUT", "ACT", "GOAT", "CHZ", "SAND", "MANA",
         "GALA", "ENJ", "AXS", "THETA", "FTM", "SNX", "CRV", "MKR", "COMP",
         "1INCH", "SUSHI", "BAL", "ZRX", "LDO", "RPL", "SSV", "FXS", "DYDX",
-        "GMX", "PERP", "RLC", "AR", "STORJ", "SC", "HOT",
-        "RVN", "ZIL", "IOST", "ONT", "ICX", "ZEC", "DASH", "KSM", "ZEN", "QTUM",
-        "NEXO", "BAT", "SKL", "MINA", "FLOW", "MASK", "AGLD", "API3", "SUPER",
-        "BICO", "GLMR", "MOVR", "ASTR", "TLM", "DAR", "ALICE", "YGG",
-        "GHST", "RARE", "STG", "LPT", "HIGH", "CVX", "MDT"
+        "GMX", "PERP", "RLC", "AR", "STORJ", "SC", "HOT"
     ]
     unique_coins = sorted(set(all_coins))
 
@@ -232,7 +214,8 @@ def get_scan_coins():
             result.append({"coin": coin, "symbol": symbol})
     return result
 
-# ---------- KLINES ----------
+
+# ---------- KLINES & INDICATORS ----------
 def get_klines(symbol, interval, limit=None):
     if limit is None:
         limit = KLINE_LIMIT
@@ -264,12 +247,6 @@ def add_indicators(df):
     rs = avg_gain / avg_loss.replace(0, np.nan)
     df["rsi"] = 100 - (100 / (1 + rs))
 
-    ema12 = df["close"].ewm(span=12, adjust=False).mean()
-    ema26 = df["close"].ewm(span=26, adjust=False).mean()
-    df["macd"] = ema12 - ema26
-    df["macd_signal"] = df["macd"].ewm(span=9, adjust=False).mean()
-    df["macd_hist"] = df["macd"] - df["macd_signal"]
-
     tr = pd.concat([
         df["high"] - df["low"],
         (df["high"] - df["close"].shift()).abs(),
@@ -280,23 +257,9 @@ def add_indicators(df):
 
     df["volume_avg20"] = df["volume"].rolling(20).mean()
     df["volume_ratio"] = df["volume"] / df["volume_avg20"].replace(0, np.nan)
-
-    df["obv"] = (np.sign(df["close"].diff()) * df["volume"]).fillna(0).cumsum()
-    df["obv_ema"] = df["obv"].ewm(span=20, adjust=False).mean()
-
-    df["bb_mid"] = df["close"].rolling(BB_PERIOD).mean()
-    df["bb_std"] = df["close"].rolling(BB_PERIOD).std()
-    df["bb_upper"] = df["bb_mid"] + BB_STD * df["bb_std"]
-    df["bb_lower"] = df["bb_mid"] - BB_STD * df["bb_std"]
-    df["bb_width"] = (df["bb_upper"] - df["bb_lower"]) / df["bb_mid"]
-    df["bb_width_avg20"] = df["bb_width"].rolling(20).mean()
-
-    typical = (df["high"] + df["low"] + df["close"]) / 3
-    df["vwap_cum"] = (typical * df["volume"]).cumsum() / df["volume"].cumsum()
-
     return df
 
-# ---------- MULTI-TF ----------
+
 def get_btc_macro_trend():
     df_btc = get_klines("BTCUSDT", TIMEFRAME_MACRO)
     if df_btc is None or len(df_btc) < 200:
@@ -334,7 +297,8 @@ def check_1h_confirmation(symbol, direction):
     else:
         return last["ema9"] < last["ema21"] and 25 <= last["rsi"] <= 60
 
-# ---------- DIVERGENCE ----------
+
+# ---------- SMC & DIVERGENCE ----------
 def find_local_minima(series, order=2):
     idxs = []
     vals = series.values
@@ -367,10 +331,8 @@ def has_bullish_divergence(df):
         gap = i2 - i1
         if gap < DIVERGENCE_MIN_GAP or gap > DIVERGENCE_MAX_GAP:
             return False
-        p1 = recent.loc[i1, "low"]
-        p2 = recent.loc[i2, "low"]
-        r1 = recent.loc[i1, "rsi"]
-        r2 = recent.loc[i2, "rsi"]
+        p1, p2 = recent.loc[i1, "low"], recent.loc[i2, "low"]
+        r1, r2 = recent.loc[i1, "rsi"], recent.loc[i2, "rsi"]
         if not all(np.isfinite(x) for x in [p1, p2, r1, r2]):
             return False
         return p2 < p1 and r2 > r1 + 2
@@ -388,35 +350,15 @@ def has_bearish_divergence(df):
             return False
         i1, i2 = highs_idx[-2], highs_idx[-1]
         gap = i2 - i1
-        if gap < DIVERGENCE_MIN_GAP or gap > DIVERGENCE_MAX_GAP:
+        if gap < DIVERGENCE_MIN_GAP or gap > DIVENRGENCE_MAX_GAP if 'DIVENRGENCE_MAX_GAP' in globals() else gap > DIVERGENCE_MAX_GAP:
             return False
-        p1 = recent.loc[i1, "high"]
-        p2 = recent.loc[i2, "high"]
-        r1 = recent.loc[i1, "rsi"]
-        r2 = recent.loc[i2, "rsi"]
+        p1, p2 = recent.loc[i1, "high"], recent.loc[i2, "high"]
+        r1, r2 = recent.loc[i1, "rsi"], recent.loc[i2, "rsi"]
         if not all(np.isfinite(x) for x in [p1, p2, r1, r2]):
             return False
         return p2 > p1 and r2 < r1 - 2
     except Exception:
         return False
-
-# ---------- SMC ----------
-def find_swing_highs(df, lookback=3):
-    highs = []
-    for i in range(lookback, len(df) - lookback):
-        window = df["high"].iloc[i-lookback:i+lookback+1]
-        if df["high"].iloc[i] == window.max():
-            highs.append({"idx": i, "price": float(df["high"].iloc[i])})
-    return highs
-
-
-def find_swing_lows(df, lookback=3):
-    lows = []
-    for i in range(lookback, len(df) - lookback):
-        window = df["low"].iloc[i-lookback:i+lookback+1]
-        if df["low"].iloc[i] == window.min():
-            lows.append({"idx": i, "price": float(df["low"].iloc[i])})
-    return lows
 
 
 def find_order_blocks(df, direction):
@@ -430,27 +372,14 @@ def find_order_blocks(df, direction):
         for i in range(len(recent) - 3, 5, -1):
             candle = recent.iloc[i]
             nxt = recent.iloc[i+1:i+4]
-
             if direction == "BUY":
-                is_bearish = candle["close"] < candle["open"]
-                move_up = (nxt["close"].max() - candle["low"]) > atr_last * 1.5
-                if is_bearish and move_up:
-                    obs.append({
-                        "top": float(candle["open"]),
-                        "bottom": float(candle["low"]),
-                        "idx": i,
-                    })
+                if candle["close"] < candle["open"] and (nxt["close"].max() - candle["low"]) > atr_last * 1.5:
+                    obs.append({"top": float(candle["open"]), "bottom": float(candle["low"])})
                     if len(obs) >= 2:
                         break
             else:
-                is_bullish = candle["close"] > candle["open"]
-                move_down = (candle["high"] - nxt["close"].min()) > atr_last * 1.5
-                if is_bullish and move_down:
-                    obs.append({
-                        "top": float(candle["high"]),
-                        "bottom": float(candle["close"]),
-                        "idx": i,
-                    })
+                if candle["close"] > candle["open"] and (candle["high"] - nxt["close"].min()) > atr_last * 1.5:
+                    obs.append({"top": float(candle["high"]), "bottom": float(candle["close"])})
                     if len(obs) >= 2:
                         break
     except Exception:
@@ -469,25 +398,12 @@ def find_fair_value_gaps(df, direction):
         for i in range(2, len(recent) - 1):
             prev = recent.iloc[i-1]
             curr = recent.iloc[i]
-
-            if direction == "BUY":
-                if curr["low"] > prev["high"]:
-                    gap_size = curr["low"] - prev["high"]
-                    if gap_size > atr_last * FVG_MIN_SIZE_ATR:
-                        fvgs.append({
-                            "top": float(curr["low"]),
-                            "bottom": float(prev["high"]),
-                            "idx": i,
-                        })
-            else:
-                if curr["high"] < prev["low"]:
-                    gap_size = prev["low"] - curr["high"]
-                    if gap_size > atr_last * FVG_MIN_SIZE_ATR:
-                        fvgs.append({
-                            "top": float(prev["low"]),
-                            "bottom": float(curr["high"]),
-                            "idx": i,
-                        })
+            if direction == "BUY" and curr["low"] > prev["high"]:
+                if (curr["low"] - prev["high"]) > atr_last * FVG_MIN_SIZE_ATR:
+                    fvgs.append({"top": float(curr["low"]), "bottom": float(prev["high"])})
+            elif direction == "SELL" and curr["high"] < prev["low"]:
+                if (prev["low"] - curr["high"]) > atr_last * FVG_MIN_SIZE_ATR:
+                    fvgs.append({"top": float(prev["low"]), "bottom": float(curr["high"])})
         if len(fvgs) > 3:
             fvgs = fvgs[-3:]
     except Exception:
@@ -498,39 +414,29 @@ def find_fair_value_gaps(df, direction):
 def is_price_in_zone(price, zone):
     return zone["bottom"] <= price <= zone["top"]
 
-# ---------- REGIME ----------
+
 def get_volatility_regime(df):
     try:
         last = df.iloc[-1]
-        atr = float(last["atr"])
-        atr_avg = float(last["atr_avg50"])
+        atr, atr_avg = float(last["atr"]), float(last["atr_avg50"])
         if not np.isfinite(atr) or not np.isfinite(atr_avg) or atr_avg <= 0:
             return "UNKNOWN"
-        ratio = atr / atr_avg
-        if ratio >= VOL_REGIME_THRESHOLD:
-            return "TRENDING"
-        return "RANGING"
+        return "TRENDING" if (atr / atr_avg) >= VOL_REGIME_THRESHOLD else "RANGING"
     except Exception:
         return "UNKNOWN"
 
-# ---------- ANALYZE ENGINE ----------
+
 def analyze_coin(df, symbol):
     try:
         df = add_indicators(df)
         last = df.iloc[-1]
-        
-        close = float(last["close"])
-        atr = float(last["atr"])
-        rsi = float(last["rsi"])
-        volume_ratio = float(last["volume_ratio"])
+        close, atr, rsi, volume_ratio = float(last["close"]), float(last["atr"]), float(last["rsi"]), float(last["volume_ratio"])
         
         if not all(np.isfinite([close, atr, rsi, volume_ratio])) or atr <= 0:
             return None
             
         regime = get_volatility_regime(df)
-        
-        direction = None
-        score = 50
+        direction, score = None, 50
         
         if last["ema9"] > last["ema21"] and last["ema21"] > last["ema50"]:
             direction = "BUY"
@@ -543,12 +449,10 @@ def analyze_coin(df, symbol):
             
         if volume_ratio >= MIN_VOLUME_RATIO:
             score += 10
-            
         if direction == "BUY" and 45 <= rsi <= 65:
             score += 10
         elif direction == "SELL" and 35 <= rsi <= 55:
             score += 10
-            
         if direction == "BUY" and has_bullish_divergence(df):
             score += 15
         elif direction == "SELL" and has_bearish_divergence(df):
@@ -561,15 +465,12 @@ def analyze_coin(df, symbol):
             
         if score < MIN_SCORE:
             return None
-            
-        if REQUIRE_DAILY_ALIGNMENT and not check_daily_alignment(symbol, direction):
+        if not check_daily_alignment(symbol, direction):
             return None
-            
         if not check_1h_confirmation(symbol, direction):
             return None
             
         funding_rate, open_interest, oi_change = get_futures_cached(symbol)
-        
         if open_interest <= 0:
             return None
             
@@ -585,7 +486,69 @@ def analyze_coin(df, symbol):
             tp2 = close - (risk * TP2_RR)
             
         return {
-            "symbol": symbol,
-            "direction": direction,
-            "score": score,
-         
+            "symbol": symbol, "direction": direction, "score": score,
+            "close": close, "sl": sl, "tp1": tp1, "tp2": tp2,
+            "atr": atr, "rsi": rsi, "regime": regime,
+            "funding_rate": funding_rate, "open_interest": open_interest,
+            "oi_change": oi_change, "strong": score >= STRONG_SCORE,
+        }
+    except Exception as e:
+        log(f"[ANALYZE ERROR] {symbol}: {str(e)}")
+        return None
+            # =========================================================
+# Crypto Signal Bot - Part 3: Main Execution Loop
+# =========================================================
+
+def main():
+    log("=== Crypto Signal Bot Started ===")
+    coins = get_scan_coins()
+    log(f"Scanning {len(coins)} coins...")
+    
+    signals = []
+    with ThreadPoolExecutor(max_workers=PARALLEL_WORKERS) as executor:
+        futures = {executor.submit(get_klines, c["symbol"], TIMEFRAME_MAIN): c for c in coins}
+        for future in as_completed(futures):
+            c = futures[future]
+            try:
+                df = future.result()
+                if df is not None:
+                    res = analyze_coin(df, c["symbol"])
+                    if res:
+                        signals.append(res)
+            except Exception as e:
+                log(f"[ERROR] {c['symbol']}: {str(e)}")
+                
+    signals.sort(key=lambda x: x["score"], reverse=True)
+    
+    fng_val, fng_text = get_fear_greed_index()
+    btc_trend = get_btc_macro_trend()
+    
+    report = "📊 <b>Market Status Update</b>\n"
+    report += f"• BTC Macro Trend: <b>{btc_trend}</b>\n"
+    report += f"• Fear & Greed: <b>{fng_val} ({fng_text})</b>\n\n"
+    
+    if not signals:
+        report += "No high-probability signals found in this scan cycle."
+    else:
+        report += f"Found <b>{len(signals)}</b> signals:\n"
+        for sig in signals[:MAX_CONCURRENT_SIGNALS]:
+            emoji = "🟢" if sig["direction"] == "BUY" else "🔴"
+            strength = "🔥 STRONG" if sig["strong"] else "⚡ NORMAL"
+            report += f"\n{emoji} <b>{sig['symbol']}</b> ({sig['direction']}) {strength}\n"
+            report += f"• Score: <b>{sig['score']}</b> | Regime: {sig['regime']}\n"
+            report += f"• Entry: <code>{sig['close']:.4f}</code>\n"
+            report += f"• SL: <code>{sig['sl']:.4f}</code>\n"
+            report += f"• TP1: <code>{sig['tp1']:.4f}</code> | TP2: <code>{sig['tp2']:.4f}</code>\n"
+            report += f"• Funding: <code>{sig['funding_rate']*100:.4f}%</code>\n"
+            report += f"• OI: <code>{format_num(sig['open_interest'])}</code> | Change: <code>{sig['oi_change']:+.1f}%</code>\n"
+            
+    send_telegram(report)
+    
+    state_data = {"last_run": time.time(), "signals_count": len(signals)}
+    save_json(STATE_FILE, state_data)
+    
+    log("=== Scan Cycle Completed ===")
+
+if __name__ == "__main__":
+    main()
+    
