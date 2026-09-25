@@ -1,5 +1,5 @@
 # =========================================================
-# Crypto Signal Bot - Pro Edition (Multi-TF + Volume + BTC Macro)
+# Crypto Signal Bot - Clean & Optimized Pro Edition
 # Data source: Binance (Independent Fixed List)
 # Executed via GitHub Actions
 # =========================================================
@@ -21,10 +21,10 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 TIMEFRAME_MAIN = "4h"     # تایم‌فریم اصلی تحلیل
 TIMEFRAME_SUB = "1h"      # تایم‌فریم تاییدیه چندگانه (Multi-TF)
-KLINE_LIMIT = 500         # تعداد کندل‌ها برای محاسبات دقیق EMA200 و تاریخچه
+KLINE_LIMIT = 500         # تعداد کندل‌ها برای محاسبات دقیق EMA200
 
-MIN_SCORE = 72            # امتیاز متوازن استراتژی
-MIN_VOLUME_RATIO = 1.20   # حداقل ۲۰٪ افزایش حجم نسبت به میانگین کندل‌ها
+MIN_SCORE = 70            # امتیاز متوازن استراتژی (کاهش جزئی برای پویایی بهتر)
+MIN_VOLUME_RATIO = 1.20   # حداقل ۲۰٪ افزایش حجم نسبت به میانگین
 MIN_24H_USDT_VOLUME = 5_000_000  # حداقل حجم معاملات ۲۴ ساعته (۵ میلیون دلار)
 
 ATR_PERIOD = 14
@@ -98,7 +98,6 @@ def get_scan_coins():
     
     unique_coins = sorted(list(set(all_coins)))
 
-    # دریافت حجم معاملات ۲۴ ساعته کل بازار به صورت یکجا
     tickers = http_get(f"{BINANCE_BASE}/api/v3/ticker/24hr")
     valid_volumes = {}
     if tickers:
@@ -125,17 +124,14 @@ def get_scan_coins():
         symbol = coin + "USDT"
         if symbol in binance_symbols:
             vol_24h = valid_volumes.get(symbol, 0)
-            # فیلتر حجم دلاری ۲۴ ساعته
             if vol_24h >= MIN_24H_USDT_VOLUME:
                 result.append({"coin": coin, "symbol": symbol})
-            else:
-                print(f"[FILTER] نماد {symbol} به دلیل حجم کم حذف شد ({vol_24h:,.0f} USDT)")
             
     return result
 
 
 # =========================================================
-# 4. ADVANCED DATA & INDICATORS
+# 4. TECHNICAL INDICATORS & DATA
 # =========================================================
 
 def get_klines(symbol, interval):
@@ -194,26 +190,11 @@ def add_indicators(df):
     return df
 
 
-def check_daily_trend(symbol):
-    df_daily = get_klines(symbol, "1d")
-    if df_daily is None or len(df_daily) < 200:
-        return "NEUTRAL"
-    
-    ema200_d = df_daily["close"].ewm(span=200, adjust=False).mean().iloc[-1]
-    last_close = df_daily.iloc[-1]["close"]
-    
-    if last_close > ema200_d:
-        return "BULLISH"
-    elif last_close < ema200_d:
-        return "BEARISH"
-    return "NEUTRAL"
-
-
 def get_btc_macro_trend():
-    """بررسی روند کلان بیت‌کوین در تایم روزانه برای فیلتر کلی بازار"""
+    """بررسی روند کلان بیت‌کوین در تایم روزانه برای فیلتر بازار"""
     df_btc = get_klines("BTCUSDT", "1d")
     if df_btc is None or len(df_btc) < 200:
-        return "BULLISH" # پیش‌فرض بهینه در صورت عدم دسترسی
+        return "BULLISH"
     
     ema200_btc = df_btc["close"].ewm(span=200, adjust=False).mean().iloc[-1]
     last_btc = df_btc.iloc[-1]["close"]
@@ -224,29 +205,24 @@ def get_btc_macro_trend():
 def check_1h_confirmation(symbol, direction):
     df_1h = get_klines(symbol, TIMEFRAME_SUB)
     if df_1h is None or len(df_1h) < 50:
-        return False, "داده کافی ۱ ساعته موجود نیست"
+        return False
 
     df_1h = add_indicators(df_1h)
     last_1h = df_1h.iloc[-1]
     
     if direction == "BUY":
-        if last_1h["close"] > last_1h["ema21"] or last_1h["ema9"] > last_1h["ema21"]:
-            return True, "تاییدیه مومنتوم ۱ ساعته صعودی"
+        return last_1h["close"] > last_1h["ema21"] or last_1h["ema9"] > last_1h["ema21"]
     elif direction == "SELL":
-        if last_1h["close"] < last_1h["ema21"] or last_1h["ema9"] < last_1h["ema21"]:
-            return True, "تاییدیه مومنتوم ۱ ساعته نزولی"
+        return last_1h["close"] < last_1h["ema21"] or last_1h["ema9"] < last_1h["ema21"]
             
-    return False, "عدم همبستگی با تایم ۱ ساعته"
+    return False
 
 
 # =========================================================
-# 5. BALANCED STRATEGY ENGINE
+# 5. STRATEGY ENGINE
 # =========================================================
 
 def analyze_coin(df, symbol, btc_trend):
-    # اگر بیت‌کوین در روند نزولی کلان باشد، از سیگنال‌های خرید آلت‌کوین‌ها جلوگیری می‌کنیم
-    # (مگر برای بیت‌کوین خودش)
-    
     df = add_indicators(df)
     last = df.iloc[-1]
     prev = df.iloc[-2]
@@ -262,63 +238,54 @@ def analyze_coin(df, symbol, btc_trend):
     buy_score, sell_score = 0, 0
     reasons_buy, reasons_sell = [], []
 
-    # 1. Daily Trend Filter
-    daily_trend = check_daily_trend(symbol)
-    if daily_trend == "BULLISH":
-        buy_score += 12
-        reasons_buy.append("روند روزانه صعودی")
-    elif daily_trend == "BEARISH":
-        sell_score += 12
-        reasons_sell.append("روند روزانه نزولی")
-
-    # 2. EMA 200 Filter
+    # فیلتر EMA 200
     if price > last["ema200"]:
-        buy_score += 15
+        buy_score += 20
         reasons_buy.append("قیمت بالاتر از EMA200 (4H)")
     else:
-        sell_score += 15
+        sell_score += 20
         reasons_sell.append("قیمت پایین‌تر از EMA200 (4H)")
 
-    # 3. EMA Crossover
+    # تقاطع EMA
     if last["ema9"] > last["ema21"]:
-        buy_score += 12
-        reasons_buy.append("تقاطع صعودی EMA9 و EMA21 (4H)")
+        buy_score += 15
+        reasons_buy.append("تقاطع صعودی EMA9 و EMA21")
     else:
-        sell_score += 12
-        reasons_sell.append("تقاطع نزولی EMA9 و EMA21 (4H)")
+        sell_score += 15
+        reasons_sell.append("تقاطع نزولی EMA9 و EMA21")
 
-    # 4. RSI Momentum
+    # مومنتوم RSI
     if 45 <= rsi <= 70:
-        buy_score += 12
+        buy_score += 15
         reasons_buy.append(f"مومنتوم مناسب RSI ({rsi:.1f})")
     elif rsi < 35:
-        buy_score += 10
+        buy_score += 12
         reasons_buy.append(f"اشباع فروش RSI ({rsi:.1f})")
 
     if 30 <= rsi <= 55:
-        sell_score += 12
+        sell_score += 15
         reasons_sell.append(f"مومنتوم نزولی RSI ({rsi:.1f})")
     elif rsi > 65:
-        sell_score += 10
+        sell_score += 12
         reasons_sell.append(f"اشباع خرید RSI ({rsi:.1f})")
 
-    # 5. MACD Filter
+    # MACD
     if prev["macd"] <= prev["macd_signal"] and last["macd"] > last["macd_signal"]:
-        buy_score += 12
+        buy_score += 15
         reasons_buy.append("تقاطع صعودی MACD")
     if prev["macd"] >= prev["macd_signal"] and last["macd"] < last["macd_signal"]:
-        sell_score += 12
+        sell_score += 15
         reasons_sell.append("تقاطع نزولی MACD")
 
-    # 6. OBV Flow
+    # جریان نقدینگی OBV
     if last["obv"] > last["obv_ema"]:
-        buy_score += 8
+        buy_score += 10
         reasons_buy.append("جریان پول مثبت (OBV)")
     else:
-        sell_score += 8
+        sell_score += 10
         reasons_sell.append("جریان پول منفی (OBV)")
 
-    # 7. Volume Spike
+    # حجم معاملات
     if volume_ratio >= MIN_VOLUME_RATIO:
         if last["close"] > last["open"]:
             buy_score += 15
@@ -327,24 +294,11 @@ def analyze_coin(df, symbol, btc_trend):
             sell_score += 15
             reasons_sell.append(f"افزایش حجم نزولی ({volume_ratio:.2f}x)")
 
-    # 8. Local Breakout
-    recent_high = df["high"].iloc[-11:-1].max()
-    recent_low = df["low"].iloc[-11:-1].min()
-
-    if last["close"] > recent_high:
-        buy_score += 14
-        reasons_buy.append("شکست سقف محلی (Breakout)")
-    if last["close"] < recent_low:
-        sell_score += 14
-        reasons_sell.append("شکست کف محلی (Breakdown)")
-
     direction, score, reasons = None, 0, []
     
     if buy_score >= MIN_SCORE and buy_score > sell_score:
-        # فیلتر کلان: اگر بازار در روند نزولی بیت‌کوین باشد و نماد خود بیت‌کوین نباشد، خرید انجام نمی‌شود
         if btc_trend == "BEARISH" and symbol != "BTCUSDT":
             return None
-            
         direction = "BUY"
         score = buy_score
         reasons = reasons_buy
@@ -355,12 +309,11 @@ def analyze_coin(df, symbol, btc_trend):
     else:
         return None
 
-    # 9. Multi-TF Confirmation Filter (1h)
-    is_confirmed, conf_reason = check_1h_confirmation(symbol, direction)
-    if not is_confirmed:
+    # تاییدیه تایم‌فریم ۱ ساعته
+    if not check_1h_confirmation(symbol, direction):
         return None
     
-    reasons.append(conf_reason)
+    reasons.append("تاییدیه مومنتوم ۱ ساعته (Multi-TF)")
     score += 5
 
     if direction == "BUY":
@@ -409,14 +362,13 @@ def save_state(state):
 
 
 def run_scan():
-    print(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] شروع اسکن پیشرفته بازار...")
+    print(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] شروع اسکن بهینه بازار...")
     
-    # بررسی روند کلان بیت‌کوین در ابتدا
     btc_macro_trend = get_btc_macro_trend()
-    print(f"وضعیت روند کلان بیت‌کوین (BTC Macro Trend): {btc_macro_trend}")
+    print(f"روند کلان بیت‌کوین: {btc_macro_trend}")
 
     coins = get_scan_coins()
-    print(f"تعداد ارزهای واجد شرایط حجم ۲۴ ساعته: {len(coins)}")
+    print(f"تعداد ارزهای واجد شرایط حجم: {len(coins)}")
     if not coins:
         return
 
@@ -439,7 +391,7 @@ def run_scan():
 
         emoji = "🟢" if result["signal"] == "BUY" else "🔴"
         msg = (
-            f"{emoji} <b>سیگنال جدید (Pro Filtered Edition)</b>\n\n"
+            f"{emoji} <b>سیگنال جدید (Pro Clean Edition)</b>\n\n"
             f"<b>نماد:</b> #{result['symbol'].replace('USDT', '')}\n"
             f"<b>جهت:</b> {result['signal']}\n"
             f"<b>نقطه ورود:</b> {result['entry']:.6g}\n\n"
@@ -458,10 +410,11 @@ def run_scan():
             sent_count += 1
             print(f"[SENT] سیگنال {symbol} ارسال شد.")
 
-        time.sleep(0.5)
+        time.sleep(0.3)
 
     print(f"اسکن پایان یافت. سیگنال‌های ارسال‌شده: {sent_count}")
 
 
 if __name__ == "__main__":
     run_scan()
+        
