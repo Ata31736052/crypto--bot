@@ -19,11 +19,11 @@ from datetime import datetime, timezone
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-TIMEFRAME_MAIN = "4h"     # تایم‌فریم اصلی تحلیل
+TIMEFRAME_MAIN = "4h"     # تایم‌فریم اصلی تحلیل (بهترین انتخاب برای اسوینگ)
 TIMEFRAME_SUB = "1h"      # تایم‌فریم تاییدیه چندگانه (Multi-TF)
 KLINE_LIMIT = 500         # تعداد کندل‌ها برای محاسبات دقیق EMA200
 
-MIN_SCORE = 62            # آستانه جدید امتیاز برای دریافت سیگنال‌های متعادل‌تر
+MIN_SCORE = 62            # آستانه امتیاز متوازن برای کیفیت و تعداد سیگنال
 MIN_VOLUME_RATIO = 1.20   # حداقل ۲۰٪ افزایش حجم نسبت به میانگین
 MIN_24H_USDT_VOLUME = 5_000_000  # حداقل حجم معاملات ۲۴ ساعته (۵ میلیون دلار)
 
@@ -409,4 +409,4 @@ def run_scan():
 
 if __name__ == "__main__":
     run_scan()
-            
+        
