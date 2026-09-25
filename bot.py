@@ -1,6 +1,5 @@
-
 # =========================================================
-# Crypto Signal Bot - INSTITUTIONAL GRADE v5.3 FINAL
+# Crypto Signal Bot - INSTITUTIONAL GRADE v5.4 FINAL
 # =========================================================
 
 import os, json, time, traceback
@@ -44,12 +43,8 @@ BB_SQUEEZE_THRESHOLD = 0.5
 
 MAX_CONCURRENT_SIGNALS = 8
 MAX_DAILY_SIGNALS = 15
-COOLDOWN_AFTER_3_SL = 6
 
 REQUIRE_DAILY_ALIGNMENT = True
-
-ANOMALY_VOLUME_MULT = 5.0
-ANOMALY_ATR_MULT = 3.0
 
 STATE_FILE = "signals_state.json"
 HISTORY_FILE = "signals_history.json"
@@ -57,9 +52,6 @@ COOLDOWN_FILE = "cooldown_state.json"
 
 BINANCE_SPOT_BASE = "https://data-api.binance.vision"
 BINANCE_FUTURES_BASE = "https://fapi.binance.com"
-
-DAILY_REPORT_HOUR = 21
-WEEKLY_REPORT_DAY = 6
 
 FUTURES_CACHE = {}
 FUTURES_CACHE_TTL = 3600
@@ -427,34 +419,6 @@ def find_swing_lows(df, lookback=3):
     return lows
 
 
-def detect_bos_choch(df):
-    result = {"bos_bull": False, "bos_bear": False,
-              "choch_bull": False, "choch_bear": False}
-    try:
-        highs = find_swing_highs(df, lookback=3)
-        lows = find_swing_lows(df, lookback=3)
-        if len(highs) < 2 or len(lows) < 2:
-            return result
-
-        last_close = float(df["close"].iloc[-1])
-        last_high = highs[-1]["price"]
-        prev_high = highs[-2]["price"]
-        last_low = lows[-1]["price"]
-        prev_low = lows[-2]["price"]
-
-        if last_high > prev_high and last_close > last_high:
-            result["bos_bull"] = True
-        if last_low < prev_low and last_close < last_low:
-            result["bos_bear"] = True
-        if last_close > prev_high and last_low > prev_high:
-            result["choch_bull"] = True
-        if last_close < prev_low and last_high < prev_high:
-            result["choch_bear"] = True
-    except Exception:
-        pass
-    return result
-
-
 def find_order_blocks(df, direction):
     obs = []
     try:
@@ -534,7 +498,7 @@ def find_fair_value_gaps(df, direction):
 def is_price_in_zone(price, zone):
     return zone["bottom"] <= price <= zone["top"]
 
-# ---------- REGIME & ANOMALY ----------
+# ---------- REGIME ----------
 def get_volatility_regime(df):
     try:
         last = df.iloc[-1]
@@ -592,4 +556,36 @@ def analyze_coin(df, symbol):
             
         obs = find_order_blocks(df, direction)
         fvgs = find_fair_value_gaps(df, direction)
- 
+        if any(is_price_in_zone(close, ob) for ob in obs) or any(is_price_in_zone(close, fvg) for fvg in fvgs):
+            score += 10
+            
+        if score < MIN_SCORE:
+            return None
+            
+        if REQUIRE_DAILY_ALIGNMENT and not check_daily_alignment(symbol, direction):
+            return None
+            
+        if not check_1h_confirmation(symbol, direction):
+            return None
+            
+        funding_rate, open_interest, oi_change = get_futures_cached(symbol)
+        
+        if open_interest <= 0:
+            return None
+            
+        if direction == "BUY":
+            sl = close - (atr * SL_ATR_MULTIPLIER)
+            risk = close - sl
+            tp1 = close + (risk * TP1_RR)
+            tp2 = close + (risk * TP2_RR)
+        else:
+            sl = close + (atr * SL_ATR_MULTIPLIER)
+            risk = sl - close
+            tp1 = close - (risk * TP1_RR)
+            tp2 = close - (risk * TP2_RR)
+            
+        return {
+            "symbol": symbol,
+            "direction": direction,
+            "score": score,
+         
