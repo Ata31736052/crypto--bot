@@ -23,7 +23,7 @@ TIMEFRAME_MAIN = "4h"     # تایم‌فریم اصلی تحلیل
 TIMEFRAME_SUB = "1h"      # تایم‌فریم تاییدیه چندگانه (Multi-TF)
 KLINE_LIMIT = 500         # تعداد کندل‌ها برای محاسبات دقیق EMA200
 
-MIN_SCORE = 70            # امتیاز متوازن استراتژی (کاهش جزئی برای پویایی بهتر)
+MIN_SCORE = 62            # آستانه جدید امتیاز برای دریافت سیگنال‌های متعادل‌تر
 MIN_VOLUME_RATIO = 1.20   # حداقل ۲۰٪ افزایش حجم نسبت به میانگین
 MIN_24H_USDT_VOLUME = 5_000_000  # حداقل حجم معاملات ۲۴ ساعته (۵ میلیون دلار)
 
@@ -191,7 +191,6 @@ def add_indicators(df):
 
 
 def get_btc_macro_trend():
-    """بررسی روند کلان بیت‌کوین در تایم روزانه برای فیلتر بازار"""
     df_btc = get_klines("BTCUSDT", "1d")
     if df_btc is None or len(df_btc) < 200:
         return "BULLISH"
@@ -238,7 +237,6 @@ def analyze_coin(df, symbol, btc_trend):
     buy_score, sell_score = 0, 0
     reasons_buy, reasons_sell = [], []
 
-    # فیلتر EMA 200
     if price > last["ema200"]:
         buy_score += 20
         reasons_buy.append("قیمت بالاتر از EMA200 (4H)")
@@ -246,7 +244,6 @@ def analyze_coin(df, symbol, btc_trend):
         sell_score += 20
         reasons_sell.append("قیمت پایین‌تر از EMA200 (4H)")
 
-    # تقاطع EMA
     if last["ema9"] > last["ema21"]:
         buy_score += 15
         reasons_buy.append("تقاطع صعودی EMA9 و EMA21")
@@ -254,7 +251,6 @@ def analyze_coin(df, symbol, btc_trend):
         sell_score += 15
         reasons_sell.append("تقاطع نزولی EMA9 و EMA21")
 
-    # مومنتوم RSI
     if 45 <= rsi <= 70:
         buy_score += 15
         reasons_buy.append(f"مومنتوم مناسب RSI ({rsi:.1f})")
@@ -269,7 +265,6 @@ def analyze_coin(df, symbol, btc_trend):
         sell_score += 12
         reasons_sell.append(f"اشباع خرید RSI ({rsi:.1f})")
 
-    # MACD
     if prev["macd"] <= prev["macd_signal"] and last["macd"] > last["macd_signal"]:
         buy_score += 15
         reasons_buy.append("تقاطع صعودی MACD")
@@ -277,7 +272,6 @@ def analyze_coin(df, symbol, btc_trend):
         sell_score += 15
         reasons_sell.append("تقاطع نزولی MACD")
 
-    # جریان نقدینگی OBV
     if last["obv"] > last["obv_ema"]:
         buy_score += 10
         reasons_buy.append("جریان پول مثبت (OBV)")
@@ -285,7 +279,6 @@ def analyze_coin(df, symbol, btc_trend):
         sell_score += 10
         reasons_sell.append("جریان پول منفی (OBV)")
 
-    # حجم معاملات
     if volume_ratio >= MIN_VOLUME_RATIO:
         if last["close"] > last["open"]:
             buy_score += 15
@@ -309,7 +302,6 @@ def analyze_coin(df, symbol, btc_trend):
     else:
         return None
 
-    # تاییدیه تایم‌فریم ۱ ساعته
     if not check_1h_confirmation(symbol, direction):
         return None
     
@@ -398,7 +390,7 @@ def run_scan():
             f"🛑 <b>حد زیان (SL):</b> {result['stop_loss']:.6g}\n"
             f"🎯 <b>تارگت اول (TP1):</b> {result['tp1']:.6g}\n"
             f"🎯 <b>تارگت دوم (TP2):</b> {result['tp2']:.6g}\n\n"
-            f"📊 <b>امتیاز استراتژی:</b> {result['score']}/100\n"
+            f"📊 <b>امتیاز استراتژی:</b> {result['score']}/95\n"
             f"📈 <b>RSI:</b> {result['rsi']:.1f}\n"
             f"📦 <b>نسبت حجم:</b> {result['volume_ratio']:.2f}x\n\n"
             f"<b>دلایل تاییدیه:</b>\n" + "\n".join([f"• {r}" for r in result["reasons"]])
@@ -417,4 +409,4 @@ def run_scan():
 
 if __name__ == "__main__":
     run_scan()
-        
+            
