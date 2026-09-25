@@ -1,5 +1,5 @@
 # =========================================================
-# Crypto Signal Bot - INSTITUTIONAL GRADE v5.1 FINAL
+# Crypto Signal Bot - INSTITUTIONAL GRADE v5.2 FINAL
 # =========================================================
 
 import os, json, time, traceback
