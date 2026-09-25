@@ -1,10 +1,9 @@
 # =========================================================
-# Crypto Signal Bot - Optimized Part 1
+# Crypto Signal Bot - Final Part 1
 # =========================================================
 
-import os, json, time, traceback
+import os, json, time
 import requests, pandas as pd, numpy as np
-from datetime import datetime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ---------- SETTINGS ----------
@@ -12,43 +11,32 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 TIMEFRAME_MAIN = "4h"
-TIMEFRAME_SUB = "1h"
-TIMEFRAME_MACRO = "1d"
-KLINE_LIMIT = 500
-KLINE_LIMIT_1H = 300
+KLINE_LIMIT = 200
 
 MIN_SCORE = 60
 STRONG_SCORE = 78
-MIN_VOLUME_RATIO = 1.30
-MIN_24H_USDT_VOLUME = 10_000_000
+MIN_VOLUME_RATIO = 1.20
+MIN_24H_USDT_VOLUME = 15_000_000
 
 ATR_PERIOD = 14
 SL_ATR_MULTIPLIER = 1.50
 TP1_RR = 1.60
 TP2_RR = 2.80
 
-DIVERGENCE_LOOKBACK = 30
+DIVERGENCE_LOOKBACK = 25
 DIVERGENCE_MIN_GAP = 3
-DIVERGENCE_MAX_GAP = 20
+DIVERGENCE_MAX_GAP = 15
 
-OB_LOOKBACK = 50
+OB_LOOKBACK = 40
 FVG_MIN_SIZE_ATR = 0.3
-
-VOL_REGIME_ATR_WINDOW = 50
 VOL_REGIME_THRESHOLD = 1.15
 
-BB_PERIOD = 20
-BB_STD = 2.0
-
 MAX_CONCURRENT_SIGNALS = 8
-
 STATE_FILE = "signals_state.json"
 BINANCE_SPOT_BASE = "https://data-api.binance.vision"
 BINANCE_FUTURES_BASE = "https://fapi.binance.com"
 
-FUTURES_CACHE = {}
-FUTURES_CACHE_TTL = 3600
-PARALLEL_WORKERS = 15  # افزایش سرعت پردازش موازی
+PARALLEL_WORKERS = 20
 
 # ---------- UTILS ----------
 def log(msg):
@@ -58,7 +46,7 @@ def log(msg):
         pass
 
 
-def http_get(url, params=None, retries=2, timeout=10):  # بهینه‌سازی تایم‌اوت و تلاش مجدد برای جلوگیری از معطلی
+def http_get(url, params=None, retries=1, timeout=6):
     for attempt in range(retries):
         try:
             r = requests.get(url, params=params, timeout=timeout)
@@ -73,30 +61,23 @@ def http_get(url, params=None, retries=2, timeout=10):  # بهینه‌سازی 
     return None
 
 
-def send_telegram(text, retries=3):
+def send_telegram(text):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
         return False
     if len(text) > 4000:
         text = text[:3990] + "\n...(کوتاه شد)"
-    url = "https://api.telegram.org/bot" + TELEGRAM_TOKEN + "/sendMessage"
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
         "text": text,
         "parse_mode": "HTML",
         "disable_web_page_preview": True,
     }
-    for attempt in range(retries):
-        try:
-            res = requests.post(url, json=payload, timeout=(10, 30))
-            if res.status_code == 200:
-                return True
-            if res.status_code == 429:
-                time.sleep(2)
-                continue
-            return False
-        except Exception:
-            time.sleep(2)
-    return False
+    try:
+        res = requests.post(url, json=payload, timeout=10)
+        return res.status_code == 200
+    except Exception:
+        return False
 
 
 def format_num(n):
@@ -117,46 +98,41 @@ def save_json(path, data):
     try:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        log("[SAVE ERROR] " + path + ": " + str(e))
+    except Exception:
+        pass
 
 
-# ---------- DATA ----------
+# ---------- DATA & FUTURES ----------
 def get_fear_greed_index():
     data = http_get("https://api.alternative.me/fng/?limit=1")
     try:
-        if data and "data" in data and len(data["data"]) > 0:
+        if data and "data" in data:
             return int(data["data"][0]["value"]), data["data"][0]["value_classification"]
     except Exception:
         pass
     return 50, "Neutral"
 
 
-def get_futures_metrics(symbol):
-    funding_rate, open_interest, oi_change = 0.0, 0.0, 0.0
+def fetch_futures_metrics_batch(symbols):
+    metrics = {}
     try:
-        pi = http_get(BINANCE_FUTURES_BASE + "/fapi/v1/premiumIndex", params={"symbol": symbol})
-        if pi and isinstance(pi, dict):
-            funding_rate = float(pi.get("lastFundingRate", 0) or 0)
+        pi_data = http_get(BINANCE_FUTURES_BASE + "/fapi/v1/premiumIndex", timeout=5)
+        pi_map = {item["symbol"]: float(item.get("lastFundingRate", 0) or 0) for item in pi_data} if isinstance(pi_data, list) else {}
 
-        oi_data = http_get(BINANCE_FUTURES_BASE + "/fapi/v1/openInterest", params={"symbol": symbol})
-        if oi_data and isinstance(oi_data, dict):
-            open_interest = float(oi_data.get("openInterest", 0) or 0)
-    except Exception as e:
-        log(f"[FUTURES ERROR] {symbol}: {str(e)}")
-        
-    return funding_rate, open_interest, oi_change
-
-
-def get_futures_cached(symbol):
-    now = time.time()
-    if symbol in FUTURES_CACHE:
-        cached_time, data = FUTURES_CACHE[symbol]
-        if now - cached_time < FUTURES_CACHE_TTL:
-            return data
-    data = get_futures_metrics(symbol)
-    FUTURES_CACHE[symbol] = (now, data)
-    return data
+        for sym in symbols:
+            fr = pi_map.get(sym, 0.0)
+            oi = 0.0
+            try:
+                oi_data = http_get(BINANCE_FUTURES_BASE + "/fapi/v1/openInterest", params={"symbol": sym}, timeout=3)
+                if oi_data and isinstance(oi_data, dict):
+                    oi = float(oi_data.get("openInterest", 0) or 0)
+            except Exception:
+                pass
+            metrics[sym] = {"funding_rate": fr, "open_interest": oi, "oi_change": 0.0}
+    except Exception:
+        for sym in symbols:
+            metrics[sym] = {"funding_rate": 0.0, "open_interest": 0.0, "oi_change": 0.0}
+    return metrics
 
 
 def get_scan_coins():
@@ -172,7 +148,7 @@ def get_scan_coins():
         "GALA", "ENJ", "AXS", "THETA", "FTM", "SNX", "CRV", "MKR", "COMP"
     ]
     unique_coins = sorted(set(all_coins))
-
+    
     tickers = http_get(BINANCE_SPOT_BASE + "/api/v3/ticker/24hr")
     valid_volumes = {}
     if tickers and isinstance(tickers, list):
@@ -181,43 +157,32 @@ def get_scan_coins():
             if sym and sym.endswith("USDT"):
                 try:
                     valid_volumes[sym] = float(t.get("quoteVolume", 0) or 0)
-                except (ValueError, TypeError):
+                except Exception:
                     pass
-
-    info = http_get(BINANCE_SPOT_BASE + "/api/v3/exchangeInfo")
-    if not info or "symbols" not in info:
-        return []
-
-    binance_symbols = set()
-    for item in info.get("symbols", []):
-        if item.get("status") == "TRADING" and item.get("quoteAsset") == "USDT":
-            binance_symbols.add(item["symbol"])
 
     result = []
     for coin in unique_coins:
         symbol = coin + "USDT"
-        if symbol in binance_symbols and valid_volumes.get(symbol, 0) >= MIN_24H_USDT_VOLUME:
+        if valid_volumes.get(symbol, 0) >= MIN_24H_USDT_VOLUME:
             result.append({"coin": coin, "symbol": symbol})
     return result
 
 
-# ---------- KLINES & INDICATORS ----------
-def get_klines(symbol, interval, limit=None):
-    if limit is None:
-        limit = KLINE_LIMIT
+def get_klines(symbol, interval="4h", limit=KLINE_LIMIT):
     params = {"symbol": symbol, "interval": interval, "limit": limit}
     data = http_get(BINANCE_SPOT_BASE + "/api/v3/klines", params=params)
-    if not data or len(data) < 200:
+    if not data or len(data) < 50:
         return None
-    columns = ["open_time", "open", "high", "low", "close", "volume",
-               "close_time", "q_vol", "trades", "tb_base", "tb_quote", "ignore"]
-    df = pd.DataFrame(data, columns=columns)
+    df = pd.DataFrame(data, columns=["open_time", "open", "high", "low", "close", "volume",
+                                     "close_time", "q_vol", "trades", "tb_base", "tb_quote", "ignore"])
     for col in ["open", "high", "low", "close", "volume"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
-    df["close_time"] = pd.to_datetime(df["close_time"], unit="ms", utc=True)
     return df.iloc[:-1].reset_index(drop=True)
+# =========================================================
+# Crypto Signal Bot - Final Part 2
+# =========================================================
 
-
+# ---------- INDICATORS & SMC ----------
 def add_indicators(df):
     df = df.copy()
     df["ema9"] = df["close"].ewm(span=9, adjust=False).mean()
@@ -239,54 +204,13 @@ def add_indicators(df):
         (df["low"] - df["close"].shift()).abs()
     ], axis=1).max(axis=1)
     df["atr"] = tr.rolling(ATR_PERIOD).mean()
-    df["atr_avg50"] = df["atr"].rolling(VOL_REGIME_ATR_WINDOW).mean()
+    df["atr_avg50"] = df["atr"].rolling(50).mean()
 
     df["volume_avg20"] = df["volume"].rolling(20).mean()
     df["volume_ratio"] = df["volume"] / df["volume_avg20"].replace(0, np.nan)
     return df
 
 
-def get_btc_macro_trend():
-    df_btc = get_klines("BTCUSDT", TIMEFRAME_MACRO)
-    if df_btc is None or len(df_btc) < 200:
-        return "BULLISH"
-    ema200 = df_btc["close"].ewm(span=200, adjust=False).mean().iloc[-1]
-    if not np.isfinite(ema200):
-        return "BULLISH"
-    return "BULLISH" if df_btc.iloc[-1]["close"] > ema200 else "BEARISH"
-
-
-def check_daily_alignment(symbol, direction):
-    df = get_klines(symbol, TIMEFRAME_MACRO)
-    if df is None or len(df) < 50:
-        return True
-    df = add_indicators(df)
-    last = df.iloc[-1]
-    if not np.isfinite(last["ema50"]):
-        return True
-    if direction == "BUY":
-        return last["close"] > last["ema50"] and last["ema9"] > last["ema21"]
-    else:
-        return last["close"] < last["ema50"] and last["ema9"] < last["ema21"]
-
-
-def check_1h_confirmation(symbol, direction):
-    df = get_klines(symbol, TIMEFRAME_SUB, limit=KLINE_LIMIT_1H)
-    if df is None or len(df) < 50:
-        return False
-    df = add_indicators(df)
-    last = df.iloc[-1]
-    if not np.isfinite(last["ema21"]) or not np.isfinite(last["rsi"]):
-        return False
-    if direction == "BUY":
-        return last["ema9"] > last["ema21"] and 40 <= last["rsi"] <= 75
-    else:
-        return last["ema9"] < last["ema21"] and 25 <= last["rsi"] <= 60
-        # =========================================================
-# Crypto Signal Bot - Optimized Part 2: SMC, Analysis & Main
-# =========================================================
-
-# ---------- SMC & DIVERGENCE ----------
 def find_local_minima(series, order=2):
     idxs = []
     vals = series.values
@@ -403,17 +327,6 @@ def is_price_in_zone(price, zone):
     return zone["bottom"] <= price <= zone["top"]
 
 
-def get_volatility_regime(df):
-    try:
-        last = df.iloc[-1]
-        atr, atr_avg = float(last["atr"]), float(last["atr_avg50"])
-        if not np.isfinite(atr) or not np.isfinite(atr_avg) or atr_avg <= 0:
-            return "UNKNOWN"
-        return "TRENDING" if (atr / atr_avg) >= VOL_REGIME_THRESHOLD else "RANGING"
-    except Exception:
-        return "UNKNOWN"
-
-
 def analyze_coin(df, symbol):
     try:
         df = add_indicators(df)
@@ -423,43 +336,51 @@ def analyze_coin(df, symbol):
         if not all(np.isfinite([close, atr, rsi, volume_ratio])) or atr <= 0:
             return None
             
-        regime = get_volatility_regime(df)
+        regime = "📈 Trending" if (atr / float(last["atr_avg50"])) >= VOL_REGIME_THRESHOLD else "🔄 Ranging"
         direction, score = None, 50
+        reasons = []
         
         if last["ema9"] > last["ema21"] and last["ema21"] > last["ema50"]:
             direction = "BUY"
             score += 15
+            reasons.append("• تقاطع صعودی EMA 9/21")
         elif last["ema9"] < last["ema21"] and last["ema21"] < last["ema50"]:
             direction = "SELL"
             score += 15
+            reasons.append("• تقاطع نزولی EMA 9/21")
         else:
             return None
             
+        if close > last["ema200"]:
+            reasons.append("• بالای EMA200 (4H)")
+        
         if volume_ratio >= MIN_VOLUME_RATIO:
             score += 10
+            reasons.append(f"• حجم قوی ({volume_ratio:.2f}x)")
+            
         if direction == "BUY" and 45 <= rsi <= 65:
             score += 10
+            reasons.append(f"• RSI مومنتوم ({rsi:.1f})")
         elif direction == "SELL" and 35 <= rsi <= 55:
             score += 10
+            reasons.append(f"• RSI مومنتوم ({rsi:.1f})")
+            
         if direction == "BUY" and has_bullish_divergence(df):
             score += 15
+            reasons.append("• واگرایی صعودی (Bullish Div)")
         elif direction == "SELL" and has_bearish_divergence(df):
             score += 15
+            reasons.append("• واگرایی نزولی (Bearish Div)")
             
         obs = find_order_blocks(df, direction)
         fvgs = find_fair_value_gaps(df, direction)
         if any(is_price_in_zone(close, ob) for ob in obs) or any(is_price_in_zone(close, fvg) for fvg in fvgs):
             score += 10
+            reasons.append("• در محدوده Order Block / FVG")
             
         if score < MIN_SCORE:
             return None
-        if not check_daily_alignment(symbol, direction):
-            return None
-        if not check_1h_confirmation(symbol, direction):
-            return None
             
-        funding_rate, open_interest, oi_change = get_futures_cached(symbol)
-        
         if direction == "BUY":
             sl = close - (atr * SL_ATR_MULTIPLIER)
             risk = close - sl
@@ -471,12 +392,16 @@ def analyze_coin(df, symbol):
             tp1 = close - (risk * TP1_RR)
             tp2 = close - (risk * TP2_RR)
             
+        sl_pct = ((sl - close) / close) * 100
+        tp1_pct = ((tp1 - close) / close) * 100
+        tp2_pct = ((tp2 - close) / close) * 100
+        
         return {
             "symbol": symbol, "direction": direction, "score": score,
             "close": close, "sl": sl, "tp1": tp1, "tp2": tp2,
-            "atr": atr, "rsi": rsi, "regime": regime,
-            "funding_rate": funding_rate, "open_interest": open_interest,
-            "oi_change": oi_change, "strong": score >= STRONG_SCORE,
+            "sl_pct": sl_pct, "tp1_pct": tp1_pct, "tp2_pct": tp2_pct,
+            "rsi": rsi, "volume_ratio": volume_ratio, "regime": regime,
+            "reasons": reasons, "strong": score >= STRONG_SCORE,
         }
     except Exception as e:
         log(f"[ANALYZE ERROR] {symbol}: {str(e)}")
@@ -504,29 +429,52 @@ def main():
                 log(f"[ERROR] {c['symbol']}: {str(e)}")
                 
     signals.sort(key=lambda x: x["score"], reverse=True)
+    top_signals = signals[:MAX_CONCURRENT_SIGNALS]
     
+    if top_signals:
+        syms_to_fetch = [s["symbol"] for s in top_signals]
+        futures_data = fetch_futures_metrics_batch(syms_to_fetch)
+        for sig in top_signals:
+            f_metrics = futures_data.get(sig["symbol"], {"funding_rate": 0.0, "open_interest": 0.0, "oi_change": 0.0})
+            sig.update(f_metrics)
+
     fng_val, fng_text = get_fear_greed_index()
-    btc_trend = get_btc_macro_trend()
     
-    report = "📊 <b>Market Status Update</b>\n"
-    report += f"• BTC Macro Trend: <b>{btc_trend}</b>\n"
-    report += f"• Fear & Greed: <b>{fng_val} ({fng_text})</b>\n\n"
-    
-    if not signals:
-        report += "No high-probability signals found in this scan cycle."
+    if not top_signals:
+        report = f"📊 <b>Market Status Update</b>\n😱 ترس و طمع: {fng_val} ({fng_text})\n\nNo high-probability signals found in this scan cycle."
     else:
-        report += f"Found <b>{len(signals)}</b> signals:\n"
-        for sig in signals[:MAX_CONCURRENT_SIGNALS]:
-            emoji = "🟢" if sig["direction"] == "BUY" else "🔴"
-            strength = "🔥 STRONG" if sig["strong"] else "⚡ NORMAL"
-            report += f"\n{emoji} <b>{sig['symbol']}</b> ({sig['direction']}) {strength}\n"
-            report += f"• Score: <b>{sig['score']}</b> | Regime: {sig['regime']}\n"
-            report += f"• Entry: <code>{sig['close']:.4f}</code>\n"
-            report += f"• SL: <code>{sig['sl']:.4f}</code>\n"
-            report += f"• TP1: <code>{sig['tp1']:.4f}</code> | TP2: <code>{sig['tp2']:.4f}</code>\n"
-            report += f"• Funding: <code>{sig['funding_rate']*100:.4f}%</code>\n"
-            report += f"• OI: <code>{format_num(sig['open_interest'])}</code> | Change: <code>{sig['oi_change']:+.1f}%</code>\n"
+        report = f"📊 <b>Market Status Update</b>\n😱 ترس و طمع: {fng_val} ({fng_text})\n\nFound <b>{len(top_signals)}</b> signals:\n"
+        for sig in top_signals:
+            header_emoji = "🟢" if sig["direction"] == "BUY" else "🔴"
+            signal_type = "سیگنال قوی (4H)" if sig["strong"] else "سیگنال معمولی (4H)"
+            coin_hashtag = "#" + sig["symbol"].replace("USDT", "")
             
+            risk_usd = 10.0
+            price_risk_per_unit = abs(sig["close"] - sig["sl"])
+            position_units = risk_usd / price_risk_per_unit if price_risk_per_unit > 0 else 0.0
+            position_value = position_units * sig["close"]
+            
+            v_ratio = sig['volume_ratio']
+            v_text = f"قوی {v_ratio:.2f}x" if v_ratio >= 1.5 else f"متوسط {v_ratio:.2f}x"
+
+            msg = f"\n{header_emoji} <b>{signal_type}</b>\n\n"
+            msg += f"نماد: <b>{coin_hashtag}</b>\n"
+            msg += f"جهت: <b>{sig['direction']}</b>\n"
+            msg += f"ورود: <code>{sig['close']:.4f}</code>\n\n"
+            msg += f"🛑 SL: <code>{sig['sl']:.4f}</code> ({sig['sl_pct']:+.2f}%)\n"
+            msg += f"🎯 TP1: <code>{sig['tp1']:.4f}</code> ({sig['tp1_pct']:+.2f}%)\n"
+            msg += f"🎯 TP2: <code>{sig['tp2']:.4f}</code> ({sig['tp2_pct']:+.2f}%)\n\n"
+            msg += f"پیشنهاد حجم (حساب $1000، ریسک 1%):\n"
+            msg += f"🔹 <code>{position_units:.4f}</code> واحد (~$<code>{position_value:.2f}</code>)\n\n"
+            msg += f"📊 امتیاز: <b>{sig['score']}/100</b> | RSI: {sig['rsi']:.1f}\n"
+            msg += f"📦 حجم: {v_text}\n"
+            msg += f"⚡ فاندینگ: <code>{sig['funding_rate']*100:.4f}%</code>\n"
+            msg += f"💼 OI: <code>{format_num(sig['open_interest'])}</code> | {sig['oi_change']:+.1f}%\n"
+            msg += f"🌊 رژیم بازار: {sig['regime']}\n"
+            msg += f"😱 ترس و طمع: {fng_val}\n\n"
+            msg += f"دلایل:\n" + "\n".join(sig["reasons"]) + "\n" + "—" * 20
+            report += msg
+
     send_telegram(report)
     
     state_data = {"last_run": time.time(), "signals_count": len(signals)}
@@ -536,3 +484,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
