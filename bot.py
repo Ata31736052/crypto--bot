@@ -1,5 +1,5 @@
 # =========================================================
-# Crypto Signal Bot - Balanced Pro Edition (4H + 1H Multi-TF)
+# Crypto Signal Bot - Pro Edition (Multi-TF + Volume + BTC Macro)
 # Data source: Binance (Independent Fixed List)
 # Executed via GitHub Actions
 # =========================================================
@@ -23,8 +23,9 @@ TIMEFRAME_MAIN = "4h"     # تایم‌فریم اصلی تحلیل
 TIMEFRAME_SUB = "1h"      # تایم‌فریم تاییدیه چندگانه (Multi-TF)
 KLINE_LIMIT = 500         # تعداد کندل‌ها برای محاسبات دقیق EMA200 و تاریخچه
 
-MIN_SCORE = 72            # امتیاز متوازن با احتساب تایم‌فریم جدید
-MIN_VOLUME_RATIO = 1.20   # حداقل ۲۰٪ افزایش حجم نسبت به میانگین
+MIN_SCORE = 72            # امتیاز متوازن استراتژی
+MIN_VOLUME_RATIO = 1.20   # حداقل ۲۰٪ افزایش حجم نسبت به میانگین کندل‌ها
+MIN_24H_USDT_VOLUME = 5_000_000  # حداقل حجم معاملات ۲۴ ساعته (۵ میلیون دلار)
 
 ATR_PERIOD = 14
 SL_ATR_MULTIPLIER = 1.50   # حد زیان پویا بر اساس ATR
@@ -73,7 +74,7 @@ def send_telegram(message):
 
 
 # =========================================================
-# 3. MARKET COINS DISCOVERY (No Nobitex Dependency)
+# 3. MARKET COINS DISCOVERY & VOLUME FILTER
 # =========================================================
 
 def get_scan_coins():
@@ -97,6 +98,18 @@ def get_scan_coins():
     
     unique_coins = sorted(list(set(all_coins)))
 
+    # دریافت حجم معاملات ۲۴ ساعته کل بازار به صورت یکجا
+    tickers = http_get(f"{BINANCE_BASE}/api/v3/ticker/24hr")
+    valid_volumes = {}
+    if tickers:
+        for t in tickers:
+            sym = t.get("symbol")
+            if sym and sym.endswith("USDT"):
+                try:
+                    valid_volumes[sym] = float(t.get("quoteVolume", 0))
+                except:
+                    pass
+
     info = http_get(f"{BINANCE_BASE}/api/v3/exchangeInfo")
     if not info:
         return [{"coin": c, "symbol": c + "USDT"} for c in unique_coins]
@@ -111,7 +124,12 @@ def get_scan_coins():
     for coin in unique_coins:
         symbol = coin + "USDT"
         if symbol in binance_symbols:
-            result.append({"coin": coin, "symbol": symbol})
+            vol_24h = valid_volumes.get(symbol, 0)
+            # فیلتر حجم دلاری ۲۴ ساعته
+            if vol_24h >= MIN_24H_USDT_VOLUME:
+                result.append({"coin": coin, "symbol": symbol})
+            else:
+                print(f"[FILTER] نماد {symbol} به دلیل حجم کم حذف شد ({vol_24h:,.0f} USDT)")
             
     return result
 
@@ -191,8 +209,19 @@ def check_daily_trend(symbol):
     return "NEUTRAL"
 
 
+def get_btc_macro_trend():
+    """بررسی روند کلان بیت‌کوین در تایم روزانه برای فیلتر کلی بازار"""
+    df_btc = get_klines("BTCUSDT", "1d")
+    if df_btc is None or len(df_btc) < 200:
+        return "BULLISH" # پیش‌فرض بهینه در صورت عدم دسترسی
+    
+    ema200_btc = df_btc["close"].ewm(span=200, adjust=False).mean().iloc[-1]
+    last_btc = df_btc.iloc[-1]["close"]
+    
+    return "BULLISH" if last_btc > ema200_btc else "BEARISH"
+
+
 def check_1h_confirmation(symbol, direction):
-    """بررسی تاییدیه در تایم‌فریم ۱ ساعته جهت همگام‌سازی روند"""
     df_1h = get_klines(symbol, TIMEFRAME_SUB)
     if df_1h is None or len(df_1h) < 50:
         return False, "داده کافی ۱ ساعته موجود نیست"
@@ -201,11 +230,9 @@ def check_1h_confirmation(symbol, direction):
     last_1h = df_1h.iloc[-1]
     
     if direction == "BUY":
-        # شرایط مثبت ۱ ساعته: قیمت بالای EMA21 یا تقاطع صعودی EMA9 و EMA21
         if last_1h["close"] > last_1h["ema21"] or last_1h["ema9"] > last_1h["ema21"]:
             return True, "تاییدیه مومنتوم ۱ ساعته صعودی"
     elif direction == "SELL":
-        # شرایط منفی ۱ ساعته: قیمت پایین EMA21 یا تقاطع نزولی EMA9 و EMA21
         if last_1h["close"] < last_1h["ema21"] or last_1h["ema9"] < last_1h["ema21"]:
             return True, "تاییدیه مومنتوم ۱ ساعته نزولی"
             
@@ -216,7 +243,10 @@ def check_1h_confirmation(symbol, direction):
 # 5. BALANCED STRATEGY ENGINE
 # =========================================================
 
-def analyze_coin(df, symbol):
+def analyze_coin(df, symbol, btc_trend):
+    # اگر بیت‌کوین در روند نزولی کلان باشد، از سیگنال‌های خرید آلت‌کوین‌ها جلوگیری می‌کنیم
+    # (مگر برای بیت‌کوین خودش)
+    
     df = add_indicators(df)
     last = df.iloc[-1]
     prev = df.iloc[-2]
@@ -311,6 +341,10 @@ def analyze_coin(df, symbol):
     direction, score, reasons = None, 0, []
     
     if buy_score >= MIN_SCORE and buy_score > sell_score:
+        # فیلتر کلان: اگر بازار در روند نزولی بیت‌کوین باشد و نماد خود بیت‌کوین نباشد، خرید انجام نمی‌شود
+        if btc_trend == "BEARISH" and symbol != "BTCUSDT":
+            return None
+            
         direction = "BUY"
         score = buy_score
         reasons = reasons_buy
@@ -327,7 +361,7 @@ def analyze_coin(df, symbol):
         return None
     
     reasons.append(conf_reason)
-    score += 5  # پاداش تاییدیه تایم‌فریم پایین‌تر
+    score += 5
 
     if direction == "BUY":
         stop_loss = price - (atr * SL_ATR_MULTIPLIER)
@@ -375,10 +409,14 @@ def save_state(state):
 
 
 def run_scan():
-    print(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] شروع اسکن متوازن بازار (4H + 1H)...")
+    print(f"[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}] شروع اسکن پیشرفته بازار...")
     
+    # بررسی روند کلان بیت‌کوین در ابتدا
+    btc_macro_trend = get_btc_macro_trend()
+    print(f"وضعیت روند کلان بیت‌کوین (BTC Macro Trend): {btc_macro_trend}")
+
     coins = get_scan_coins()
-    print(f"تعداد ارزهای قابل بررسی: {len(coins)}")
+    print(f"تعداد ارزهای واجد شرایط حجم ۲۴ ساعته: {len(coins)}")
     if not coins:
         return
 
@@ -391,7 +429,7 @@ def run_scan():
         if df is None:
             continue
 
-        result = analyze_coin(df, symbol)
+        result = analyze_coin(df, symbol, btc_macro_trend)
         if not result:
             continue
 
@@ -401,7 +439,7 @@ def run_scan():
 
         emoji = "🟢" if result["signal"] == "BUY" else "🔴"
         msg = (
-            f"{emoji} <b>سیگنال جدید (Multi-TF Pro)</b>\n\n"
+            f"{emoji} <b>سیگنال جدید (Pro Filtered Edition)</b>\n\n"
             f"<b>نماد:</b> #{result['symbol'].replace('USDT', '')}\n"
             f"<b>جهت:</b> {result['signal']}\n"
             f"<b>نقطه ورود:</b> {result['entry']:.6g}\n\n"
@@ -418,7 +456,7 @@ def run_scan():
             state[signal_key] = {"sent_at": datetime.now(timezone.utc).isoformat()}
             save_state(state)
             sent_count += 1
-            print(f"[SENT] سیگنال متوازن {symbol} ارسال شد.")
+            print(f"[SENT] سیگنال {symbol} ارسال شد.")
 
         time.sleep(0.5)
 
@@ -427,4 +465,3 @@ def run_scan():
 
 if __name__ == "__main__":
     run_scan()
-        
