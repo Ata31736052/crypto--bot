@@ -1,5 +1,5 @@
 # =========================================================
-# Crypto Signal Bot - Final Part 1
+# Crypto Signal Bot - Final Complete Code
 # =========================================================
 
 import os, json, time
@@ -122,13 +122,22 @@ def fetch_futures_metrics_batch(symbols):
         for sym in symbols:
             fr = pi_map.get(sym, 0.0)
             oi = 0.0
+            oi_change = 0.0
             try:
                 oi_data = http_get(BINANCE_FUTURES_BASE + "/fapi/v1/openInterest", params={"symbol": sym}, timeout=3)
                 if oi_data and isinstance(oi_data, dict):
                     oi = float(oi_data.get("openInterest", 0) or 0)
+                
+                hist_data = http_get(BINANCE_FUTURES_BASE + "/futures/data/openInterestHist", params={"symbol": sym, "period": "4h", "limit": 2}, timeout=3)
+                if hist_data and isinstance(hist_data, list) and len(hist_data) >= 2:
+                    prev_oi = float(hist_data[-2].get("sumOpenInterest", 0) or 0)
+                    curr_oi = float(hist_data[-1].get("sumOpenInterest", 0) or 0)
+                    if prev_oi > 0:
+                        oi_change = ((curr_oi - prev_oi) / prev_oi) * 100
             except Exception:
                 pass
-            metrics[sym] = {"funding_rate": fr, "open_interest": oi, "oi_change": 0.0}
+            
+            metrics[sym] = {"funding_rate": fr, "open_interest": oi, "oi_change": oi_change}
     except Exception:
         for sym in symbols:
             metrics[sym] = {"funding_rate": 0.0, "open_interest": 0.0, "oi_change": 0.0}
@@ -178,9 +187,7 @@ def get_klines(symbol, interval="4h", limit=KLINE_LIMIT):
     for col in ["open", "high", "low", "close", "volume"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
     return df.iloc[:-1].reset_index(drop=True)
-# =========================================================
-# Crypto Signal Bot - Final Part 2
-# =========================================================
+
 
 # ---------- INDICATORS & SMC ----------
 def add_indicators(df):
@@ -484,4 +491,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
