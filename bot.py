@@ -367,7 +367,9 @@ def find_fvgs(df, direction):
 
 def in_zone(price, zone):
     return zone["bottom"] <= price <= zone["top"]
-                             def analyze_coin(df, symbol, fng_val=50, btc_bullish=True):
+
+
+def analyze_coin(df, symbol, fng_val=50, btc_bullish=True):
     try:
         df = add_indicators(df)
         last = df.iloc[-1]
@@ -397,7 +399,6 @@ def in_zone(price, zone):
         else:
             return None
 
-        # فیلتر پیشرفته روند کلان بیت‌کوین
         if direction == "BUY" and not btc_bullish:
             print(f"[MACRO FILTER] Skip BUY for {symbol} because BTC macro trend is bearish", flush=True)
             return None
@@ -563,7 +564,6 @@ def main():
     fng_val, fng_cls = get_fear_greed_index()
     print(f"[FNG] Index: {fng_val} ({fng_cls})", flush=True)
 
-    # بررسی روند کلان بیت‌کوین (BTC Macro Trend Check)
     btc_bullish = True
     btc_df = get_klines("BTCUSDT", TIMEFRAME_MAIN, 200)
     if btc_df is not None and len(btc_df) > 50:
@@ -603,42 +603,4 @@ def main():
     with ThreadPoolExecutor(max_workers=PARALLEL_WORKERS) as executor:
         results = executor.map(process_coin, coins)
         for r in results:
-            if r is not None:
-                signals.append(r)
-
-    print(f"[SIGNALS] Found {len(signals)} initial signals", flush=True)
-
-    signals.sort(key=lambda x: x["score"], reverse=True)
-    signals = signals[:MAX_CONCURRENT_SIGNALS]
-
-    state = load_state()
-    fresh_signals, state = filter_dups(signals, state)
-    save_json(STATE_FILE, state)
-
-    if not fresh_signals:
-        print("[TG] No new signals to send after deduplication.", flush=True)
-        send_telegram("ℹ️ اسکن بازار به اتمام رسید. در این چرخه سیگنال جدیدی با فیلترهای جدید یافت نشد.")
-        return
-
-    header_text = (
-        "🤖 <b>گزارش اسکن پیشرفته بازار (" + TIMEFRAME_MAIN + ")</b>\n" +
-        "📅 شاخص ترس و طمع: <b>" + str(fng_val) + " (" + str(fng_cls) + ")</b>\n" +
-        "🔍 سیگنال‌های تایید شده: <b>" + str(len(fresh_signals)) + "</b>"
-    )
-    
-    send_telegram(header_text)
-    time.sleep(1.0)
-
-    for sig in fresh_signals:
-        msg = build_msg(sig, fng_val)
-        send_telegram(msg)
-        time.sleep(1.2)
-
-    print("[TG] All signals sent successfully.", flush=True)
-    print("=" * 50, flush=True)
-    print("BOT FINISHED", flush=True)
-
-
-if __name__ == "__main__":
-    main()
-        
+            if r is not N
