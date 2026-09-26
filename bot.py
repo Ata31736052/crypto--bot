@@ -145,29 +145,48 @@ def get_fear_greed_index():
     data = http_get("https://api.alternative.me/fng/?limit=1")
     try:
         if data and "data" in data:
-            return int(data["data"][0]["value"]), data["data"][0]["value_classification"]
+            val = int(data["data"][0]["value"])
+            cls = data["data"][0]["value_classification"]
+            return val, cls
     except Exception:
         pass
     return 50, "Neutral"
 
 
 def fetch_futures_metrics_batch(symbols):
-    metrics = {sym: {"funding_rate": 0.0, "open_interest": 0.0, "oi_change": 0.0} for sym in symbols}
+    metrics = {}
+    for sym in symbols:
+        metrics[sym] = {
+            "funding_rate": 0.0,
+            "open_interest": 0.0,
+            "oi_change": 0.0
+        }
     pi_data = http_get(BINANCE_FUTURES_BASE + "/fapi/v1/premiumIndex", timeout=5)
+    pi_map = {}
     if isinstance(pi_data, list) and pi_data:
-        pi_map = {item["symbol"]: float(item.get("lastFundingRate", 0) or 0) for item in pi_data if "symbol" in item}
+        for item in pi_data:
+            if "symbol" in item:
+                fr = float(item.get("lastFundingRate", 0) or 0)
+                pi_map[item["symbol"]] = fr
     else:
-        pi_map = {}
         print("[FUTURES] premiumIndex unavailable", flush=True)
     for sym in symbols:
         metrics[sym]["funding_rate"] = pi_map.get(sym, 0.0)
-        oi_data = http_get(BINANCE_FUTURES_BASE + "/fapi/v1/openInterest", params={"symbol": sym}, timeout=3)
+        oi_data = http_get(
+            BINANCE_FUTURES_BASE + "/fapi/v1/openInterest",
+            params={"symbol": sym},
+            timeout=3
+        )
         if oi_data and isinstance(oi_data, dict):
             try:
                 metrics[sym]["open_interest"] = float(oi_data.get("openInterest", 0) or 0)
             except Exception:
                 pass
-        hist = http_get(BINANCE_FUTURES_BASE + "/futures/data/openInterestHist", params={"symbol": sym, "period": "4h", "limit": 2}, timeout=3)
+        hist = http_get(
+            BINANCE_FUTURES_BASE + "/futures/data/openInterestHist",
+            params={"symbol": sym, "period": "4h", "limit": 2},
+            timeout=3
+        )
         if hist and isinstance(hist, list) and len(hist) >= 2:
             try:
                 prev_oi = float(hist[-2].get("sumOpenInterest", 0) or 0)
@@ -216,10 +235,9 @@ def get_klines(symbol, interval="4h", limit=KLINE_LIMIT):
     data = http_get(BINANCE_SPOT_BASE + "/api/v3/klines", params=params)
     if not data or len(data) < 100:
         return None
-    df = pd.DataFrame(data, columns=[
-        "open_time", "open", "high", "low", "close", "volume",
-        "close_time", "q_vol", "trades", "tb_base", "tb_quote", "ignore"
-    ])
+    cols = ["open_time", "open", "high", "low", "close", "volume",
+            "close_time", "q_vol", "trades", "tb_base", "tb_quote", "ignore"]
+    df = pd.DataFrame(data, columns=cols)
     for col in ["open", "high", "low", "close", "volume"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
     return df.iloc[:-1].reset_index(drop=True)
@@ -238,11 +256,10 @@ def add_indicators(df):
     avg_loss = loss.ewm(alpha=1/14, adjust=False).mean()
     rs = avg_gain / avg_loss.replace(0, np.nan)
     df["rsi"] = 100 - (100 / (1 + rs))
-    tr = pd.concat([
-        df["high"] - df["low"],
-        (df["high"] - df["close"].shift()).abs(),
-        (df["low"] - df["close"].shift()).abs()
-    ], axis=1).max(axis=1)
+    tr1 = df["high"] - df["low"]
+    tr2 = (df["high"] - df["close"].shift()).abs()
+    tr3 = (df["low"] - df["close"].shift()).abs()
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
     df["atr"] = tr.rolling(ATR_PERIOD).mean()
     df["atr_avg50"] = df["atr"].rolling(50).mean()
     df["volume_avg20"] = df["volume"].rolling(20).mean()
@@ -251,7 +268,8 @@ def add_indicators(df):
 
 
 def find_local_minima(series, order=2):
-    idxs, vals = [], series.values
+    idxs = []
+    vals = series.values
     for i in range(order, len(vals) - order):
         w = vals[i - order:i + order + 1]
         if vals[i] == w.min() and np.isfinite(vals[i]):
@@ -260,7 +278,8 @@ def find_local_minima(series, order=2):
 
 
 def find_local_maxima(series, order=2):
-    idxs, vals = [], series.values
+    idxs = []
+    vals = series.values
     for i in range(order, len(vals) - order):
         w = vals[i - order:i + order + 1]
         if vals[i] == w.max() and np.isfinite(vals[i]):
@@ -280,8 +299,10 @@ def has_bullish_divergence(df):
         gap = i2 - i1
         if gap < DIVERGENCE_MIN_GAP or gap > DIVERGENCE_MAX_GAP:
             return False
-        p1, p2 = recent.loc[i1, "low"], recent.loc[i2, "low"]
-        r1, r2 = recent.loc[i1, "rsi"], recent.loc[i2, "rsi"]
+        p1 = recent.loc[i1, "low"]
+        p2 = recent.loc[i2, "low"]
+        r1 = recent.loc[i1, "rsi"]
+        r2 = recent.loc[i2, "rsi"]
         if not all(np.isfinite(x) for x in [p1, p2, r1, r2]):
             return False
         return p2 < p1 and r2 > r1 + 2
@@ -301,8 +322,10 @@ def has_bearish_divergence(df):
         gap = i2 - i1
         if gap < DIVERGENCE_MIN_GAP or gap > DIVERGENCE_MAX_GAP:
             return False
-        p1, p2 = recent.loc[i1, "high"], recent.loc[i2, "high"]
-        r1, r2 = recent.loc[i1, "rsi"], recent.loc[i2, "rsi"]
+        p1 = recent.loc[i1, "high"]
+        p2 = recent.loc[i2, "high"]
+        r1 = recent.loc[i1, "rsi"]
+        r2 = recent.loc[i2, "rsi"]
         if not all(np.isfinite(x) for x in [p1, p2, r1, r2]):
             return False
         return p2 > p1 and r2 < r1 - 2
@@ -323,13 +346,21 @@ def find_order_blocks(df, direction):
             if len(nxt) == 0:
                 continue
             if direction == "BUY":
-                if candle["close"] < candle["open"] and (nxt["close"].max() - candle["low"]) > atr_last * 1.5:
-                    obs.append({"top": float(candle["open"]), "bottom": float(candle["low"])})
+                diff = nxt["close"].max() - candle["low"]
+                if candle["close"] < candle["open"] and diff > atr_last * 1.5:
+                    obs.append({
+                        "top": float(candle["open"]),
+                        "bottom": float(candle["low"])
+                    })
                     if len(obs) >= 2:
                         break
             else:
-                if candle["close"] > candle["open"] and (candle["high"] - nxt["close"].min()) > atr_last * 1.5:
-                    obs.append({"top": float(candle["high"]), "bottom": float(candle["close"])})
+                diff = candle["high"] - nxt["close"].min()
+                if candle["close"] > candle["open"] and diff > atr_last * 1.5:
+                    obs.append({
+                        "top": float(candle["high"]),
+                        "bottom": float(candle["close"])
+                    })
                     if len(obs) >= 2:
                         break
     except Exception as e:
@@ -345,18 +376,27 @@ def find_fair_value_gaps(df, direction):
         if not np.isfinite(atr_last) or atr_last <= 0:
             return fvgs
         for i in range(2, len(recent) - 1):
-            prev, curr = recent.iloc[i - 1], recent.iloc[i]
+            prev = recent.iloc[i - 1]
+            curr = recent.iloc[i]
             after = recent.iloc[i + 1:]
             if direction == "BUY" and curr["low"] > prev["high"]:
                 size = curr["low"] - prev["high"]
                 if size > atr_last * FVG_MIN_SIZE_ATR:
-                    if len(after) == 0 or not (after["low"] < prev["high"]).any():
-                        fvgs.append({"top": float(curr["low"]), "bottom": float(prev["high"])})
+                    filled = len(after) > 0 and (after["low"] < prev["high"]).any()
+                    if not filled:
+                        fvgs.append({
+                            "top": float(curr["low"]),
+                            "bottom": float(prev["high"])
+                        })
             elif direction == "SELL" and curr["high"] < prev["low"]:
                 size = prev["low"] - curr["high"]
                 if size > atr_last * FVG_MIN_SIZE_ATR:
-                    if len(after) == 0 or not (after["high"] > prev["low"]).any():
-                        fvgs.append({"top": float(prev["low"]), "bottom": float(curr["high"])})
+                    filled = len(after) > 0 and (after["high"] > prev["low"]).any()
+                    if not filled:
+                        fvgs.append({
+                            "top": float(prev["low"]),
+                            "bottom": float(curr["high"])
+                        })
         if len(fvgs) > 3:
             fvgs = fvgs[-3:]
     except Exception as e:
@@ -376,12 +416,16 @@ def analyze_coin(df, symbol, fng_val=50):
         atr = float(last["atr"])
         rsi = float(last["rsi"])
         volume_ratio = float(last["volume_ratio"])
-        if not all(np.isfinite([close, atr, rsi, volume_ratio])) or atr <= 0:
+        if not all(np.isfinite([close, atr, rsi, volume_ratio])):
+            return None
+        if atr <= 0:
             return None
         if volume_ratio < 0.8:
             return None
-        regime = "📈 Trending" if (atr / float(last["atr_avg50"])) >= VOL_REGIME_THRESHOLD else "🔄 Ranging"
-        direction, score = None, 50
+        atr_ratio = atr / float(last["atr_avg50"])
+        regime = "📈 Trending" if atr_ratio >= VOL_REGIME_THRESHOLD else "🔄 Ranging"
+        direction = None
+        score = 50
         reasons = []
         if last["ema9"] > last["ema21"] and last["ema21"] > last["ema50"]:
             direction = "BUY"
@@ -419,7 +463,9 @@ def analyze_coin(df, symbol, fng_val=50):
             reasons.append("• واگرایی نزولی")
         obs = find_order_blocks(df, direction)
         fvgs = find_fair_value_gaps(df, direction)
-        if any(is_price_in_zone(close, ob) for ob in obs) or any(is_price_in_zone(close, fvg) for fvg in fvgs):
+        in_ob = any(is_price_in_zone(close, ob) for ob in obs)
+        in_fvg = any(is_price_in_zone(close, fvg) for fvg in fvgs)
+        if in_ob or in_fvg:
             score += 10
             reasons.append("• در محدوده OB / FVG")
         if fng_val > 70 and direction == "BUY":
@@ -446,11 +492,21 @@ def analyze_coin(df, symbol, fng_val=50):
         if abs(sl_pct) > MAX_SL_PCT:
             return None
         return {
-            "symbol": symbol, "direction": direction, "score": score,
-            "close": close, "sl": sl, "tp1": tp1, "tp2": tp2,
-            "sl_pct": sl_pct, "tp1_pct": tp1_pct, "tp2_pct": tp2_pct,
-            "rsi": rsi, "volume_ratio": volume_ratio, "regime": regime,
-            "reasons": reasons, "strong": score >= STRONG_SCORE,
+            "symbol": symbol,
+            "direction": direction,
+            "score": score,
+            "close": close,
+            "sl": sl,
+            "tp1": tp1,
+            "tp2": tp2,
+            "sl_pct": sl_pct,
+            "tp1_pct": tp1_pct,
+            "tp2_pct": tp2_pct,
+            "rsi": rsi,
+            "volume_ratio": volume_ratio,
+            "regime": regime,
+            "reasons": reasons,
+            "strong": score >= STRONG_SCORE,
         }
     except Exception as e:
         print(f"[ANALYZE ERROR] {symbol}: {e}", flush=True)
@@ -477,51 +533,32 @@ def filter_duplicates(signals, state):
     return filtered, state
 
 
-def main():
-    print("=" * 60, flush=True)
-    print("BOT STARTED", flush=True)
-    print(f"TOKEN set: {bool(TELEGRAM_TOKEN)} (len={len(TELEGRAM_TOKEN)})", flush=True)
-    print(f"CHAT set: {bool(TELEGRAM_CHAT_ID)} (val={TELEGRAM_CHAT_ID!r})", flush=True)
-    print("=" * 60, flush=True)
-    log.info("=== Crypto Signal Bot Started ===")
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        print("[FATAL] TELEGRAM_TOKEN or TELEGRAM_CHAT_ID missing!", flush=True)
-        return
-    print("[TEST] Sending startup notification...", flush=True)
-    test_ok = send_telegram("🤖 ربات روشن شد — شروع اسکن...")
-    print(f"[TEST] Startup notification result: {test_ok}", flush=True)
-    fng_val, fng_text = get_fear_greed_index()
-    print(f"[FNG] Fear & Greed: {fng_val} ({fng_text})", flush=True)
-    coins = get_scan_coins()
-    if not coins:
-        print("[FATAL] No coins passed volume filter.", flush=True)
-        send_telegram("⚠️ ربات: هیچ کوینی از فیلتر حجم رد نشد.")
-        return
-    print(f"[SCAN] Scanning {len(coins)} coins...", flush=True)
-    signals = []
-    with ThreadPoolExecutor(max_workers=PARALLEL_WORKERS) as executor:
-        futures = {executor.submit(get_klines, c["symbol"]): c for c in coins}
-        for future in as_completed(futures):
-            c = futures[future]
-            try:
-                df = future.result()
-                if df is not None:
-                    res = analyze_coin(df, c["symbol"], fng_val=fng_val)
-                    if res:
-                        signals.append(res)
-            except Exception as e:
-                print(f"[ERROR] {c['symbol']}: {e}", flush=True)
-    print(f"[ANALYZE] {len(signals)} raw signals found", flush=True)
-    signals.sort(key=lambda x: x["score"], reverse=True)
-    top_signals = signals[:MAX_CONCURRENT_SIGNALS]
-    state = load_sent_state()
-    top_signals, state = filter_duplicates(top_signals, state)
-    print(f"[DEDUP] {len(top_signals)} signals after dedup", flush=True)
-    if top_signals:
-        syms = [s["symbol"] for s in top_signals]
-        futures_data = fetch_futures_metrics_batch(syms)
-        for sig in top_signals:
-            fm = futures_data.get(sig["symbol"], {})
-            sig.update(fm)
-    if not top_signals:
-        report = f"📊 <b>Market Status</b>\n😱 ترس و طمع: {fng_val} ({fng_text})\n\nسیگنالی یافت ن
+def build_signal_message(sig, fng_val):
+    emoji = "🟢" if sig["direction"] == "BUY" else "🔴"
+    stype = "سیگنال قوی (4H)" if sig["strong"] else "سیگنال معمولی (4H)"
+    tag = "#" + sig["symbol"].replace("USDT", "")
+    risk_usd = 10.0
+    price_risk = abs(sig["close"] - sig["sl"])
+    units = risk_usd / price_risk if price_risk > 0 else 0
+    notional = units * sig["close"]
+    v = sig["volume_ratio"]
+    v_text = f"قوی {v:.2f}x" if v >= 1.5 else f"متوسط {v:.2f}x"
+    lines = []
+    lines.append("")
+    lines.append(f"{emoji} <b>{stype}</b>")
+    lines.append("")
+    lines.append(f"نماد: <b>{tag}</b>")
+    lines.append(f"جهت: <b>{sig['direction']}</b>")
+    lines.append(f"ورود: <code>{sig['close']:.4f}</code>")
+    lines.append("")
+    lines.append(f"🛑 SL: <code>{sig['sl']:.4f}</code> ({sig['sl_pct']:+.2f}%)")
+    lines.append(f"🎯 TP1: <code>{sig['tp1']:.4f}</code> ({sig['tp1_pct']:+.2f}%)")
+    lines.append(f"🎯 TP2: <code>{sig['tp2']:.4f}</code> ({sig['tp2_pct']:+.2f}%)")
+    lines.append("")
+    lines.append("پیشنهاد حجم (سرمایه $1000، ریسک 1%):")
+    lines.append(f"🔹 <code>{units:.4f}</code> واحد | نوشنال ~$<code>{notional:.2f}</code>")
+    lines.append("")
+    lines.append(f"📊 امتیاز: <b>{sig['score']}/100</b> | RSI: {sig['rsi']:.1f}")
+    lines.append(f"📦 حجم: {v_text}")
+    fr = sig.get("funding_rate", 0)
+    if fr !
