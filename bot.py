@@ -605,4 +605,6 @@ def main():
         send_telegram("ℹ️ اسکن بازار به اتمام رسید. در این چرخه سیگنال جدیدی با فیلترهای فعلی یافت نشد.")
         return
 
-    header_text = f"🤖 <b>گزارش اسکن بازار ({TIMEFRAME_MAIN})</b>\n📅 شاخص ترس و طمع: <b>{fng_val} ({fng_cls})</b>\n🔍 سیگنال‌های جدید 
+    header_lines = [
+        f"🤖 <b>گزارش اسکن بازار ({TIMEFRAME_MAIN})</b>",
+        f"📅 شاخص ترس و طمع: <b>{fng_val} ({fng_cls})</b
