@@ -555,7 +555,6 @@ def main():
     print("=" * 50, flush=True)
     print("BOT STARTED", flush=True)
 
-    # پیام تست برای بررسی سلامت اتصال تلگرام در هر بار اجرا
     send_telegram("🤖 ربات اسکنر بازار روشن شد و در حال پردازش است...")
 
     fng_val, fng_cls = get_fear_greed_index()
@@ -606,5 +605,4 @@ def main():
         send_telegram("ℹ️ اسکن بازار به اتمام رسید. در این چرخه سیگنال جدیدی با فیلترهای فعلی یافت نشد.")
         return
 
-    header_text = (
-        f"🤖 <b>گزارش اسکن بازار ({TIMEFRAME_MAIN})</b>
+    header_text = f"🤖 <b>گزارش اسکن بازار ({TIMEFRAME_MAIN})</b>\n📅 شاخص ترس و طمع: <b>{fng_val} ({fng_cls})</b>\n🔍 سیگنال‌های جدید 
