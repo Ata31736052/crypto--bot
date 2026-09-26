@@ -37,34 +37,36 @@ VOL_REGIME_THRESHOLD = 1.12
 MAX_ATR_RATIO = 3.0
 MAX_CONCURRENT_SIGNALS = 6
 STATE_FILE = "signals_state.json"
-SPOT_BASE = "https://data-api.binance.vision"
+SPOT_BASE = "https://api.binance.com"
 FUT_BASE = "https://fapi.binance.com"
-PARALLEL_WORKERS = 18
+PARALLEL_WORKERS = 8  # کاهش برای جلوگیری از Rate Limit
 DEDUP_HOURS = 7
 
 # ======================================================
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s | %(message)s",
+    format="%(asctime)s | %(levelname)s | %(message)s",
     handlers=[logging.StreamHandler(sys.stdout)],
     force=True
 )
 logger = logging.getLogger()
 
 
-def http_get(url, params=None, retries=2, timeout=7):
+def http_get(url, params=None, retries=3, timeout=8):
     for attempt in range(retries + 1):
         try:
             r = requests.get(url, params=params, timeout=timeout)
             if r.status_code == 429:
-                time.sleep((2 ** attempt) + np.random.uniform(0, 0.6))
+                sleep_time = (2 ** attempt) + np.random.uniform(0.5, 1.5)
+                logger.warning(f"Rate limit hit (429) for {url}. Sleeping for {sleep_time:.2f}s")
+                time.sleep(sleep_time)
                 continue
             r.raise_for_status()
             return r.json()
         except Exception as e:
             if attempt < retries:
-                time.sleep(1.2 + attempt)
+                time.sleep(1.5 * (attempt + 1))
             else:
                 logger.warning(f"HTTP FAIL {url}: {e}")
     return None
@@ -75,6 +77,7 @@ def send_telegram(text):
         print("\n[DRY RUN TELEGRAM]\n" + text + "\n")
         return True
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        logger.warning("Telegram token or chat ID is missing!")
         return False
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {
@@ -90,7 +93,8 @@ def send_telegram(text):
             time.sleep(ra + 1)
             return send_telegram(text)
         return res.status_code == 200
-    except Exception:
+    except Exception as e:
+        logger.error(f"Telegram send error: {e}")
         return False
 
 
@@ -160,8 +164,8 @@ def get_fear_greed_index():
             val = int(data["data"][0]["value"])
             cls = data["data"][0]["value_classification"]
             return val, cls
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"FNG error: {e}")
     return 50, "Neutral"
 
 
@@ -176,14 +180,14 @@ def fetch_futures_metrics_batch(symbols):
 
     def fetch_single_oi(sym):
         res = {"symbol": sym, "oi": 0.0, "oi_change": 0.0}
-        oi = http_get(FUT_BASE + "/fapi/v1/openInterest", params={"symbol": sym}, timeout=3)
+        oi = http_get(FUT_BASE + "/fapi/v1/openInterest", params={"symbol": sym}, timeout=4)
         if oi and isinstance(oi, dict):
             try:
                 res["oi"] = float(oi.get("openInterest", 0) or 0)
             except Exception:
                 pass
         hist = http_get(FUT_BASE + "/futures/data/openInterestHist",
-                        params={"symbol": sym, "period": "4h", "limit": 2}, timeout=3)
+                        params={"symbol": sym, "period": "4h", "limit": 2}, timeout=4)
         if hist and isinstance(hist, list) and len(hist) >= 2:
             try:
                 p = float(hist[-2].get("sumOpenInterest", 0) or 0)
@@ -194,12 +198,14 @@ def fetch_futures_metrics_batch(symbols):
                 pass
         return res
 
-    with ThreadPoolExecutor(max_workers=14) as executor:
+    # کنترل تعداد تردها برای محافظت از درخواست‌ها
+    with ThreadPoolExecutor(max_workers=PARALLEL_WORKERS) as executor:
         for r in executor.map(fetch_single_oi, symbols):
             s = r["symbol"]
             if s in metrics:
                 metrics[s]["open_interest"] = r["oi"]
                 metrics[s]["oi_change"] = r["oi_change"]
+            time.sleep(0.05)  # تاخیر کوتاه برای پایداری درخواست‌ها
     return metrics
 
 
@@ -269,7 +275,8 @@ def add_indicators(df):
     t2 = (df["high"] - df["close"].shift()).abs()
     t3 = (df["low"] - df["close"].shift()).abs()
     tr = pd.concat([t1, t2, t3], axis=1).max(axis=1)
-    df["atr"] = tr.rolling(ATR_PERIOD).mean()
+    # اصلاح فرمول ATR با میانگین وایلدر (Wilder's Smoothing)
+    df["atr"] = tr.ewm(alpha=1/ATR_PERIOD, adjust=False).mean()
     df["atr_avg50"] = df["atr"].rolling(50).mean()
     df["vol_avg20"] = df["volume"].rolling(20).mean()
     df["vol_ratio"] = df["volume"] / df["vol_avg20"]
@@ -429,7 +436,7 @@ def analyze_coin(df, symbol, fng_val=50, btc_bullish=True, funding_rate=0.0, oi_
         else:
             return None
 
-        # تایم‌فریم بالاتر (جریمه کمتر شده)
+        # تایم‌فریم بالاتر
         if direction == "BUY" and higher_trend == "bullish":
             score += 8
             reasons.append("• تأیید روند روزانه صعودی")
@@ -455,14 +462,14 @@ def analyze_coin(df, symbol, fng_val=50, btc_bullish=True, funding_rate=0.0, oi_
             if rsi > RSI_OVERBOUGHT: return None
             if 38 <= rsi <= 57:
                 score += 10
-                reasons.append(f"• RSI خوب ({rsi:.1f})")
+                reasons.append(f"• RSI مناسب ({rsi:.1f})")
             else:
                 score += 4
         else:
             if rsi < RSI_OVERSOLD: return None
             if 43 <= rsi <= 62:
                 score += 10
-                reasons.append(f"• RSI خوب ({rsi:.1f})")
+                reasons.append(f"• RSI مناسب ({rsi:.1f})")
             else:
                 score += 4
 
@@ -566,57 +573,11 @@ def analyze_coin(df, symbol, fng_val=50, btc_bullish=True, funding_rate=0.0, oi_
             "oi_change": oi_change,
             "higher_trend": higher_trend,
         }
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Error analyzing {symbol}: {e}")
         return None
 
 
 def filter_dups(signals, state):
     now = time.time()
     sent = state.get("signals", {})
-    out = []
-    for sig in signals:
-        key = f"{sig['symbol']}_{sig['direction']}"
-        if (now - sent.get(key, 0)) < DEDUP_HOURS * 3600:
-            continue
-        out.append(sig)
-        sent[key] = now
-    state["signals"] = sent
-    return out, state
-
-
-def build_msg(sig, fng_val):
-    emoji = "🟢" if sig["direction"] == "BUY" else "🔴"
-    tag = "#" + sig["symbol"].replace("USDT", "")
-    risk_usd = 10.0
-    pr = abs(sig["close"] - sig["sl"])
-    units = (risk_usd / pr) if pr > 0 else 0
-    notional = units * sig["close"]
-
-    L = [
-        f"{emoji} <b>سیگنال شخصی (4H) - حالت متعادل</b>",
-        "",
-        f"نماد: <b>{tag}</b>",
-        f"جهت: <b>{sig['direction']}</b>",
-        f"ورود: <code>{sig['close']:.5f}</code>",
-        "",
-        f"🛑 SL: <code>{sig['sl']:.5f}</code> ({sig['sl_pct']:+.2f}%)",
-        f"🎯 TP1: <code>{sig['tp1']:.5f}</code> ({sig['tp1_pct']:+.2f}%)",
-        f"🎯 TP2: <code>{sig['tp2']:.5f}</code> ({sig['tp2_pct']:+.2f}%)",
-        "",
-        f"پیشنهاد حجم (ریسک $10):",
-        f"🔹 <code>{units:.4f}</code> | \~$<code>{notional:.1f}</code>",
-        "",
-        f"📊 امتیاز: <b>{sig['score']}</b> | RSI: {sig['rsi']:.1f}",
-        f"📦 حجم: {sig['volume_ratio']:.2f}x | {sig['regime']}",
-    ]
-    if sig.get("funding_rate"):
-        L.append(f"⚡ فاندینگ: <code>{sig['funding_rate']*100:.4f}%</code>")
-    if sig.get("oi_change"):
-        L.append(f"💼 تغییر OI: <code>{sig['oi_change']:+.1f}%</code>")
-    L.append(f"🕰 روند روزانه: {sig.get('higher_trend', 'neutral')}")
-    L.append(f"😱 F&G: {fng_val}")
-    L.append("")
-    L.append("دلایل:")
-    L.extend(sig["reasons"])
-    L.append("—" * 18)
-    return "\n".join(L)
