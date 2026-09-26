@@ -16,25 +16,25 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 TIMEFRAME_MAIN = "4h"
 KLINE_LIMIT = 500
 
-# تنظیمات انعطاف‌پذیرتر برای یافتن سیگنال در شرایط فعلی بازار
-MIN_SCORE = 58
-STRONG_SCORE = 78
-MIN_VOLUME_RATIO = 0.7      # انعطاف بیشتر در حجم معاملات
-MIN_24H_USDT_VOLUME = 10_000_000  # کاهش سقف حجم برای بررسی گزینه‌های بیشتر
+# تنظیمات بهبود یافته
+MIN_SCORE = 62
+STRONG_SCORE = 80
+MIN_VOLUME_RATIO = 0.85          # کمی سخت‌گیرانه‌تر
+MIN_24H_USDT_VOLUME = 12_000_000
 ATR_PERIOD = 14
-SL_ATR_MULTIPLIER = 1.50
-MAX_SL_PCT = 7.0
-TP1_RR = 1.60
-TP2_RR = 2.80
-RSI_OVERBOUGHT = 65         # ایمن و زیر ۶۵ برای جلوگیری از اشباع خرید
-RSI_OVERSOLD = 35           
-DIVERGENCE_LOOKBACK = 40
-DIVERGENCE_MIN_GAP = 3
-DIVERGENCE_MAX_GAP = 20
-OB_LOOKBACK = 40
-FVG_MIN_SIZE_ATR = 0.25
-VOL_REGIME_THRESHOLD = 1.10
-MAX_CONCURRENT_SIGNALS = 6
+SL_ATR_MULTIPLIER = 1.45
+MAX_SL_PCT = 6.5
+TP1_RR = 1.70
+TP2_RR = 2.90
+RSI_OVERBOUGHT = 68
+RSI_OVERSOLD = 32
+DIVERGENCE_LOOKBACK = 45
+DIVERGENCE_MIN_GAP = 4
+DIVERGENCE_MAX_GAP = 22
+OB_LOOKBACK = 35
+FVG_MIN_SIZE_ATR = 0.22
+VOL_REGIME_THRESHOLD = 1.12
+MAX_CONCURRENT_SIGNALS = 5
 STATE_FILE = "signals_state.json"
 SPOT_BASE = "https://data-api.binance.vision"
 FUT_BASE = "https://fapi.binance.com"
@@ -202,7 +202,7 @@ def get_scan_coins():
 def get_klines(symbol, interval="4h", limit=KLINE_LIMIT):
     params = {"symbol": symbol, "interval": interval, "limit": limit}
     data = http_get(SPOT_BASE + "/api/v3/klines", params=params)
-    if not data or len(data) < 100:
+    if not data or len(data) < 120:
         return None
     cols = ["ot", "open", "high", "low", "close", "volume", "ct", "qv", "tr", "tb", "tq", "ig"]
     df = pd.DataFrame(data, columns=cols)
@@ -266,12 +266,15 @@ def find_maxima(series, order=2):
 def bull_div(df):
     try:
         r = df.tail(DIVERGENCE_LOOKBACK).reset_index(drop=True)
-        if len(r) < 20: return False
+        if len(r) < 25:
+            return False
         idx = find_minima(r["low"], 2)
-        if len(idx) < 2: return False
+        if len(idx) < 2:
+            return False
         i1, i2 = idx[-2], idx[-1]
-        if not (DIVERGENCE_MIN_GAP <= (i2 - i1) <= DIVERGENCE_MAX_GAP): return False
-        return r.loc[i2, "low"] < r.loc[i1, "low"] and r.loc[i2, "rsi"] > r.loc[i1, "rsi"] + 1.5
+        if not (DIVERGENCE_MIN_GAP <= (i2 - i1) <= DIVERGENCE_MAX_GAP):
+            return False
+        return r.loc[i2, "low"] < r.loc[i1, "low"] and r.loc[i2, "rsi"] > r.loc[i1, "rsi"] + 2.0
     except Exception:
         return False
 
@@ -279,25 +282,84 @@ def bull_div(df):
 def bear_div(df):
     try:
         r = df.tail(DIVERGENCE_LOOKBACK).reset_index(drop=True)
-        if len(r) < 20: return False
+        if len(r) < 25:
+            return False
         idx = find_maxima(r["high"], 2)
-        if len(idx) < 2: return False
+        if len(idx) < 2:
+            return False
         i1, i2 = idx[-2], idx[-1]
-        if not (DIVERGENCE_MIN_GAP <= (i2 - i1) <= DIVERGENCE_MAX_GAP): return False
-        return r.loc[i2, "high"] > r.loc[i1, "high"] and r.loc[i2, "rsi"] < r.loc[i1, "rsi"] - 1.5
+        if not (DIVERGENCE_MIN_GAP <= (i2 - i1) <= DIVERGENCE_MAX_GAP):
+            return False
+        return r.loc[i2, "high"] > r.loc[i1, "high"] and r.loc[i2, "rsi"] < r.loc[i1, "rsi"] - 2.0
     except Exception:
         return False
 
 
-def analyze_coin(df, symbol, fng_val=50, btc_bullish=True):
+def detect_order_block(df, direction):
+    """تشخیص ساده Order Block (آخرین کندل مخالف قوی قبل از حرکت)"""
+    try:
+        look = df.tail(OB_LOOKBACK).reset_index(drop=True)
+        if len(look) < 10:
+            return False
+        
+        if direction == "BUY":
+            # آخرین کندل نزولی قوی قبل از حرکت صعودی
+            for i in range(len(look) - 3, 3, -1):
+                body = abs(look.loc[i, "close"] - look.loc[i, "open"])
+                rng = look.loc[i, "high"] - look.loc[i, "low"]
+                if look.loc[i, "close"] < look.loc[i, "open"] and body > rng * 0.55:
+                    # بعد از آن حرکت صعودی رخ داده باشد
+                    if look.loc[i+1:, "close"].max() > look.loc[i, "high"]:
+                        return True
+        else:
+            for i in range(len(look) - 3, 3, -1):
+                body = abs(look.loc[i, "close"] - look.loc[i, "open"])
+                rng = look.loc[i, "high"] - look.loc[i, "low"]
+                if look.loc[i, "close"] > look.loc[i, "open"] and body > rng * 0.55:
+                    if look.loc[i+1:, "close"].min() < look.loc[i, "low"]:
+                        return True
+        return False
+    except Exception:
+        return False
+
+
+def detect_fvg(df, direction, atr):
+    """تشخیص ساده Fair Value Gap"""
+    try:
+        look = df.tail(20).reset_index(drop=True)
+        if len(look) < 5 or atr <= 0:
+            return False
+        
+        min_gap = atr * FVG_MIN_SIZE_ATR
+        
+        if direction == "BUY":
+            # FVG صعودی: low کندل فعلی > high کندل دو تا قبل
+            for i in range(2, len(look)):
+                gap = look.loc[i, "low"] - look.loc[i-2, "high"]
+                if gap > min_gap:
+                    return True
+        else:
+            for i in range(2, len(look)):
+                gap = look.loc[i-2, "low"] - look.loc[i, "high"]
+                if gap > min_gap:
+                    return True
+        return False
+    except Exception:
+        return False
+
+
+def analyze_coin(df, symbol, fng_val=50, btc_bullish=True, funding_rate=0.0, oi_change=0.0):
     try:
         df = add_indicators(df)
         last = df.iloc[-1]
+        prev = df.iloc[-2]
+        
         close = float(last["close"])
         atr = float(last["atr"])
         rsi = float(last["rsi"])
         vr = float(last["vol_ratio"])
         macd_hist = float(last["macd_hist"])
+        macd_hist_prev = float(prev["macd_hist"])
         
         if not all(np.isfinite([close, atr, rsi, vr, macd_hist])) or atr <= 0:
             return None
@@ -305,48 +367,139 @@ def analyze_coin(df, symbol, fng_val=50, btc_bullish=True):
         if vr < MIN_VOLUME_RATIO:
             return None
 
-        e9, e21 = last["ema9"], last["ema21"]
+        e9 = last["ema9"]
+        e21 = last["ema21"]
+        e9_prev = prev["ema9"]
+        e21_prev = prev["ema21"]
+        e50 = last["ema50"]
+        e200 = last["ema200"]
+
+        # تشخیص کراس واقعی (نه فقط وضعیت)
+        bullish_cross = e9_prev <= e21_prev and e9 > e21
+        bearish_cross = e9_prev >= e21_prev and e9 < e21
+        
+        # اگر کراس تازه نبود، حداقل باید فاصله معنی‌دار داشته باشه و روند هم‌راستا باشه
+        strong_alignment_buy = e9 > e21 > e50 and close > e50
+        strong_alignment_sell = e9 < e21 < e50 and close < e50
+
         direction = None
-        score = 50
+        score = 40  # پایه پایین‌تر
         reasons = []
 
-        if e9 > e21:
+        if bullish_cross or (strong_alignment_buy and e9 > e21):
             direction = "BUY"
-            score += 12
-            reasons.append("• تقاطع صعودی EMA 9/21")
-        elif e9 < e21:
+            if bullish_cross:
+                score += 16
+                reasons.append("• کراس صعودی تازه EMA 9/21")
+            else:
+                score += 9
+                reasons.append("• هم‌راستایی قوی صعودی EMAها")
+        elif bearish_cross or (strong_alignment_sell and e9 < e21):
             direction = "SELL"
-            score += 12
-            reasons.append("• تقاطع نزولی EMA 9/21")
+            if bearish_cross:
+                score += 16
+                reasons.append("• کراس نزولی تازه EMA 9/21")
+            else:
+                score += 9
+                reasons.append("• هم‌راستایی قوی نزولی EMAها")
         else:
             return None
 
-        # فیلتر ایمنی RSI
-        if direction == "BUY" and rsi > RSI_OVERBOUGHT:
-            return None
-        if direction == "SELL" and rsi < RSI_OVERSOLD:
-            return None
+        # فیلتر روند کلی بیت‌کوین
+        if direction == "BUY" and not btc_bullish:
+            score -= 8
+            reasons.append("• ⚠️ روند بیت‌کوین نزولی (امتیاز کم شد)")
+        elif direction == "SELL" and btc_bullish:
+            score -= 6
 
-        score += 8
-        reasons.append(f"• وضعیت امن RSI ({rsi:.1f})")
+        # فیلتر RSI
+        if direction == "BUY":
+            if rsi > RSI_OVERBOUGHT:
+                return None
+            if 40 <= rsi <= 58:
+                score += 10
+                reasons.append(f"• RSI ایده‌آل ({rsi:.1f})")
+            else:
+                score += 4
+                reasons.append(f"• RSI قابل قبول ({rsi:.1f})")
+        else:
+            if rsi < RSI_OVERSOLD:
+                return None
+            if 42 <= rsi <= 60:
+                score += 10
+                reasons.append(f"• RSI ایده‌آل ({rsi:.1f})")
+            else:
+                score += 4
+                reasons.append(f"• RSI قابل قبول ({rsi:.1f})")
 
-        if direction == "BUY" and macd_hist > 0:
-            score += 8
-            reasons.append("• تایید مومنتوم صعودی (MACD)")
-        elif direction == "SELL" and macd_hist < 0:
-            score += 8
-            reasons.append("• تایید مومنتوم نزولی (MACD)")
+        # MACD
+        if direction == "BUY" and macd_hist > 0 and macd_hist > macd_hist_prev:
+            score += 9
+            reasons.append("• مومنتوم صعودی در حال تقویت (MACD)")
+        elif direction == "SELL" and macd_hist < 0 and macd_hist < macd_hist_prev:
+            score += 9
+            reasons.append("• مومنتوم نزولی در حال تقویت (MACD)")
+        elif (direction == "BUY" and macd_hist > 0) or (direction == "SELL" and macd_hist < 0):
+            score += 4
 
+        # واگرایی
         if direction == "BUY" and bull_div(df):
-            score += 15
-            reasons.append("• تایید واگرایی صعودی")
+            score += 14
+            reasons.append("• واگرایی صعودی تأیید شد")
         elif direction == "SELL" and bear_div(df):
-            score += 15
-            reasons.append("• تایید واگرایی نزولی")
+            score += 14
+            reasons.append("• واگرایی نزولی تأیید شد")
 
+        # Order Block
+        if detect_order_block(df, direction):
+            score += 8
+            reasons.append("• Order Block هم‌راستا")
+
+        # Fair Value Gap
+        if detect_fvg(df, direction, atr):
+            score += 7
+            reasons.append("• Fair Value Gap شناسایی شد")
+
+        # حجم
+        if vr >= 1.3:
+            score += 7
+            reasons.append(f"• حجم قوی ({vr:.2f}x)")
+        elif vr >= 1.0:
+            score += 3
+
+        # Funding Rate
+        if funding_rate != 0:
+            if direction == "BUY" and funding_rate < -0.0001:  # فاندینگ منفی به نفع لانگ
+                score += 5
+                reasons.append("• فاندینگ منفی (به نفع لانگ)")
+            elif direction == "SELL" and funding_rate > 0.0003:
+                score += 5
+                reasons.append("• فاندینگ مثبت بالا (به نفع شورت)")
+            elif direction == "BUY" and funding_rate > 0.0005:
+                score -= 6
+                reasons.append("• ⚠️ فاندینگ خیلی مثبت (خطر)")
+
+        # تغییر Open Interest
+        if oi_change > 4 and direction == "BUY":
+            score += 4
+            reasons.append("• افزایش OI همراه با خرید")
+        elif oi_change < -4 and direction == "SELL":
+            score += 4
+            reasons.append("• کاهش OI همراه با فروش")
+
+        # Fear & Greed
+        if fng_val <= 25 and direction == "BUY":
+            score += 6
+            reasons.append("• ترس شدید بازار (فرصت خرید)")
+        elif fng_val >= 75 and direction == "SELL":
+            score += 5
+            reasons.append("• طمع بالا (فرصت فروش)")
+
+        # فیلتر نهایی امتیاز
         if score < MIN_SCORE:
             return None
 
+        # محاسبه حد ضرر و اهداف
         if direction == "BUY":
             sl = close - (atr * SL_ATR_MULTIPLIER)
             risk = close - sl
@@ -362,10 +515,13 @@ def analyze_coin(df, symbol, fng_val=50, btc_bullish=True):
         if abs(slp) > MAX_SL_PCT:
             return None
 
+        # رژیم بازار
+        regime = "📈 Trending" if (atr / float(last["atr_avg50"])) >= VOL_REGIME_THRESHOLD else "🔄 Ranging"
+
         return {
             "symbol": symbol,
             "direction": direction,
-            "score": score,
+            "score": min(score, 98),  # سقف امتیاز
             "close": close,
             "sl": sl,
             "tp1": tp1,
@@ -375,9 +531,11 @@ def analyze_coin(df, symbol, fng_val=50, btc_bullish=True):
             "tp2_pct": ((tp2 - close) / close) * 100,
             "rsi": rsi,
             "volume_ratio": vr,
-            "regime": "📈 Trending" if (atr / float(last["atr_avg50"])) >= VOL_REGIME_THRESHOLD else "🔄 Ranging",
+            "regime": regime,
             "reasons": reasons,
             "strong": score >= STRONG_SCORE,
+            "funding_rate": funding_rate,
+            "oi_change": oi_change,
         }
     except Exception:
         return None
@@ -399,7 +557,7 @@ def filter_dups(signals, state):
 
 def build_msg(sig, fng_val):
     emoji = "🟢" if sig["direction"] == "BUY" else "🔴"
-    stype = "سیگنال نوسانی انعطاف‌پذیر (4H)"
+    stype = "سیگنال نوسانی بهبودیافته (4H)"
     tag = "#" + sig["symbol"].replace("USDT", "")
     
     risk_usd = 10.0
@@ -419,7 +577,7 @@ def build_msg(sig, fng_val):
         f"🎯 TP2: <code>{sig['tp2']:.4f}</code> ({sig['tp2_pct']:+.2f}%)",
         "",
         "پیشنهاد حجم (سرمایه $1000، ریسک 1%):",
-        f"🔹 <code>{units:.4f}</code> واحد | ~$<code>{notional:.2f}</code>",
+        f"🔹 <code>{units:.4f}</code> واحد | \~$<code>{notional:.2f}</code>",
         "",
         f"📊 امتیاز: <b>{sig['score']}/100</b> | RSI: {sig['rsi']:.1f}",
         f"📦 حجم: {sig['volume_ratio']:.2f}x"
@@ -429,9 +587,9 @@ def build_msg(sig, fng_val):
     if fr != 0.0:
         L.append(f"⚡ فاندینگ: <code>{fr*100:.4f}%</code>")
     
-    oi = sig.get("open_interest", 0)
-    if oi > 0:
-        L.append(f"💼 OI: <code>{format_num(oi)}</code> | {sig['oi_change']:+.1f}%")
+    oi_change = sig.get("oi_change", 0)
+    if oi_change != 0:
+        L.append(f"💼 تغییر OI: <code>{oi_change:+.1f}%</code>")
 
     L.extend([
         f"🌊 رژیم: {sig['regime']}",
@@ -441,76 +599,4 @@ def build_msg(sig, fng_val):
     ])
     L.extend(sig["reasons"])
     L.append("—" * 20)
-    return "\n".join(L)
-
-
-def main():
-    print("=" * 50, flush=True)
-    print("BOT STARTED - FLEXIBLE SWING", flush=True)
-
-    send_telegram("🤖 ربات نوسان‌گیر با تنظیمات انعطاف‌پذیر جدید روشن شد...")
-
-    fng_val, fng_cls = get_fear_greed_index()
-
-    btc_bullish = True
-    btc_df = get_klines("BTCUSDT", TIMEFRAME_MAIN, 200)
-    if btc_df is not None and len(btc_df) > 50:
-        btc_df = add_indicators(btc_df)
-        btc_last = btc_df.iloc[-1]
-        if np.isfinite(btc_last["ema200"]) and btc_last["close"] < btc_last["ema200"]:
-            btc_bullish = False
-
-    coins = get_scan_coins()
-    if not coins:
-        return
-
-    symbols = [item["symbol"] for item in coins]
-    fut_metrics = fetch_futures_metrics_batch(symbols)
-
-    signals = []
-
-    def process_coin(item):
-        symbol = item["symbol"]
-        df = get_klines(symbol, TIMEFRAME_MAIN, KLINE_LIMIT)
-        if df is None or len(df) < 100:
-            return None
-        sig = analyze_coin(df, symbol, fng_val, btc_bullish)
-        if sig:
-            m = fut_metrics.get(symbol, {})
-            sig["funding_rate"] = m.get("funding_rate", 0.0)
-            sig["open_interest"] = m.get("open_interest", 0.0)
-            sig["oi_change"] = m.get("oi_change", 0.0)
-        return sig
-
-    with ThreadPoolExecutor(max_workers=PARALLEL_WORKERS) as executor:
-        results = executor.map(process_coin, coins)
-        for r in results:
-            if r is not None:
-                signals.append(r)
-
-    signals.sort(key=lambda x: x["score"], reverse=True)
-    signals = signals[:MAX_CONCURRENT_SIGNALS]
-
-    state = load_state()
-    fresh_signals, state = filter_dups(signals, state)
-    save_json(STATE_FILE, state)
-
-    if not fresh_signals:
-        send_telegram("ℹ️ اسکن بازار تمام شد. در حال حاضر با وجود کاهش فیلترها نیز سیگنالی شناسایی نشد.")
-        return
-
-    header_text = f"🤖 <b>گزارش نوسان‌گیری بازار ({TIMEFRAME_MAIN})</b>\n📅 شاخص ترس و طمع: <b>{fng_val} ({fng_cls})</b>\n🔍 سیگنال‌های تاییدشده: <b>{len(fresh_signals)}</b>"
-    
-    send_telegram(header_text)
-    time.sleep(1.0)
-
-    for sig in fresh_signals:
-        msg = build_msg(sig, fng_val)
-        send_telegram(msg)
-        time.sleep(1.2)
-
-    print("BOT FINISHED", flush=True)
-
-
-if __name__ == "__main__":
-    main()
+    retu
