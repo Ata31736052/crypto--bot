@@ -1,15 +1,14 @@
 import os, sys, json, time, logging
-import requests, pandas as pd, numpy as np
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import requests
+import pandas as pd
+import numpy as np
+from concurrent.futures import ThreadPoolExecutor
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[logging.StreamHandler(sys.stdout)],
     force=True
 )
-log = logging.getLogger(__name__)
-log.setLevel(logging.INFO)
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
@@ -35,8 +34,8 @@ FVG_MIN_SIZE_ATR = 0.3
 VOL_REGIME_THRESHOLD = 1.15
 MAX_CONCURRENT_SIGNALS = 8
 STATE_FILE = "signals_state.json"
-BINANCE_SPOT_BASE = "https://data-api.binance.vision"
-BINANCE_FUTURES_BASE = "https://fapi.binance.com"
+SPOT_BASE = "https://data-api.binance.vision"
+FUT_BASE = "https://fapi.binance.com"
 PARALLEL_WORKERS = 20
 DEDUP_HOURS = 6
 
@@ -46,9 +45,9 @@ def http_get(url, params=None, retries=2, timeout=6):
         try:
             r = requests.get(url, params=params, timeout=timeout)
             if r.status_code == 429:
-                sleep_time = (2 ** attempt) + np.random.uniform(0, 0.5)
-                log.warning(f"[RATE LIMIT] sleeping {sleep_time:.2f}s")
-                time.sleep(sleep_time)
+                st = (2 ** attempt) + np.random.uniform(0, 0.5)
+                print(f"[RATE] sleep {st:.1f}s", flush=True)
+                time.sleep(st)
                 continue
             r.raise_for_status()
             return r.json()
@@ -56,13 +55,13 @@ def http_get(url, params=None, retries=2, timeout=6):
             if attempt < retries:
                 time.sleep(1 + attempt)
             else:
-                log.debug(f"[HTTP FAIL] {url}: {e}")
+                print(f"[HTTP FAIL] {url}: {e}", flush=True)
     return None
 
 
 def send_telegram(text):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        print("[TELEGRAM] missing token/chat_id", flush=True)
+        print("[TG] missing token/chat", flush=True)
         return False
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {
@@ -74,41 +73,19 @@ def send_telegram(text):
     try:
         res = requests.post(url, json=payload, timeout=10)
         if res.status_code == 429:
-            retry_after = res.json().get("parameters", {}).get("retry_after", 5)
-            print(f"[TELEGRAM 429] retry after {retry_after}s", flush=True)
-            time.sleep(retry_after + 1)
+            info = res.json().get("parameters", {})
+            ra = info.get("retry_after", 5)
+            print(f"[TG 429] retry {ra}s", flush=True)
+            time.sleep(ra + 1)
             return send_telegram(text)
         if res.status_code != 200:
-            print(f"[TELEGRAM ERROR] {res.status_code}: {res.text[:300]}", flush=True)
+            msg = res.text[:300]
+            print(f"[TG ERROR] {res.status_code}: {msg}", flush=True)
             return False
         return True
     except Exception as e:
-        print(f"[TELEGRAM EXC] {e}", flush=True)
+        print(f"[TG EXC] {e}", flush=True)
         return False
-
-
-def send_telegram_chunks(text, max_len=3800):
-    if not text:
-        return True
-    parts = []
-    while text:
-        if len(text) <= max_len:
-            parts.append(text)
-            break
-        cut = text.rfind("\n\n", 0, max_len)
-        if cut == -1:
-            cut = max_len
-        parts.append(text[:cut])
-        text = text[cut:].lstrip("\n")
-    all_ok = True
-    for i, part in enumerate(parts):
-        if len(parts) > 1:
-            part = f"<i>({i+1}/{len(parts)})</i>\n" + part
-        ok = send_telegram(part)
-        if not ok:
-            all_ok = False
-        time.sleep(1.2)
-    return all_ok
 
 
 def format_num(n):
@@ -130,7 +107,9 @@ def load_json(path, default=None):
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception:
-        return default if default is not None else {}
+        if default is not None:
+            return default
+        return {}
 
 
 def save_json(path, data):
@@ -138,7 +117,7 @@ def save_json(path, data):
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        print(f"[SAVE JSON] {path}: {e}", flush=True)
+        print(f"[SAVE] {path}: {e}", flush=True)
 
 
 def get_fear_greed_index():
@@ -154,89 +133,93 @@ def get_fear_greed_index():
 
 
 def fetch_futures_metrics_batch(symbols):
-    metrics = {}
-    for sym in symbols:
-        metrics[sym] = {
-            "funding_rate": 0.0,
-            "open_interest": 0.0,
-            "oi_change": 0.0
-        }
-    pi_data = http_get(BINANCE_FUTURES_BASE + "/fapi/v1/premiumIndex", timeout=5)
-    pi_map = {}
-    if isinstance(pi_data, list) and pi_data:
-        for item in pi_data:
-            if "symbol" in item:
-                fr = float(item.get("lastFundingRate", 0) or 0)
-                pi_map[item["symbol"]] = fr
-    else:
-        print("[FUTURES] premiumIndex unavailable", flush=True)
-    for sym in symbols:
-        metrics[sym]["funding_rate"] = pi_map.get(sym, 0.0)
-        oi_data = http_get(
-            BINANCE_FUTURES_BASE + "/fapi/v1/openInterest",
-            params={"symbol": sym},
-            timeout=3
-        )
-        if oi_data and isinstance(oi_data, dict):
+    metrics = {sym: {"funding_rate": 0.0, "open_interest": 0.0, "oi_change": 0.0} for sym in symbols}
+    
+    # 1. دریافت دسته‌ای فاندینگ ریت‌ها
+    pi = http_get(FUT_BASE + "/fapi/v1/premiumIndex", timeout=5)
+    if isinstance(pi, list):
+        for item in pi:
+            s = item.get("symbol")
+            if s in metrics:
+                metrics[s]["funding_rate"] = float(item.get("lastFundingRate", 0) or 0)
+
+    # 2. دریافت موازی Open Interest برای سرعت بالا
+    def fetch_single_oi(sym):
+        res = {"symbol": sym, "oi": 0.0, "oi_change": 0.0}
+        url1 = FUT_BASE + "/fapi/v1/openInterest"
+        oi = http_get(url1, params={"symbol": sym}, timeout=3)
+        if oi and isinstance(oi, dict):
             try:
-                metrics[sym]["open_interest"] = float(oi_data.get("openInterest", 0) or 0)
+                res["oi"] = float(oi.get("openInterest", 0) or 0)
             except Exception:
                 pass
-        hist = http_get(
-            BINANCE_FUTURES_BASE + "/futures/data/openInterestHist",
-            params={"symbol": sym, "period": "4h", "limit": 2},
-            timeout=3
-        )
+        
+        url2 = FUT_BASE + "/futures/data/openInterestHist"
+        hist = http_get(url2, params={"symbol": sym, "period": "4h", "limit": 2}, timeout=3)
         if hist and isinstance(hist, list) and len(hist) >= 2:
             try:
-                prev_oi = float(hist[-2].get("sumOpenInterest", 0) or 0)
-                curr_oi = float(hist[-1].get("sumOpenInterest", 0) or 0)
-                if prev_oi > 0:
-                    metrics[sym]["oi_change"] = ((curr_oi - prev_oi) / prev_oi) * 100
+                p = float(hist[-2].get("sumOpenInterest", 0) or 0)
+                c = float(hist[-1].get("sumOpenInterest", 0) or 0)
+                if p > 0:
+                    res["oi_change"] = ((c - p) / p) * 100
             except Exception:
                 pass
+        return res
+
+    with ThreadPoolExecutor(max_workers=15) as executor:
+        results = executor.map(fetch_single_oi, symbols)
+        for r in results:
+            s = r["symbol"]
+            if s in metrics:
+                metrics[s]["open_interest"] = r["oi"]
+                metrics[s]["oi_change"] = r["oi_change"]
+
     return metrics
 
 
 def get_scan_coins():
-    all_coins = [
-        "BTC", "ETH", "SOL", "BNB", "XRP", "TON", "ADA", "DOGE", "AVAX", "LINK",
-        "DOT", "LTC", "BCH", "ETC", "XLM", "UNI", "FIL", "TRX", "ATOM", "NEAR",
-        "AAVE", "SUI", "APT", "ARB", "OP", "SEI", "INJ", "TIA", "STX", "ALGO",
-        "PEPE", "WIF", "BONK", "FLOKI", "SHIB", "MEME", "NOT", "ORDI", "BOME",
-        "POL", "RENDER", "ICP", "KAS", "IMX", "GRT", "HBAR", "ENA",
-        "PENDLE", "JUP", "PYTH", "W", "MANTA", "ALT", "STRK", "AXL",
-        "AEVO", "REZ", "BB", "IO", "ZK", "LISTA", "DOGS", "CATI",
-        "HMSTR", "EIGEN", "SCR", "PNUT", "ACT", "GOAT", "CHZ", "SAND", "MANA",
-        "GALA", "ENJ", "AXS", "THETA", "FTM", "SNX", "CRV", "MKR", "COMP"
+    coins = [
+        "BTC", "ETH", "SOL", "BNB", "XRP", "TON", "ADA", "DOGE",
+        "AVAX", "LINK", "DOT", "LTC", "BCH", "ETC", "XLM", "UNI",
+        "FIL", "TRX", "ATOM", "NEAR", "AAVE", "SUI", "APT", "ARB",
+        "OP", "SEI", "INJ", "TIA", "STX", "ALGO", "PEPE", "WIF",
+        "BONK", "FLOKI", "SHIB", "MEME", "NOT", "ORDI", "BOME",
+        "POL", "RENDER", "ICP", "KAS", "IMX", "GRT", "HBAR",
+        "ENA", "PENDLE", "JUP", "PYTH", "W", "MANTA", "ALT",
+        "STRK", "AXL", "AEVO", "REZ", "BB", "IO", "ZK",
+        "LISTA", "DOGS", "CATI", "HMSTR", "EIGEN", "SCR",
+        "PNUT", "ACT", "GOAT", "CHZ", "SAND", "MANA", "GALA",
+        "ENJ", "AXS", "THETA", "FTM", "SNX", "CRV", "MKR",
+        "COMP"
     ]
-    unique_coins = sorted(set(all_coins))
-    tickers = http_get(BINANCE_SPOT_BASE + "/api/v3/ticker/24hr")
-    valid_volumes = {}
+    uniq = sorted(set(coins))
+    tickers = http_get(SPOT_BASE + "/api/v3/ticker/24hr")
+    vols = {}
     if tickers and isinstance(tickers, list):
         for t in tickers:
-            sym = t.get("symbol")
-            if sym and sym.endswith("USDT"):
+            s = t.get("symbol")
+            if s and s.endswith("USDT"):
                 try:
-                    valid_volumes[sym] = float(t.get("quoteVolume", 0) or 0)
+                    v = float(t.get("quoteVolume", 0) or 0)
+                    vols[s] = v
                 except Exception:
                     pass
     result = []
-    for coin in unique_coins:
-        symbol = coin + "USDT"
-        if valid_volumes.get(symbol, 0) >= MIN_24H_USDT_VOLUME:
-            result.append({"coin": coin, "symbol": symbol})
-    print(f"[SCAN] {len(result)} coins passed volume filter", flush=True)
+    for c in uniq:
+        sym = c + "USDT"
+        if vols.get(sym, 0) >= MIN_24H_USDT_VOLUME:
+            result.append({"coin": c, "symbol": sym})
+    print(f"[SCAN] {len(result)} coins passed", flush=True)
     return result
 
 
 def get_klines(symbol, interval="4h", limit=KLINE_LIMIT):
     params = {"symbol": symbol, "interval": interval, "limit": limit}
-    data = http_get(BINANCE_SPOT_BASE + "/api/v3/klines", params=params)
+    data = http_get(SPOT_BASE + "/api/v3/klines", params=params)
     if not data or len(data) < 100:
         return None
-    cols = ["open_time", "open", "high", "low", "close", "volume",
-            "close_time", "q_vol", "trades", "tb_base", "tb_quote", "ignore"]
+    cols = ["ot", "open", "high", "low", "close", "volume",
+            "ct", "qv", "tr", "tb", "tq", "ig"]
     df = pd.DataFrame(data, columns=cols)
     for col in ["open", "high", "low", "close", "volume"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -249,25 +232,25 @@ def add_indicators(df):
     df["ema21"] = df["close"].ewm(span=21, adjust=False).mean()
     df["ema50"] = df["close"].ewm(span=50, adjust=False).mean()
     df["ema200"] = df["close"].ewm(span=200, adjust=False).mean()
-    delta = df["close"].diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    avg_gain = gain.ewm(alpha=1/14, adjust=False).mean()
-    avg_loss = loss.ewm(alpha=1/14, adjust=False).mean()
-    rs = avg_gain / avg_loss.replace(0, np.nan)
+    d = df["close"].diff()
+    g = d.clip(lower=0)
+    l = -d.clip(upper=0)
+    ag = g.ewm(alpha=1/14, adjust=False).mean()
+    al = l.ewm(alpha=1/14, adjust=False).mean()
+    rs = ag / al.replace(0, np.nan)
     df["rsi"] = 100 - (100 / (1 + rs))
-    tr1 = df["high"] - df["low"]
-    tr2 = (df["high"] - df["close"].shift()).abs()
-    tr3 = (df["low"] - df["close"].shift()).abs()
-    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    t1 = df["high"] - df["low"]
+    t2 = (df["high"] - df["close"].shift()).abs()
+    t3 = (df["low"] - df["close"].shift()).abs()
+    tr = pd.concat([t1, t2, t3], axis=1).max(axis=1)
     df["atr"] = tr.rolling(ATR_PERIOD).mean()
     df["atr_avg50"] = df["atr"].rolling(50).mean()
-    df["volume_avg20"] = df["volume"].rolling(20).mean()
-    df["volume_ratio"] = df["volume"] / df["volume_avg20"].replace(0, np.nan)
+    df["vol_avg20"] = df["volume"].rolling(20).mean()
+    df["vol_ratio"] = df["volume"] / df["vol_avg20"]
     return df
 
 
-def find_local_minima(series, order=2):
+def find_minima(series, order=2):
     idxs = []
     vals = series.values
     for i in range(order, len(vals) - order):
@@ -277,7 +260,7 @@ def find_local_minima(series, order=2):
     return idxs
 
 
-def find_local_maxima(series, order=2):
+def find_maxima(series, order=2):
     idxs = []
     vals = series.values
     for i in range(order, len(vals) - order):
@@ -287,22 +270,20 @@ def find_local_maxima(series, order=2):
     return idxs
 
 
-def has_bullish_divergence(df):
+def bull_div(df):
     try:
-        recent = df.tail(DIVERGENCE_LOOKBACK).reset_index(drop=True)
-        if len(recent) < 20:
+        r = df.tail(DIVERGENCE_LOOKBACK).reset_index(drop=True)
+        if len(r) < 20:
             return False
-        lows_idx = find_local_minima(recent["low"], order=2)
-        if len(lows_idx) < 2:
+        idx = find_minima(r["low"], 2)
+        if len(idx) < 2:
             return False
-        i1, i2 = lows_idx[-2], lows_idx[-1]
+        i1, i2 = idx[-2], idx[-1]
         gap = i2 - i1
         if gap < DIVERGENCE_MIN_GAP or gap > DIVERGENCE_MAX_GAP:
             return False
-        p1 = recent.loc[i1, "low"]
-        p2 = recent.loc[i2, "low"]
-        r1 = recent.loc[i1, "rsi"]
-        r2 = recent.loc[i2, "rsi"]
+        p1, p2 = r.loc[i1, "low"], r.loc[i2, "low"]
+        r1, r2 = r.loc[i1, "rsi"], r.loc[i2, "rsi"]
         if not all(np.isfinite(x) for x in [p1, p2, r1, r2]):
             return False
         return p2 < p1 and r2 > r1 + 2
@@ -310,22 +291,20 @@ def has_bullish_divergence(df):
         return False
 
 
-def has_bearish_divergence(df):
+def bear_div(df):
     try:
-        recent = df.tail(DIVERGENCE_LOOKBACK).reset_index(drop=True)
-        if len(recent) < 20:
+        r = df.tail(DIVERGENCE_LOOKBACK).reset_index(drop=True)
+        if len(r) < 20:
             return False
-        highs_idx = find_local_maxima(recent["high"], order=2)
-        if len(highs_idx) < 2:
+        idx = find_maxima(r["high"], 2)
+        if len(idx) < 2:
             return False
-        i1, i2 = highs_idx[-2], highs_idx[-1]
+        i1, i2 = idx[-2], idx[-1]
         gap = i2 - i1
         if gap < DIVERGENCE_MIN_GAP or gap > DIVERGENCE_MAX_GAP:
             return False
-        p1 = recent.loc[i1, "high"]
-        p2 = recent.loc[i2, "high"]
-        r1 = recent.loc[i1, "rsi"]
-        r2 = recent.loc[i2, "rsi"]
+        p1, p2 = r.loc[i1, "high"], r.loc[i2, "high"]
+        r1, r2 = r.loc[i1, "rsi"], r.loc[i2, "rsi"]
         if not all(np.isfinite(x) for x in [p1, p2, r1, r2]):
             return False
         return p2 > p1 and r2 < r1 - 2
@@ -333,34 +312,26 @@ def has_bearish_divergence(df):
         return False
 
 
-def find_order_blocks(df, direction):
+def find_obs(df, direction):
     obs = []
     try:
-        recent = df.tail(OB_LOOKBACK).reset_index(drop=True)
-        atr_last = float(df["atr"].iloc[-1])
-        if not np.isfinite(atr_last) or atr_last <= 0:
+        r = df.tail(OB_LOOKBACK).reset_index(drop=True)
+        a = float(df["atr"].iloc[-1])
+        if not np.isfinite(a) or a <= 0:
             return obs
-        for i in range(len(recent) - 3, 5, -1):
-            candle = recent.iloc[i]
-            nxt = recent.iloc[i + 1:i + 4]
-            if len(nxt) == 0:
+        for i in range(len(r) - 3, 5, -1):
+            c = r.iloc[i]
+            n = r.iloc[i + 1:i + 4]
+            if len(n) == 0:
                 continue
             if direction == "BUY":
-                diff = nxt["close"].max() - candle["low"]
-                if candle["close"] < candle["open"] and diff > atr_last * 1.5:
-                    obs.append({
-                        "top": float(candle["open"]),
-                        "bottom": float(candle["low"])
-                    })
+                if c["close"] < c["open"] and (n["close"].max() - c["low"]) > a * 1.5:
+                    obs.append({"top": float(c["open"]), "bottom": float(c["low"])})
                     if len(obs) >= 2:
                         break
             else:
-                diff = candle["high"] - nxt["close"].min()
-                if candle["close"] > candle["open"] and diff > atr_last * 1.5:
-                    obs.append({
-                        "top": float(candle["high"]),
-                        "bottom": float(candle["close"])
-                    })
+                if c["close"] > c["open"] and (c["high"] - n["close"].min()) > a * 1.5:
+                    obs.append({"top": float(c["high"]), "bottom": float(c["close"])})
                     if len(obs) >= 2:
                         break
     except Exception as e:
@@ -368,35 +339,27 @@ def find_order_blocks(df, direction):
     return obs
 
 
-def find_fair_value_gaps(df, direction):
+def find_fvgs(df, direction):
     fvgs = []
     try:
-        recent = df.tail(OB_LOOKBACK).reset_index(drop=True)
-        atr_last = float(df["atr"].iloc[-1])
-        if not np.isfinite(atr_last) or atr_last <= 0:
+        r = df.tail(OB_LOOKBACK).reset_index(drop=True)
+        a = float(df["atr"].iloc[-1])
+        if not np.isfinite(a) or a <= 0:
             return fvgs
-        for i in range(2, len(recent) - 1):
-            prev = recent.iloc[i - 1]
-            curr = recent.iloc[i]
-            after = recent.iloc[i + 1:]
-            if direction == "BUY" and curr["low"] > prev["high"]:
-                size = curr["low"] - prev["high"]
-                if size > atr_last * FVG_MIN_SIZE_ATR:
-                    filled = len(after) > 0 and (after["low"] < prev["high"]).any()
+        for i in range(2, len(r) - 1):
+            p = r.iloc[i - 1]
+            c = r.iloc[i]
+            af = r.iloc[i + 1:]
+            if direction == "BUY":
+                if c["low"] > p["high"] and (c["low"] - p["high"]) > a * FVG_MIN_SIZE_ATR:
+                    filled = len(af) > 0 and (af["low"] < p["high"]).any()
                     if not filled:
-                        fvgs.append({
-                            "top": float(curr["low"]),
-                            "bottom": float(prev["high"])
-                        })
-            elif direction == "SELL" and curr["high"] < prev["low"]:
-                size = prev["low"] - curr["high"]
-                if size > atr_last * FVG_MIN_SIZE_ATR:
-                    filled = len(after) > 0 and (after["high"] > prev["low"]).any()
+                        fvgs.append({"top": float(c["low"]), "bottom": float(p["high"])})
+            elif direction == "SELL":
+                if c["high"] < p["low"] and (p["low"] - c["high"]) > a * FVG_MIN_SIZE_ATR:
+                    filled = len(af) > 0 and (af["high"] > p["low"]).any()
                     if not filled:
-                        fvgs.append({
-                            "top": float(prev["low"]),
-                            "bottom": float(curr["high"])
-                        })
+                        fvgs.append({"top": float(p["low"]), "bottom": float(c["high"])})
         if len(fvgs) > 3:
             fvgs = fvgs[-3:]
     except Exception as e:
@@ -404,7 +367,7 @@ def find_fair_value_gaps(df, direction):
     return fvgs
 
 
-def is_price_in_zone(price, zone):
+def in_zone(price, zone):
     return zone["bottom"] <= price <= zone["top"]
 
 
@@ -415,67 +378,75 @@ def analyze_coin(df, symbol, fng_val=50):
         close = float(last["close"])
         atr = float(last["atr"])
         rsi = float(last["rsi"])
-        volume_ratio = float(last["volume_ratio"])
-        if not all(np.isfinite([close, atr, rsi, volume_ratio])):
+        vr = float(last["vol_ratio"])
+        if not all(np.isfinite([close, atr, rsi, vr])) or atr <= 0 or vr < 0.8:
             return None
-        if atr <= 0:
-            return None
-        if volume_ratio < 0.8:
-            return None
+        
         atr_ratio = atr / float(last["atr_avg50"])
         regime = "📈 Trending" if atr_ratio >= VOL_REGIME_THRESHOLD else "🔄 Ranging"
+        
         direction = None
         score = 50
         reasons = []
-        if last["ema9"] > last["ema21"] and last["ema21"] > last["ema50"]:
+        e9, e21, e50 = last["ema9"], last["ema21"], last["ema50"]
+        
+        if e9 > e21 and e21 > e50:
             direction = "BUY"
             score += 15
             reasons.append("• تقاطع صعودی EMA 9/21")
-        elif last["ema9"] < last["ema21"] and last["ema21"] < last["ema50"]:
+        elif e9 < e21 and e21 < e50:
             direction = "SELL"
             score += 15
             reasons.append("• تقاطع نزولی EMA 9/21")
         else:
             return None
+
         if direction == "BUY" and rsi > RSI_OVERBOUGHT:
             return None
         if direction == "SELL" and rsi < RSI_OVERSOLD:
             return None
-        if np.isfinite(last["ema200"]):
-            if direction == "BUY" and close > last["ema200"]:
+
+        e200 = last["ema200"]
+        if np.isfinite(e200):
+            if direction == "BUY" and close > e200:
                 reasons.append("• بالای EMA200 (4H)")
-            elif direction == "SELL" and close < last["ema200"]:
+            elif direction == "SELL" and close < e200:
                 reasons.append("• زیر EMA200 (4H)")
-        if volume_ratio >= MIN_VOLUME_RATIO:
+
+        if vr >= MIN_VOLUME_RATIO:
             score += 10
-            reasons.append(f"• حجم قوی ({volume_ratio:.2f}x)")
+            reasons.append(f"• حجم قوی ({vr:.2f}x)")
+
         if direction == "BUY" and 45 <= rsi <= 65:
             score += 10
-            reasons.append(f"• RSI مومنتوم ({rsi:.1f})")
-        elif direction == "SELL" and 35 <= rsi <= 55:
+            reasons.append(f"• RSI ({rsi:.1f})")
+        if direction == "SELL" and 35 <= rsi <= 55:
             score += 10
-            reasons.append(f"• RSI مومنتوم ({rsi:.1f})")
-        if direction == "BUY" and has_bullish_divergence(df):
+            reasons.append(f"• RSI ({rsi:.1f})")
+
+        if direction == "BUY" and bull_div(df):
             score += 15
             reasons.append("• واگرایی صعودی")
-        elif direction == "SELL" and has_bearish_divergence(df):
+        if direction == "SELL" and bear_div(df):
             score += 15
             reasons.append("• واگرایی نزولی")
-        obs = find_order_blocks(df, direction)
-        fvgs = find_fair_value_gaps(df, direction)
-        in_ob = any(is_price_in_zone(close, ob) for ob in obs)
-        in_fvg = any(is_price_in_zone(close, fvg) for fvg in fvgs)
-        if in_ob or in_fvg:
+
+        obs = find_obs(df, direction)
+        fvgs = find_fvgs(df, direction)
+        if any(in_zone(close, o) for o in obs) or any(in_zone(close, f) for f in fvgs):
             score += 10
-            reasons.append("• در محدوده OB / FVG")
+            reasons.append("• OB / FVG")
+
         if fng_val > 70 and direction == "BUY":
             score -= 15
-            reasons.append(f"⚠️ جریمه: Greed ({fng_val})")
+            reasons.append(f"⚠️ Greed ({fng_val})")
         if fng_val < 30 and direction == "SELL":
             score -= 15
-            reasons.append(f"⚠️ جریمه: Fear ({fng_val})")
+            reasons.append(f"⚠️ Fear ({fng_val})")
+
         if score < MIN_SCORE:
             return None
+
         if direction == "BUY":
             sl = close - (atr * SL_ATR_MULTIPLIER)
             risk = close - sl
@@ -486,11 +457,11 @@ def analyze_coin(df, symbol, fng_val=50):
             risk = sl - close
             tp1 = close - (risk * TP1_RR)
             tp2 = close - (risk * TP2_RR)
-        sl_pct = ((sl - close) / close) * 100
-        tp1_pct = ((tp1 - close) / close) * 100
-        tp2_pct = ((tp2 - close) / close) * 100
-        if abs(sl_pct) > MAX_SL_PCT:
+
+        slp = ((sl - close) / close) * 100
+        if abs(slp) > MAX_SL_PCT:
             return None
+
         return {
             "symbol": symbol,
             "direction": direction,
@@ -499,66 +470,142 @@ def analyze_coin(df, symbol, fng_val=50):
             "sl": sl,
             "tp1": tp1,
             "tp2": tp2,
-            "sl_pct": sl_pct,
-            "tp1_pct": tp1_pct,
-            "tp2_pct": tp2_pct,
+            "sl_pct": slp,
+            "tp1_pct": ((tp1 - close) / close) * 100,
+            "tp2_pct": ((tp2 - close) / close) * 100,
             "rsi": rsi,
-            "volume_ratio": volume_ratio,
+            "volume_ratio": vr,
             "regime": regime,
             "reasons": reasons,
             "strong": score >= STRONG_SCORE,
         }
     except Exception as e:
-        print(f"[ANALYZE ERROR] {symbol}: {e}", flush=True)
+        print(f"[ANALYZE ERR] {symbol}: {e}", flush=True)
         return None
 
 
-def load_sent_state():
+def load_state():
     return load_json(STATE_FILE, default={"signals": {}})
 
 
-def filter_duplicates(signals, state):
+def filter_dups(signals, state):
     now = time.time()
     sent = state.get("signals", {})
-    filtered = []
+    out = []
     for sig in signals:
         key = f"{sig['symbol']}_{sig['direction']}"
-        last_ts = sent.get(key, 0)
-        if (now - last_ts) < DEDUP_HOURS * 3600:
-            print(f"[DEDUP] skipped {key}", flush=True)
+        if (now - sent.get(key, 0)) < DEDUP_HOURS * 3600:
+            print(f"[DEDUP] skip {key}", flush=True)
             continue
-        filtered.append(sig)
+        out.append(sig)
         sent[key] = now
     state["signals"] = sent
-    return filtered, state
+    return out, state
 
 
-def build_signal_message(sig, fng_val):
+def build_msg(sig, fng_val):
     emoji = "🟢" if sig["direction"] == "BUY" else "🔴"
     stype = "سیگنال قوی (4H)" if sig["strong"] else "سیگنال معمولی (4H)"
     tag = "#" + sig["symbol"].replace("USDT", "")
+    
     risk_usd = 10.0
-    price_risk = abs(sig["close"] - sig["sl"])
-    units = risk_usd / price_risk if price_risk > 0 else 0
+    pr = abs(sig["close"] - sig["sl"])
+    units = (risk_usd / pr) if pr > 0 else 0
     notional = units * sig["close"]
+    
     v = sig["volume_ratio"]
     v_text = f"قوی {v:.2f}x" if v >= 1.5 else f"متوسط {v:.2f}x"
-    lines = []
-    lines.append("")
-    lines.append(f"{emoji} <b>{stype}</b>")
-    lines.append("")
-    lines.append(f"نماد: <b>{tag}</b>")
-    lines.append(f"جهت: <b>{sig['direction']}</b>")
-    lines.append(f"ورود: <code>{sig['close']:.4f}</code>")
-    lines.append("")
-    lines.append(f"🛑 SL: <code>{sig['sl']:.4f}</code> ({sig['sl_pct']:+.2f}%)")
-    lines.append(f"🎯 TP1: <code>{sig['tp1']:.4f}</code> ({sig['tp1_pct']:+.2f}%)")
-    lines.append(f"🎯 TP2: <code>{sig['tp2']:.4f}</code> ({sig['tp2_pct']:+.2f}%)")
-    lines.append("")
-    lines.append("پیشنهاد حجم (سرمایه $1000، ریسک 1%):")
-    lines.append(f"🔹 <code>{units:.4f}</code> واحد | نوشنال ~$<code>{notional:.2f}</code>")
-    lines.append("")
-    lines.append(f"📊 امتیاز: <b>{sig['score']}/100</b> | RSI: {sig['rsi']:.1f}")
-    lines.append(f"📦 حجم: {v_text}")
+
+    L = [
+        f"{emoji} <b>{stype}</b>",
+        "",
+        f"نماد: <b>{tag}</b>",
+        f"جهت: <b>{sig['direction']}</b>",
+        f"ورود: <code>{sig['close']:.4f}</code>",
+        "",
+        f"🛑 SL: <code>{sig['sl']:.4f}</code> ({sig['sl_pct']:+.2f}%)",
+        f"🎯 TP1: <code>{sig['tp1']:.4f}</code> ({sig['tp1_pct']:+.2f}%)",
+        f"🎯 TP2: <code>{sig['tp2']:.4f}</code> ({sig['tp2_pct']:+.2f}%)",
+        "",
+        "پیشنهاد حجم (سرمایه $1000، ریسک 1%):",
+        f"🔹 <code>{units:.4f}</code> واحد | ~$<code>{notional:.2f}</code>",
+        "",
+        f"📊 امتیاز: <b>{sig['score']}/100</b> | RSI: {sig['rsi']:.1f}",
+        f"📦 حجم: {v_text}"
+    ]
+
     fr = sig.get("funding_rate", 0)
-    if fr !
+    if fr != 0.0:
+        L.append(f"⚡ فاندینگ: <code>{fr*100:.4f}%</code>")
+    
+    oi = sig.get("open_interest", 0)
+    if oi > 0:
+        L.append(f"💼 OI: <code>{format_num(oi)}</code> | {sig['oi_change']:+.1f}%")
+
+    L.extend([
+        f"🌊 رژیم: {sig['regime']}",
+        f"😱 F&G: {fng_val}",
+        "",
+        "دلایل:"
+    ])
+    L.extend(sig["reasons"])
+    L.append("—" * 20)
+    return "\n".join(L)
+
+
+def main():
+    print("=" * 50, flush=True)
+    print("BOT STARTED", flush=True)
+
+    fng_val, fng_cls = get_fear_greed_index()
+    print(f"[FNG] Index: {fng_val} ({fng_cls})", flush=True)
+
+    coins = get_scan_coins()
+    if not coins:
+        print("[SCAN] No coins found. Exiting.", flush=True)
+        return
+
+    symbols = [item["symbol"] for item in coins]
+    print(f"[FUT] Fetching metrics for {len(symbols)} symbols...", flush=True)
+    fut_metrics = fetch_futures_metrics_batch(symbols)
+
+    print("[ANALYSIS] Running analysis...", flush=True)
+    signals = []
+
+    def process_coin(item):
+        symbol = item["symbol"]
+        df = get_klines(symbol, TIMEFRAME_MAIN, KLINE_LIMIT)
+        if df is None or len(df) < 100:
+            return None
+        sig = analyze_coin(df, symbol, fng_val)
+        if sig:
+            m = fut_metrics.get(symbol, {})
+            sig["funding_rate"] = m.get("funding_rate", 0.0)
+            sig["open_interest"] = m.get("open_interest", 0.0)
+            sig["oi_change"] = m.get("oi_change", 0.0)
+        return sig
+
+    with ThreadPoolExecutor(max_workers=PARALLEL_WORKERS) as executor:
+        results = executor.map(process_coin, coins)
+        for r in results:
+            if r is not None:
+                signals.append(r)
+
+    print(f"[SIGNALS] Found {len(signals)} initial signals", flush=True)
+
+    signals.sort(key=lambda x: x["score"], reverse=True)
+    signals = signals[:MAX_CONCURRENT_SIGNALS]
+
+    state = load_state()
+    fresh_signals, state = filter_dups(signals, state)
+    save_json(STATE_FILE, state)
+
+    if not fresh_signals:
+        print("[TG] No new signals to send after deduplication.", flush=True)
+        return
+
+    # ارسال گزارش هدر اولیه
+    header_text = (
+        f"🤖 <b>گزارش اسکن بازار ({TIMEFRAME_MAIN})</b>\n"
+        f"📅 شاخص ترس و طمع: <b>{fng_val} ({fng_cls})</b>\n"
+        f"🔍 سیگنال‌های جدید تایید شده: <b>{len(fresh_si
