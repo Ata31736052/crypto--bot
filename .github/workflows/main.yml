@@ -5,6 +5,9 @@ on:
   schedule:
     - cron: '0 */4 * * *'
 
+permissions:
+  contents: write
+
 jobs:
   scan:
     runs-on: ubuntu-latest
@@ -27,4 +30,13 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python main.py
-        
+
+      - name: Commit and push state changes
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git status
+          git add signals_state.json
+          git commit -m "Update signals state [skip ci]" || echo "No changes to commit"
+          git push
+          
