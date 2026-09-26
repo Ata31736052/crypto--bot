@@ -39,7 +39,7 @@ MAX_CONCURRENT_SIGNALS = 6
 STATE_FILE = "signals_state.json"
 SPOT_BASE = "https://api.binance.com"
 FUT_BASE = "https://fapi.binance.com"
-PARALLEL_WORKERS = 8  # کاهش برای جلوگیری از Rate Limit
+PARALLEL_WORKERS = 8
 DEDUP_HOURS = 7
 
 # ======================================================
@@ -52,11 +52,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger()
 
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+}
+
 
 def http_get(url, params=None, retries=3, timeout=8):
     for attempt in range(retries + 1):
         try:
-            r = requests.get(url, params=params, timeout=timeout)
+            r = requests.get(url, params=params, headers=HEADERS, timeout=timeout)
             if r.status_code == 429:
                 sleep_time = (2 ** attempt) + np.random.uniform(0.5, 1.5)
                 logger.warning(f"Rate limit hit (429) for {url}. Sleeping for {sleep_time:.2f}s")
@@ -68,7 +72,7 @@ def http_get(url, params=None, retries=3, timeout=8):
             if attempt < retries:
                 time.sleep(1.5 * (attempt + 1))
             else:
-                logger.warning(f"HTTP FAIL {url}: {e}")
+                logger.debug(f"HTTP FAIL {url}: {e}")
     return None
 
 
@@ -96,17 +100,6 @@ def send_telegram(text):
     except Exception as e:
         logger.error(f"Telegram send error: {e}")
         return False
-
-
-def format_num(n):
-    try:
-        n = float(n)
-        if n >= 1_000_000_000: return f"{n/1_000_000_000:.2f}B"
-        if n >= 1_000_000: return f"{n/1_000_000:.2f}M"
-        if n >= 1_000: return f"{n/1_000:.2f}K"
-        return f"{n:.2f}"
-    except Exception:
-        return str(n)
 
 
 def load_json(path, default=None):
@@ -164,8 +157,8 @@ def get_fear_greed_index():
             val = int(data["data"][0]["value"])
             cls = data["data"][0]["value_classification"]
             return val, cls
-    except Exception as e:
-        logger.debug(f"FNG error: {e}")
+    except Exception:
+        pass
     return 50, "Neutral"
 
 
@@ -198,14 +191,13 @@ def fetch_futures_metrics_batch(symbols):
                 pass
         return res
 
-    # کنترل تعداد تردها برای محافظت از درخواست‌ها
     with ThreadPoolExecutor(max_workers=PARALLEL_WORKERS) as executor:
         for r in executor.map(fetch_single_oi, symbols):
             s = r["symbol"]
             if s in metrics:
                 metrics[s]["open_interest"] = r["oi"]
                 metrics[s]["oi_change"] = r["oi_change"]
-            time.sleep(0.05)  # تاخیر کوتاه برای پایداری درخواست‌ها
+            time.sleep(0.02)
     return metrics
 
 
@@ -275,7 +267,6 @@ def add_indicators(df):
     t2 = (df["high"] - df["close"].shift()).abs()
     t3 = (df["low"] - df["close"].shift()).abs()
     tr = pd.concat([t1, t2, t3], axis=1).max(axis=1)
-    # اصلاح فرمول ATR با میانگین وایلدر (Wilder's Smoothing)
     df["atr"] = tr.ewm(alpha=1/ATR_PERIOD, adjust=False).mean()
     df["atr_avg50"] = df["atr"].rolling(50).mean()
     df["vol_avg20"] = df["volume"].rolling(20).mean()
@@ -436,7 +427,6 @@ def analyze_coin(df, symbol, fng_val=50, btc_bullish=True, funding_rate=0.0, oi_
         else:
             return None
 
-        # تایم‌فریم بالاتر
         if direction == "BUY" and higher_trend == "bullish":
             score += 8
             reasons.append("• تأیید روند روزانه صعودی")
@@ -450,14 +440,12 @@ def analyze_coin(df, symbol, fng_val=50, btc_bullish=True, funding_rate=0.0, oi_
             score -= 6
             reasons.append("• ⚠️ خلاف روند روزانه")
 
-        # بیت‌کوین
         if direction == "BUY" and not btc_bullish:
             score -= 7
             reasons.append("• ⚠️ بیت‌کوین نزولی")
         elif direction == "SELL" and btc_bullish:
             score -= 4
 
-        # RSI
         if direction == "BUY":
             if rsi > RSI_OVERBOUGHT: return None
             if 38 <= rsi <= 57:
@@ -473,7 +461,6 @@ def analyze_coin(df, symbol, fng_val=50, btc_bullish=True, funding_rate=0.0, oi_
             else:
                 score += 4
 
-        # MACD
         if direction == "BUY" and macd_hist > 0 and macd_hist > macd_hist_prev:
             score += 8
             reasons.append("• مومنتوم صعودی در حال تقویت")
@@ -483,7 +470,6 @@ def analyze_coin(df, symbol, fng_val=50, btc_bullish=True, funding_rate=0.0, oi_
         elif (direction == "BUY" and macd_hist > 0) or (direction == "SELL" and macd_hist < 0):
             score += 3
 
-        # واگرایی
         if direction == "BUY" and bull_div(df):
             score += 12
             reasons.append("• واگرایی صعودی")
@@ -491,7 +477,6 @@ def analyze_coin(df, symbol, fng_val=50, btc_bullish=True, funding_rate=0.0, oi_
             score += 12
             reasons.append("• واگرایی نزولی")
 
-        # Order Block & FVG
         if detect_order_block(df, direction):
             score += 7
             reasons.append("• Order Block")
@@ -499,14 +484,12 @@ def analyze_coin(df, symbol, fng_val=50, btc_bullish=True, funding_rate=0.0, oi_
             score += 6
             reasons.append("• Fair Value Gap")
 
-        # حجم
         if vr >= 1.35:
             score += 6
             reasons.append(f"• حجم قوی ({vr:.2f}x)")
         elif vr >= 1.0:
             score += 3
 
-        # Funding
         if funding_rate != 0:
             if direction == "BUY" and funding_rate < -0.00008:
                 score += 5
@@ -518,13 +501,11 @@ def analyze_coin(df, symbol, fng_val=50, btc_bullish=True, funding_rate=0.0, oi_
                 score -= 5
                 reasons.append("• ⚠️ فاندینگ خیلی مثبت")
 
-        # OI
         if oi_change > 4 and direction == "BUY":
             score += 3
         elif oi_change < -4 and direction == "SELL":
             score += 3
 
-        # Fear & Greed
         if fng_val <= 25 and direction == "BUY":
             score += 6
             reasons.append("• ترس شدید بازار")
@@ -535,7 +516,6 @@ def analyze_coin(df, symbol, fng_val=50, btc_bullish=True, funding_rate=0.0, oi_
         if score < MIN_SCORE:
             return None
 
-        # SL / TP
         if direction == "BUY":
             sl = close - (atr * SL_ATR_MULTIPLIER)
             risk = close - sl
@@ -581,3 +561,22 @@ def analyze_coin(df, symbol, fng_val=50, btc_bullish=True, funding_rate=0.0, oi_
 def filter_dups(signals, state):
     now = time.time()
     sent = state.get("signals", {})
+    out = []
+    for sig in signals:
+        key = f"{sig['symbol']}_{sig['direction']}"
+        if (now - sent.get(key, 0)) < DEDUP_HOURS * 3600:
+            continue
+        out.append(sig)
+        sent[key] = now
+    state["signals"] = sent
+    return out, state
+
+
+def build_msg(sig, fng_val):
+    emoji = "🟢" if sig["direction"] == "BUY" else "🔴"
+    tag = "#" + sig["symbol"].replace("USDT", "")
+    
+    L = [
+        f"{emoji} <b>سیگنال شخصی (4H) - حالت متعادل</b>",
+        f"ارز: {tag} | جهت: <b>{sig['direction']}</b>",
+        f"امتیاز: <
