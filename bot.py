@@ -600,7 +600,9 @@ def main():
             sig["oi_change"] = m.get("oi_change", 0.0)
         return sig
 
-    with ThreadPoolExecutor(max_workers=PARALLEL_WORKERS) as executor:
+        with ThreadPoolExecutor(max_workers=PARALLEL_WORKERS) as executor:
         results = executor.map(process_coin, coins)
         for r in results:
             if r is not None:
+                signals.append(r)
+                
