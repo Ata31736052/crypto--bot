@@ -135,7 +135,6 @@ def get_fear_greed_index():
 def fetch_futures_metrics_batch(symbols):
     metrics = {sym: {"funding_rate": 0.0, "open_interest": 0.0, "oi_change": 0.0} for sym in symbols}
     
-    # 1. دریافت دسته‌ای فاندینگ ریت‌ها
     pi = http_get(FUT_BASE + "/fapi/v1/premiumIndex", timeout=5)
     if isinstance(pi, list):
         for item in pi:
@@ -143,7 +142,6 @@ def fetch_futures_metrics_batch(symbols):
             if s in metrics:
                 metrics[s]["funding_rate"] = float(item.get("lastFundingRate", 0) or 0)
 
-    # 2. دریافت موازی Open Interest برای سرعت بالا
     def fetch_single_oi(sym):
         res = {"symbol": sym, "oi": 0.0, "oi_change": 0.0}
         url1 = FUT_BASE + "/fapi/v1/openInterest"
@@ -604,8 +602,13 @@ def main():
         print("[TG] No new signals to send after deduplication.", flush=True)
         return
 
-    # ارسال گزارش هدر اولیه
     header_text = (
         f"🤖 <b>گزارش اسکن بازار ({TIMEFRAME_MAIN})</b>\n"
         f"📅 شاخص ترس و طمع: <b>{fng_val} ({fng_cls})</b>\n"
-        f"🔍 سیگنال‌های جدید تایید شده: <b>{len(fresh_si
+        f"🔍 سیگنال‌های جدید تایید شده: <b>{len(fresh_signals)}</b>\n"
+    )
+    send_telegram(header_text)
+    time.sleep(1.0)
+
+    for sig in fresh_signals:
+        msg = b
