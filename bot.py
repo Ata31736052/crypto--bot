@@ -209,6 +209,8 @@ def get_scan_coins():
             result.append({"coin": c, "symbol": sym})
     print(f"[SCAN] {len(result)} coins passed", flush=True)
     return result
+
+
 def get_klines(symbol, interval="4h", limit=KLINE_LIMIT):
     params = {"symbol": symbol, "interval": interval, "limit": limit}
     data = http_get(SPOT_BASE + "/api/v3/klines", params=params)
@@ -482,7 +484,9 @@ def analyze_coin(df, symbol, fng_val=50, btc_bullish=True):
     except Exception as e:
         print(f"[ANALYZE ERR] {symbol}: {e}", flush=True)
         return None
-            def load_state():
+
+
+def load_state():
     return load_json(STATE_FILE, default={"signals": {}})
 
 
@@ -599,42 +603,4 @@ def main():
     with ThreadPoolExecutor(max_workers=PARALLEL_WORKERS) as executor:
         results = executor.map(process_coin, coins)
         for r in results:
-            if r is not None:  # بررسی کامل بدون نقص خطای SyntaxError
-                signals.append(r)
-
-    print(f"[SIGNALS] Found {len(signals)} initial signals", flush=True)
-
-    signals.sort(key=lambda x: x["score"], reverse=True)
-    signals = signals[:MAX_CONCURRENT_SIGNALS]
-
-    state = load_state()
-    fresh_signals, state = filter_dups(signals, state)
-    save_json(STATE_FILE, state)
-
-    if not fresh_signals:
-        print("[TG] No new signals to send after deduplication.", flush=True)
-        send_telegram("ℹ️ اسکن بازار به اتمام رسید. در این چرخه سیگنال جدیدی با فیلترهای جدید یافت نشد.")
-        return
-
-    header_text = (
-        "🤖 <b>گزارش اسکن پیشرفته بازار (" + TIMEFRAME_MAIN + ")</b>\n" +
-        "📅 شاخص ترس و طمع: <b>" + str(fng_val) + " (" + str(fng_cls) + ")</b>\n" +
-        "🔍 سیگنال‌های تایید شده: <b>" + str(len(fresh_signals)) + "</b>"
-    )
-    
-    send_telegram(header_text)
-    time.sleep(1.0)
-
-    for sig in fresh_signals:
-        msg = build_msg(sig, fng_val)
-        send_telegram(msg)
-        time.sleep(1.2)
-
-    print("[TG] All signals sent successfully.", flush=True)
-    print("=" * 50, flush=True)
-    print("BOT FINISHED", flush=True)
-
-
-if __name__ == "__main__":
-    main()
-        
+            if r is not N
