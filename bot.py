@@ -367,7 +367,7 @@ def find_fvgs(df, direction):
 
 def in_zone(price, zone):
     return zone["bottom"] <= price <= zone["top"]
-def analyze_coin(df, symbol, fng_val=50):
+                             def analyze_coin(df, symbol, fng_val=50, btc_bullish=True):
     try:
         df = add_indicators(df)
         last = df.iloc[-1]
@@ -395,6 +395,11 @@ def analyze_coin(df, symbol, fng_val=50):
             score += 15
             reasons.append("• تقاطع نزولی EMA 9/21")
         else:
+            return None
+
+        # فیلتر پیشرفته روند کلان بیت‌کوین
+        if direction == "BUY" and not btc_bullish:
+            print(f"[MACRO FILTER] Skip BUY for {symbol} because BTC macro trend is bearish", flush=True)
             return None
 
         if direction == "BUY" and rsi > RSI_OVERBOUGHT:
@@ -553,10 +558,22 @@ def main():
     print("=" * 50, flush=True)
     print("BOT STARTED", flush=True)
 
-    send_telegram("🤖 ربات اسکنر بازار روشن شد و در حال پردازش است...")
+    send_telegram("🤖 ربات اسکنر پیشرفته بازار روشن شد...")
 
     fng_val, fng_cls = get_fear_greed_index()
     print(f"[FNG] Index: {fng_val} ({fng_cls})", flush=True)
+
+    # بررسی روند کلان بیت‌کوین (BTC Macro Trend Check)
+    btc_bullish = True
+    btc_df = get_klines("BTCUSDT", TIMEFRAME_MAIN, 200)
+    if btc_df is not None and len(btc_df) > 50:
+        btc_df = add_indicators(btc_df)
+        btc_last = btc_df.iloc[-1]
+        if np.isfinite(btc_last["ema200"]) and btc_last["close"] < btc_last["ema200"]:
+            btc_bullish = False
+            print("[MACRO] BTC is below EMA200 (Bearish trend active)", flush=True)
+        else:
+            print("[MACRO] BTC trend is bullish or neutral", flush=True)
 
     coins = get_scan_coins()
     if not coins:
@@ -575,7 +592,7 @@ def main():
         df = get_klines(symbol, TIMEFRAME_MAIN, KLINE_LIMIT)
         if df is None or len(df) < 100:
             return None
-        sig = analyze_coin(df, symbol, fng_val)
+        sig = analyze_coin(df, symbol, fng_val, btc_bullish)
         if sig:
             m = fut_metrics.get(symbol, {})
             sig["funding_rate"] = m.get("funding_rate", 0.0)
@@ -600,13 +617,13 @@ def main():
 
     if not fresh_signals:
         print("[TG] No new signals to send after deduplication.", flush=True)
-        send_telegram("ℹ️ اسکن بازار به اتمام رسید. در این چرخه سیگنال جدیدی با فیلترهای فعلی یافت نشد.")
+        send_telegram("ℹ️ اسکن بازار به اتمام رسید. در این چرخه سیگنال جدیدی با فیلترهای جدید یافت نشد.")
         return
 
     header_text = (
-        "🤖 <b>گزارش اسکن بازار (" + TIMEFRAME_MAIN + ")</b>\n" +
+        "🤖 <b>گزارش اسکن پیشرفته بازار (" + TIMEFRAME_MAIN + ")</b>\n" +
         "📅 شاخص ترس و طمع: <b>" + str(fng_val) + " (" + str(fng_cls) + ")</b>\n" +
-        "🔍 سیگنال‌های جدید تایید شده: <b>" + str(len(fresh_signals)) + "</b>"
+        "🔍 سیگنال‌های تایید شده: <b>" + str(len(fresh_signals)) + "</b>"
     )
     
     send_telegram(header_text)
