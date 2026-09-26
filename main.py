@@ -16,17 +16,17 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 TIMEFRAME_MAIN = "4h"
 KLINE_LIMIT = 500
 
-# تنظیمات متعادل‌شده برای یافتن سیگنال‌های امن اما کاربردی
+# تنظیمات انعطاف‌پذیرتر برای یافتن سیگنال در شرایط فعلی بازار
 MIN_SCORE = 58
 STRONG_SCORE = 78
-MIN_VOLUME_RATIO = 1.0      # حجم معاملات در حد نرمال یا بالاتر
-MIN_24H_USDT_VOLUME = 15_000_000
+MIN_VOLUME_RATIO = 0.7      # انعطاف بیشتر در حجم معاملات
+MIN_24H_USDT_VOLUME = 10_000_000  # کاهش سقف حجم برای بررسی گزینه‌های بیشتر
 ATR_PERIOD = 14
 SL_ATR_MULTIPLIER = 1.50
 MAX_SL_PCT = 7.0
 TP1_RR = 1.60
 TP2_RR = 2.80
-RSI_OVERBOUGHT = 65         # همچنان ایمن و زیر ۶۵ برای جلوگیری از اشباع خرید
+RSI_OVERBOUGHT = 65         # ایمن و زیر ۶۵ برای جلوگیری از اشباع خرید
 RSI_OVERSOLD = 35           
 DIVERGENCE_LOOKBACK = 40
 DIVERGENCE_MIN_GAP = 3
@@ -330,7 +330,6 @@ def analyze_coin(df, symbol, fng_val=50, btc_bullish=True):
         score += 8
         reasons.append(f"• وضعیت امن RSI ({rsi:.1f})")
 
-        # بررسی اختیاری MACD (فقط امتیاز می‌دهد، مانع خرید/فروش نمی‌شود)
         if direction == "BUY" and macd_hist > 0:
             score += 8
             reasons.append("• تایید مومنتوم صعودی (MACD)")
@@ -400,7 +399,7 @@ def filter_dups(signals, state):
 
 def build_msg(sig, fng_val):
     emoji = "🟢" if sig["direction"] == "BUY" else "🔴"
-    stype = "سیگنال نوسانی متوازن (4H)"
+    stype = "سیگنال نوسانی انعطاف‌پذیر (4H)"
     tag = "#" + sig["symbol"].replace("USDT", "")
     
     risk_usd = 10.0
@@ -447,9 +446,9 @@ def build_msg(sig, fng_val):
 
 def main():
     print("=" * 50, flush=True)
-    print("BOT STARTED - BALANCED SWING", flush=True)
+    print("BOT STARTED - FLEXIBLE SWING", flush=True)
 
-    send_telegram("🤖 ربات نوسان‌گیر متوازن با فیلتر RSI ایمن روشن شد...")
+    send_telegram("🤖 ربات نوسان‌گیر با تنظیمات انعطاف‌پذیر جدید روشن شد...")
 
     fng_val, fng_cls = get_fear_greed_index()
 
@@ -497,7 +496,7 @@ def main():
     save_json(STATE_FILE, state)
 
     if not fresh_signals:
-        send_telegram("ℹ️ اسکن بازار تمام شد. در حال حاضر سیگنالی با معیارهای متوازن یافت نشد.")
+        send_telegram("ℹ️ اسکن بازار تمام شد. در حال حاضر با وجود کاهش فیلترها نیز سیگنالی شناسایی نشد.")
         return
 
     header_text = f"🤖 <b>گزارش نوسان‌گیری بازار ({TIMEFRAME_MAIN})</b>\n📅 شاخص ترس و طمع: <b>{fng_val} ({fng_cls})</b>\n🔍 سیگنال‌های تاییدشده: <b>{len(fresh_signals)}</b>"
@@ -515,4 +514,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-            
