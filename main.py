@@ -1,4 +1,3 @@
-
 import os, sys, json, time, logging
 import requests
 import pandas as pd
@@ -16,29 +15,31 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 TIMEFRAME_MAIN = "4h"
 KLINE_LIMIT = 500
-MIN_SCORE = 65
-STRONG_SCORE = 88
-MIN_VOLUME_RATIO = 1.20
+
+# تنظیمات بهینه‌شده و ملایم‌تر برای ارسال سیگنال راحت‌تر
+MIN_SCORE = 55
+STRONG_SCORE = 85
+MIN_VOLUME_RATIO = 1.0
 MIN_24H_USDT_VOLUME = 15_000_000
 ATR_PERIOD = 14
 SL_ATR_MULTIPLIER = 1.50
-MAX_SL_PCT = 6.0
+MAX_SL_PCT = 8.0
 TP1_RR = 1.60
 TP2_RR = 2.80
-RSI_OVERBOUGHT = 72
-RSI_OVERSOLD = 28
+RSI_OVERBOUGHT = 75
+RSI_OVERSOLD = 25
 DIVERGENCE_LOOKBACK = 40
 DIVERGENCE_MIN_GAP = 3
 DIVERGENCE_MAX_GAP = 20
 OB_LOOKBACK = 40
-FVG_MIN_SIZE_ATR = 0.3
-VOL_REGIME_THRESHOLD = 1.15
+FVG_MIN_SIZE_ATR = 0.25
+VOL_REGIME_THRESHOLD = 1.10
 MAX_CONCURRENT_SIGNALS = 8
 STATE_FILE = "signals_state.json"
 SPOT_BASE = "https://data-api.binance.vision"
 FUT_BASE = "https://fapi.binance.com"
 PARALLEL_WORKERS = 20
-DEDUP_HOURS = 6
+DEDUP_HOURS = 0  # غیرفعال کردن محدودیت زمانی تکرار برای تست
 
 
 def http_get(url, params=None, retries=2, timeout=6):
@@ -103,14 +104,9 @@ def format_num(n):
         return str(n)
 
 
-def load_json(path, default=None):
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        if default is not None:
-            return default
-        return {}
+def load_state():
+    # همیشه در شروع کار حافظه موقت سیگنال‌ها را پاک می‌کنیم تا محدودیتی نباشد
+    return {"signals": {}}
 
 
 def save_json(path, data):
@@ -285,7 +281,7 @@ def bull_div(df):
         r1, r2 = r.loc[i1, "rsi"], r.loc[i2, "rsi"]
         if not all(np.isfinite(x) for x in [p1, p2, r1, r2]):
             return False
-        return p2 < p1 and r2 > r1 + 2
+        return p2 < p1 and r2 > r1 + 1.5
     except Exception:
         return False
 
@@ -306,7 +302,7 @@ def bear_div(df):
         r1, r2 = r.loc[i1, "rsi"], r.loc[i2, "rsi"]
         if not all(np.isfinite(x) for x in [p1, p2, r1, r2]):
             return False
-        return p2 > p1 and r2 < r1 - 2
+        return p2 > p1 and r2 < r1 - 1.5
     except Exception:
         return False
 
@@ -324,12 +320,12 @@ def find_obs(df, direction):
             if len(n) == 0:
                 continue
             if direction == "BUY":
-                if c["close"] < c["open"] and (n["close"].max() - c["low"]) > a * 1.5:
+                if c["close"] < c["open"] and (n["close"].max() - c["low"]) > a * 1.2:
                     obs.append({"top": float(c["open"]), "bottom": float(c["low"])})
                     if len(obs) >= 2:
                         break
             else:
-                if c["close"] > c["open"] and (c["high"] - n["close"].min()) > a * 1.5:
+                if c["close"] > c["open"] and (c["high"] - n["close"].min()) > a * 1.2:
                     obs.append({"top": float(c["high"]), "bottom": float(c["close"])})
                     if len(obs) >= 2:
                         break
@@ -378,7 +374,7 @@ def analyze_coin(df, symbol, fng_val=50, btc_bullish=True):
         atr = float(last["atr"])
         rsi = float(last["rsi"])
         vr = float(last["vol_ratio"])
-        if not all(np.isfinite([close, atr, rsi, vr])) or atr <= 0 or vr < 0.8:
+        if not all(np.isfinite([close, atr, rsi, vr])) or atr <= 0 or vr < 0.7:
             return None
         
         atr_ratio = atr / float(last["atr_avg50"])
@@ -389,42 +385,27 @@ def analyze_coin(df, symbol, fng_val=50, btc_bullish=True):
         reasons = []
         e9, e21, e50 = last["ema9"], last["ema21"], last["ema50"]
         
-        if e9 > e21 and e21 > e50:
+        if e9 > e21:
             direction = "BUY"
-            score += 15
+            score += 12
             reasons.append("• تقاطع صعودی EMA 9/21")
-        elif e9 < e21 and e21 < e50:
+        elif e9 < e21:
             direction = "SELL"
-            score += 15
+            score += 12
             reasons.append("• تقاطع نزولی EMA 9/21")
         else:
             return None
 
-        if direction == "BUY" and not btc_bullish:
-            return None
-
-        if direction == "BUY" and rsi > RSI_OVERBOUGHT:
-            return None
-        if direction == "SELL" and rsi < RSI_OVERSOLD:
-            return None
-
-        e200 = last["ema200"]
-        if np.isfinite(e200):
-            if direction == "BUY" and close > e200:
-                reasons.append("• بالای EMA200 (4H)")
-            elif direction == "SELL" and close < e200:
-                reasons.append("• زیر EMA200 (4H)")
-
         if vr >= MIN_VOLUME_RATIO:
             score += 10
-            reasons.append(f"• حجم قوی ({vr:.2f}x)")
+            reasons.append(f"• حجم مناسب ({vr:.2f}x)")
 
-        if direction == "BUY" and 45 <= rsi <= 65:
+        if direction == "BUY" and 40 <= rsi <= 70:
             score += 10
-            reasons.append(f"• RSI ({rsi:.1f})")
-        if direction == "SELL" and 35 <= rsi <= 55:
+            reasons.append(f"• RSI مناسب ({rsi:.1f})")
+        if direction == "SELL" and 30 <= rsi <= 60:
             score += 10
-            reasons.append(f"• RSI ({rsi:.1f})")
+            reasons.append(f"• RSI مناسب ({rsi:.1f})")
 
         if direction == "BUY" and bull_div(df):
             score += 15
@@ -437,14 +418,7 @@ def analyze_coin(df, symbol, fng_val=50, btc_bullish=True):
         fvgs = find_fvgs(df, direction)
         if any(in_zone(close, o) for o in obs) or any(in_zone(close, f) for f in fvgs):
             score += 10
-            reasons.append("• OB / FVG")
-
-        if fng_val > 70 and direction == "BUY":
-            score -= 15
-            reasons.append(f"⚠️ Greed ({fng_val})")
-        if fng_val < 30 and direction == "SELL":
-            score -= 15
-            reasons.append(f"⚠️ Fear ({fng_val})")
+            reasons.append("• نواحی OB / FVG")
 
         if score < MIN_SCORE:
             return None
@@ -460,8 +434,8 @@ def analyze_coin(df, symbol, fng_val=50, btc_bullish=True):
             tp1 = close - (risk * TP1_RR)
             tp2 = close - (risk * TP2_RR)
 
-        slp = ((sl - close) / close) * 100
-        if abs(slp) > MAX_SL_PCT:
+        slp = abs(((sl - close) / close) * 100)
+        if slp > MAX_SL_PCT:
             return None
 
         return {
@@ -472,7 +446,7 @@ def analyze_coin(df, symbol, fng_val=50, btc_bullish=True):
             "sl": sl,
             "tp1": tp1,
             "tp2": tp2,
-            "sl_pct": slp,
+            "sl_pct": ((sl - close) / close) * 100,
             "tp1_pct": ((tp1 - close) / close) * 100,
             "tp2_pct": ((tp2 - close) / close) * 100,
             "rsi": rsi,
@@ -485,27 +459,13 @@ def analyze_coin(df, symbol, fng_val=50, btc_bullish=True):
         return None
 
 
-def load_state():
-    return load_json(STATE_FILE, default={"signals": {}})
-
-
 def filter_dups(signals, state):
-    now = time.time()
-    sent = state.get("signals", {})
-    out = []
-    for sig in signals:
-        key = f"{sig['symbol']}_{sig['direction']}"
-        if (now - sent.get(key, 0)) < DEDUP_HOURS * 3600:
-            continue
-        out.append(sig)
-        sent[key] = now
-    state["signals"] = sent
-    return out, state
+    return signals, state
 
 
 def build_msg(sig, fng_val):
     emoji = "🟢" if sig["direction"] == "BUY" else "🔴"
-    stype = "سیگنال قوی (4H)" if sig["strong"] else "سیگنال معمولی (4H)"
+    stype = "سیگنال قوی (4H)" if sig["strong"] else "سیگنال استاندارد (4H)"
     tag = "#" + sig["symbol"].replace("USDT", "")
     
     risk_usd = 10.0
@@ -514,7 +474,7 @@ def build_msg(sig, fng_val):
     notional = units * sig["close"]
     
     v = sig["volume_ratio"]
-    v_text = f"قوی {v:.2f}x" if v >= 1.5 else f"متوسط {v:.2f}x"
+    v_text = f"قوی {v:.2f}x" if v >= 1.2 else f"معمولی {v:.2f}x"
 
     L = [
         f"{emoji} <b>{stype}</b>",
@@ -557,7 +517,7 @@ def main():
     print("=" * 50, flush=True)
     print("BOT STARTED", flush=True)
 
-    send_telegram("🤖 ربات اسکنر پیشرفته بازار روشن شد...")
+    send_telegram("🤖 ربات اسکنر بازار با تنظیمات بهینه‌شده روشن شد...")
 
     fng_val, fng_cls = get_fear_greed_index()
     print(f"[FNG] Index: {fng_val} ({fng_cls})", flush=True)
@@ -572,6 +532,7 @@ def main():
 
     coins = get_scan_coins()
     if not coins:
+        send_telegram("❌ هیچ ارزی با حجم معاملاتی مورد نظر یافت نشد.")
         return
 
     symbols = [item["symbol"] for item in coins]
@@ -606,9 +567,21 @@ def main():
     save_json(STATE_FILE, state)
 
     if not fresh_signals:
-        send_telegram("ℹ️ اسکن بازار به اتمام رسید. در این چرخه سیگنال جدیدی یافت نشد.")
+        send_telegram("ℹ️ اسکن بازار به اتمام رسید. در این چرخه سیگنال فعالی یافت نشد.")
         return
 
-    header_text = f"🤖 <b>گزارش اسکن پیشرفته بازار ({TIMEFRAME_MAIN})</b>\n📅 شاخص ترس و طمع: <b>{fng_val} ({fng_cls})</b>\n🔍 سیگنال‌های تایید شده: <b>{len(fresh_signals)}</b>"
+    header_text = f"🤖 <b>گزارش اسکن بازار ({TIMEFRAME_MAIN})</b>\n📅 شاخص ترس و طمع: <b>{fng_val} ({fng_cls})</b>\n🔍 تعداد سیگنال‌ها: <b>{len(fresh_signals)}</b>"
     
-    send_te
+    send_telegram(header_text)
+    time.sleep(1.0)
+
+    for sig in fresh_signals:
+        msg = build_msg(sig, fng_val)
+        send_telegram(msg)
+        time.sleep(1.2)
+
+    print("BOT FINISHED", flush=True)
+
+
+if __name__ == "__main__":
+    main()
