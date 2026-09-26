@@ -5,9 +5,9 @@ import pandas as pd
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor
 
-# ==================== تنظیمات شخصی ====================
-DRY_RUN = False          # True بذار تا فقط چاپ کنه و به تلگرام نفرسته
-SAVE_TO_CSV = True       # سیگنال‌ها رو در فایل csv ذخیره کنه
+# ==================== تنظیمات شخصی (حالت متعادل) ====================
+DRY_RUN = False
+SAVE_TO_CSV = True
 CSV_FILE = "my_signals.csv"
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
@@ -17,30 +17,30 @@ TIMEFRAME_MAIN = "4h"
 TIMEFRAME_HIGHER = "1d"
 KLINE_LIMIT = 500
 
-MIN_SCORE = 64
-STRONG_SCORE = 82
-MIN_VOLUME_RATIO = 0.90
-MIN_24H_USDT_VOLUME = 12_000_000
+MIN_SCORE = 59
+STRONG_SCORE = 78
+MIN_VOLUME_RATIO = 0.82
+MIN_24H_USDT_VOLUME = 10_000_000
 ATR_PERIOD = 14
 SL_ATR_MULTIPLIER = 1.40
-MAX_SL_PCT = 6.0
-TP1_RR = 1.75
-TP2_RR = 3.00
-RSI_OVERBOUGHT = 67
-RSI_OVERSOLD = 33
+MAX_SL_PCT = 6.5
+TP1_RR = 1.70
+TP2_RR = 2.90
+RSI_OVERBOUGHT = 68
+RSI_OVERSOLD = 32
 DIVERGENCE_LOOKBACK = 45
 DIVERGENCE_MIN_GAP = 4
 DIVERGENCE_MAX_GAP = 22
 OB_LOOKBACK = 30
 FVG_MIN_SIZE_ATR = 0.20
-VOL_REGIME_THRESHOLD = 1.15
-MAX_ATR_RATIO = 2.8          # اگه ATR خیلی بالاتر از میانگین باشه، رد کن
-MAX_CONCURRENT_SIGNALS = 5
+VOL_REGIME_THRESHOLD = 1.12
+MAX_ATR_RATIO = 3.0
+MAX_CONCURRENT_SIGNALS = 6
 STATE_FILE = "signals_state.json"
 SPOT_BASE = "https://data-api.binance.vision"
 FUT_BASE = "https://fapi.binance.com"
 PARALLEL_WORKERS = 18
-DEDUP_HOURS = 8
+DEDUP_HOURS = 7
 
 # ======================================================
 
@@ -364,7 +364,6 @@ def detect_fvg(df, direction, atr):
 
 
 def get_higher_tf_trend(symbol):
-    """روند تایم‌فریم روزانه"""
     df = get_klines(symbol, TIMEFRAME_HIGHER, 120)
     if df is None or len(df) < 50:
         return "neutral"
@@ -395,7 +394,6 @@ def analyze_coin(df, symbol, fng_val=50, btc_bullish=True, funding_rate=0.0, oi_
             return None
         if vr < MIN_VOLUME_RATIO:
             return None
-        # فیلتر نوسان غیرعادی
         if atr / atr_avg > MAX_ATR_RATIO:
             return None
 
@@ -409,29 +407,29 @@ def analyze_coin(df, symbol, fng_val=50, btc_bullish=True, funding_rate=0.0, oi_
         strong_sell_align = e9 < e21 < e50 and close < e50
 
         direction = None
-        score = 38
+        score = 42
         reasons = []
 
         if bullish_cross or strong_buy_align:
             direction = "BUY"
             if bullish_cross:
-                score += 17
+                score += 16
                 reasons.append("• کراس صعودی تازه EMA 9/21")
             else:
-                score += 10
+                score += 9
                 reasons.append("• هم‌راستایی قوی صعودی")
         elif bearish_cross or strong_sell_align:
             direction = "SELL"
             if bearish_cross:
-                score += 17
+                score += 16
                 reasons.append("• کراس نزولی تازه EMA 9/21")
             else:
-                score += 10
+                score += 9
                 reasons.append("• هم‌راستایی قوی نزولی")
         else:
             return None
 
-        # تایم‌فریم بالاتر
+        # تایم‌فریم بالاتر (جریمه کمتر شده)
         if direction == "BUY" and higher_trend == "bullish":
             score += 8
             reasons.append("• تأیید روند روزانه صعودی")
@@ -439,92 +437,92 @@ def analyze_coin(df, symbol, fng_val=50, btc_bullish=True, funding_rate=0.0, oi_
             score += 8
             reasons.append("• تأیید روند روزانه نزولی")
         elif direction == "BUY" and higher_trend == "bearish":
-            score -= 10
+            score -= 6
             reasons.append("• ⚠️ خلاف روند روزانه")
         elif direction == "SELL" and higher_trend == "bullish":
-            score -= 10
+            score -= 6
             reasons.append("• ⚠️ خلاف روند روزانه")
 
         # بیت‌کوین
         if direction == "BUY" and not btc_bullish:
-            score -= 9
+            score -= 7
             reasons.append("• ⚠️ بیت‌کوین نزولی")
         elif direction == "SELL" and btc_bullish:
-            score -= 5
+            score -= 4
 
         # RSI
         if direction == "BUY":
             if rsi > RSI_OVERBOUGHT: return None
-            if 38 <= rsi <= 56:
-                score += 11
-                reasons.append(f"• RSI عالی ({rsi:.1f})")
+            if 38 <= rsi <= 57:
+                score += 10
+                reasons.append(f"• RSI خوب ({rsi:.1f})")
             else:
                 score += 4
         else:
             if rsi < RSI_OVERSOLD: return None
-            if 44 <= rsi <= 62:
-                score += 11
-                reasons.append(f"• RSI عالی ({rsi:.1f})")
+            if 43 <= rsi <= 62:
+                score += 10
+                reasons.append(f"• RSI خوب ({rsi:.1f})")
             else:
                 score += 4
 
         # MACD
         if direction == "BUY" and macd_hist > 0 and macd_hist > macd_hist_prev:
-            score += 9
+            score += 8
             reasons.append("• مومنتوم صعودی در حال تقویت")
         elif direction == "SELL" and macd_hist < 0 and macd_hist < macd_hist_prev:
-            score += 9
+            score += 8
             reasons.append("• مومنتوم نزولی در حال تقویت")
         elif (direction == "BUY" and macd_hist > 0) or (direction == "SELL" and macd_hist < 0):
-            score += 4
+            score += 3
 
         # واگرایی
         if direction == "BUY" and bull_div(df):
-            score += 13
+            score += 12
             reasons.append("• واگرایی صعودی")
         elif direction == "SELL" and bear_div(df):
-            score += 13
+            score += 12
             reasons.append("• واگرایی نزولی")
 
         # Order Block & FVG
         if detect_order_block(df, direction):
-            score += 8
+            score += 7
             reasons.append("• Order Block")
         if detect_fvg(df, direction, atr):
-            score += 7
+            score += 6
             reasons.append("• Fair Value Gap")
 
         # حجم
-        if vr >= 1.4:
-            score += 7
+        if vr >= 1.35:
+            score += 6
             reasons.append(f"• حجم قوی ({vr:.2f}x)")
-        elif vr >= 1.05:
+        elif vr >= 1.0:
             score += 3
 
         # Funding
         if funding_rate != 0:
             if direction == "BUY" and funding_rate < -0.00008:
-                score += 6
+                score += 5
                 reasons.append("• فاندینگ منفی (به نفع لانگ)")
             elif direction == "SELL" and funding_rate > 0.00025:
-                score += 6
+                score += 5
                 reasons.append("• فاندینگ مثبت (به نفع شورت)")
             elif direction == "BUY" and funding_rate > 0.00045:
-                score -= 7
+                score -= 5
                 reasons.append("• ⚠️ فاندینگ خیلی مثبت")
 
         # OI
-        if oi_change > 5 and direction == "BUY":
-            score += 4
-        elif oi_change < -5 and direction == "SELL":
-            score += 4
+        if oi_change > 4 and direction == "BUY":
+            score += 3
+        elif oi_change < -4 and direction == "SELL":
+            score += 3
 
         # Fear & Greed
-        if fng_val <= 22 and direction == "BUY":
-            score += 7
-            reasons.append("• ترس شدید بازار")
-        elif fng_val >= 78 and direction == "SELL":
+        if fng_val <= 25 and direction == "BUY":
             score += 6
+            reasons.append("• ترس شدید بازار")
+        elif fng_val >= 75 and direction == "SELL":
+            score += 5
             reasons.append("• طمع بالا")
 
         if score < MIN_SCORE:
@@ -551,7 +549,7 @@ def analyze_coin(df, symbol, fng_val=50, btc_bullish=True, funding_rate=0.0, oi_
         return {
             "symbol": symbol,
             "direction": direction,
-            "score": min(int(score), 97),
+            "score": min(int(score), 96),
             "close": close,
             "sl": sl,
             "tp1": tp1,
@@ -589,4 +587,10 @@ def filter_dups(signals, state):
 def build_msg(sig, fng_val):
     emoji = "🟢" if sig["direction"] == "BUY" else "🔴"
     tag = "#" + sig["symbol"].replace("USDT", "")
-    r
+    risk_usd = 10.0
+    pr = abs(sig["close"] - sig["sl"])
+    units = (risk_usd / pr) if pr > 0 else 0
+    notional = units * sig["close"]
+
+    L = [
+        f"{emoji} <b>سیگنال شخصی (4H) - حال
