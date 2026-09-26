@@ -52,7 +52,10 @@ BINANCE_SPOT_BASE = "https://data-api.binance.vision"
 BINANCE_FUTURES_BASE = "https://fapi.binance.com"
 
 PARALLEL_WORKERS = 20
-DEDUP_HOURS = 6# ---------- UTILS ----------
+DEDUP_HOURS = 6
+
+
+# ---------- UTILS ----------
 def http_get(url, params=None, retries=2, timeout=6):
     for attempt in range(retries + 1):
         try:
@@ -146,7 +149,10 @@ def save_json(path, data):
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        log.error(f"[SAVE JSON] {path}: {e}")# ---------- DATA & FUTURES ----------
+        log.error(f"[SAVE JSON] {path}: {e}")
+
+
+# ---------- DATA & FUTURES ----------
 def get_fear_greed_index():
     data = http_get("https://api.alternative.me/fng/?limit=1")
     try:
@@ -241,7 +247,10 @@ def get_klines(symbol, interval="4h", limit=KLINE_LIMIT):
     ])
     for col in ["open", "high", "low", "close", "volume"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
-    return df.iloc[:-1].reset_index(drop=True)# ---------- INDICATORS ----------
+    return df.iloc[:-1].reset_index(drop=True)
+
+
+# ---------- INDICATORS ----------
 def add_indicators(df):
     df = df.copy()
     df["ema9"] = df["close"].ewm(span=9, adjust=False).mean()
@@ -327,7 +336,10 @@ def has_bearish_divergence(df):
             return False
         return p2 > p1 and r2 < r1 - 2
     except Exception:
-        return False# ---------- SMC ----------
+        return False
+
+
+# ---------- SMC ----------
 def find_order_blocks(df, direction):
     obs = []
     try:
@@ -385,7 +397,10 @@ def find_fair_value_gaps(df, direction):
 
 
 def is_price_in_zone(price, zone):
-    return zone["bottom"] <= price <= zone["top"]# ---------- ANALYZE ----------
+    return zone["bottom"] <= price <= zone["top"]
+
+
+# ---------- ANALYZE ----------
 def analyze_coin(df, symbol, fng_val=50):
     try:
         df = add_indicators(df)
@@ -489,7 +504,10 @@ def analyze_coin(df, symbol, fng_val=50):
         }
     except Exception as e:
         log.error(f"[ANALYZE ERROR] {symbol}: {e}")
-        return None# ---------- DEDUP ----------
+        return None
+
+
+# ---------- DEDUP ----------
 def load_sent_state():
     return load_json(STATE_FILE, default={"signals": {}})
 
@@ -525,7 +543,7 @@ def main():
     coins = get_scan_coins()
     if not coins:
         log.error("[FATAL] No coins passed volume filter. Check Binance API access.")
-        send_telegram("⚠️ ربات: هیچ کوینی از فیلتر حجم رد نشد. احتمالاً IP گیت‌هاب از بایننس بلاک شده.")
+        send_telegram("⚠️ ربات: هیچ کوینی از فیلتر حجم رد نشد.")
         return
     log.info(f"Scanning {len(coins)} coins...")
 
@@ -557,60 +575,4 @@ def main():
         futures_data = fetch_futures_metrics_batch(syms)
         for sig in top_signals:
             fm = futures_data.get(sig["symbol"], {})
-            sig.update(fm)
-
-    if not top_signals:
-        report = (f"📊 <b>Market Status</b>\n"
-                  f"😱 ترس و طمع: {fng_val} ({fng_text})\n\n"
-                  f"سیگنالی یافت نشد.")
-    else:
-        report = (f"📊 <b>Market Status</b>\n"
-                  f"😱 ترس و طمع: {fng_val} ({fng_text})\n\n"
-                  f"تعداد سیگنال: <b>{len(top_signals)}</b>\n")
-
-        for sig in top_signals:
-            emoji = "🟢" if sig["direction"] == "BUY" else "🔴"
-            stype = "سیگنال قوی (4H)" if sig["strong"] else "سیگنال معمولی (4H)"
-            tag = "#" + sig["symbol"].replace("USDT", "")
-
-            risk_usd = 10.0
-            price_risk = abs(sig["close"] - sig["sl"])
-            units = risk_usd / price_risk if price_risk > 0 else 0
-            notional = units * sig["close"]
-
-            v = sig["volume_ratio"]
-            v_text = f"قوی {v:.2f}x" if v >= 1.5 else f"متوسط {v:.2f}x"
-
-            msg = f"\n{emoji} <b>{stype}</b>\n\n"
-            msg += f"نماد: <b>{tag}</b>\n"
-            msg += f"جهت: <b>{sig['direction']}</b>\n"
-            msg += f"ورود: <code>{sig['close']:.4f}</code>\n\n"
-            msg += f"🛑 SL: <code>{sig['sl']:.4f}</code> ({sig['sl_pct']:+.2f}%)\n"
-            msg += f"🎯 TP1: <code>{sig['tp1']:.4f}</code> ({sig['tp1_pct']:+.2f}%)\n"
-            msg += f"🎯 TP2: <code>{sig['tp2']:.4f}</code> ({sig['tp2_pct']:+.2f}%)\n\n"
-            msg += f"پیشنهاد حجم (سرمایه $1000، ریسک 1%):\n"
-            msg += f"🔹 <code>{units:.4f}</code> واحد | نوشنال ~$<code>{notional:.2f}</code>\n\n"
-            msg += f"📊 امتیاز: <b>{sig['score']}/100</b> | RSI: {sig['rsi']:.1f}\n"
-            msg += f"📦 حجم: {v_text}\n"
-
-            if sig.get("funding_rate", 0) != 0.0:
-                msg += f"⚡ فاندینگ: <code>{sig['funding_rate']*100:.4f}%</code>\n"
-            if sig.get("open_interest", 0) > 0:
-                msg += f"💼 OI: <code>{format_num(sig['open_interest'])}</code> | {sig['oi_change']:+.1f}%\n"
-
-            msg += f"🌊 رژیم بازار: {sig['regime']}\n"
-            msg += f"😱 ترس و طمع: {fng_val}\n\n"
-            msg += "دلایل:\n" + "\n".join(sig["reasons"]) + "\n" + "—" * 20
-            report += msg    result = send_telegram_chunks(report)
-    if result is False:
-        log.error("[FATAL] Telegram send failed. Check token/chat_id.")
-
-    state["last_run"] = time.time()
-    state["last_count"] = len(top_signals)
-    save_json(STATE_FILE, state)
-
-    log.info(f"=== Done: {len(top_signals)} signals sent ===")
-
-
-if __name__ == "__main__":
-    main()
+           
