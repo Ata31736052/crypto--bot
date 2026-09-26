@@ -595,8 +595,9 @@ def main():
     if not fresh_signals:
         send_telegram("ℹ️ اسکن تمام شد. سیگنال تازه‌ای پیدا نشد.")
         return
-
-    header = (
-        f"🤖 <b>گزارش نوسان‌گیری ({CFG.timeframe_main})</b>\n"
-        f"📅 شاخص ترس و طمع: <b>{fng_val} ({fng_cls})</b>\n"
+        header = (
+    f"🤖 <b>گزارش نوسان‌گیری ({CFG.timeframe_main})</b>\n"
+    f"📅 شاخص ترس و طمع: <b>{fng_val} ({fng_cls})</b>\n"
+    f"🔍 سیگنال‌های تاییدشده: <b>{len(fresh_signals)}</b>"
+            )
   
