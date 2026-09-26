@@ -579,4 +579,90 @@ def build_msg(sig, fng_val):
     L = [
         f"{emoji} <b>سیگنال شخصی (4H) - حالت متعادل</b>",
         f"ارز: {tag} | جهت: <b>{sig['direction']}</b>",
-        f"امتیاز: <
+        f"امتیاز: <b>{sig['score']}/100</b> ({'قوی 🔥' if sig['strong'] else 'معمولی'})",
+        f"رژیم بازار: {sig['regime']} | روند روزانه: {sig['higher_trend']}",
+        f"-----------------------------------",
+        f"💵 قیمت ورود: <code>{sig['close']}</code>",
+        f"🛑 حد ضرر (SL): <code>{sig['sl']:.4f}</code> ({sig['sl_pct']:.2f}%)",
+        f"🎯 هدف اول (TP1): <code>{sig['tp1']:.4f}</code> ({sig['tp1_pct']:.2f}%)",
+        f"🎯 هدف دوم (TP2): <code>{sig['tp2']:.4f}</code> ({sig['tp2_pct']:.2f}%)",
+        f"-----------------------------------",
+        f"📊 RSI: <code>{sig['rsi']:.1f}</code> | حجم: <code>{sig['volume_ratio']:.2f}x</code>",
+        f"📉 فاندینگ: <code>{sig.get('funding_rate', 0)*100:.4f}%</code> | تغییر OI: <code>{sig.get('oi_change', 0):.1f}%</code>",
+        f"😨 شاخص ترس و طمع: <b>{fng_val}</b>",
+        f"-----------------------------------",
+        f"<b>دلایل سیگنال:</b>"
+    ]
+    L.extend(sig["reasons"])
+    return "\n".join(L)
+
+
+def run_scan():
+    logger.info("Starting market scan...")
+    state = load_json(STATE_FILE, {"signals": {}})
+    fng_val, _ = get_fear_greed_index()
+    
+    coins_data = get_scan_coins()
+    if not coins_data:
+        logger.warning("No coins found or network issue with Binance!")
+        return
+
+    logger.info(f"Fetched {len(coins_data)} coins matching volume criteria.")
+    symbols = [item["symbol"] for item in coins_data]
+    futures_metrics = fetch_futures_metrics_batch(symbols)
+
+    btc_df = get_klines("BTCUSDT", TIMEFRAME_MAIN, 100)
+    btc_bullish = True
+    if btc_df is not None:
+        btc_df = add_indicators(btc_df)
+        btc_last = btc_df.iloc[-1]
+        btc_bullish = btc_last["close"] > btc_last["ema50"]
+
+    signals = []
+    
+    def process_coin(item):
+        sym = item["symbol"]
+        df = get_klines(sym, TIMEFRAME_MAIN, KLINE_LIMIT)
+        if df is None:
+            return None
+        
+        higher_trend = get_higher_tf_trend(sym)
+        metrics = futures_metrics.get(sym, {})
+        sig = analyze_coin(
+            df, sym, fng_val, btc_bullish,
+            funding_rate=metrics.get("funding_rate", 0.0),
+            oi_change=metrics.get("oi_change", 0.0),
+            higher_trend=higher_trend
+        )
+        return sig
+
+    with ThreadPoolExecutor(max_workers=PARALLEL_WORKERS) as executor:
+        results = executor.map(process_coin, coins_data)
+        for sig in results:
+            if sig:
+                signals.append(sig)
+
+    logger.info(f"Generated {len(signals)} raw candidate signals.")
+
+    # اصلاح منطق: اول مرتب‌سازی و محدود کردن بر اساس ظرفیت، بعد فیلتر تکراری‌ها
+    signals = sorted(signals, key=lambda x: x["score"], reverse=True)[:MAX_CONCURRENT_SIGNALS]
+    new_signals, state = filter_dups(signals, state)
+    save_json(STATE_FILE, state)
+
+    for sig in new_signals:
+        msg = build_msg(sig, fng_val)
+        sent = send_telegram(msg)
+        if sent:
+            logger.info(f"Signal sent for {sig['symbol']} ({sig['direction']}) with score {sig['score']}")
+        save_signal_to_csv(sig, fng_val)
+        time.sleep(1)
+
+    logger.info(f"Scan finished. Sent {len(new_signals)} new signals to Telegram.")
+
+
+if __name__ == "__main__":
+    logger.info("Running single scan cycle...")
+    try:
+        run_scan()
+    except Exception as e:
+        logger.error(f"Critical error during scan: {e}")
