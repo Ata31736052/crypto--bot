@@ -593,4 +593,30 @@ def build_msg(sig, fng_val):
     notional = units * sig["close"]
 
     L = [
-        f"{emoji} <b>سیگنال شخصی (4H) - حال
+        f"{emoji} <b>سیگنال شخصی (4H) - حالت متعادل</b>",
+        "",
+        f"نماد: <b>{tag}</b>",
+        f"جهت: <b>{sig['direction']}</b>",
+        f"ورود: <code>{sig['close']:.5f}</code>",
+        "",
+        f"🛑 SL: <code>{sig['sl']:.5f}</code> ({sig['sl_pct']:+.2f}%)",
+        f"🎯 TP1: <code>{sig['tp1']:.5f}</code> ({sig['tp1_pct']:+.2f}%)",
+        f"🎯 TP2: <code>{sig['tp2']:.5f}</code> ({sig['tp2_pct']:+.2f}%)",
+        "",
+        f"پیشنهاد حجم (ریسک $10):",
+        f"🔹 <code>{units:.4f}</code> | \~$<code>{notional:.1f}</code>",
+        "",
+        f"📊 امتیاز: <b>{sig['score']}</b> | RSI: {sig['rsi']:.1f}",
+        f"📦 حجم: {sig['volume_ratio']:.2f}x | {sig['regime']}",
+    ]
+    if sig.get("funding_rate"):
+        L.append(f"⚡ فاندینگ: <code>{sig['funding_rate']*100:.4f}%</code>")
+    if sig.get("oi_change"):
+        L.append(f"💼 تغییر OI: <code>{sig['oi_change']:+.1f}%</code>")
+    L.append(f"🕰 روند روزانه: {sig.get('higher_trend', 'neutral')}")
+    L.append(f"😱 F&G: {fng_val}")
+    L.append("")
+    L.append("دلایل:")
+    L.extend(sig["reasons"])
+    L.append("—" * 18)
+    return "\n".join(L)
