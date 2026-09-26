@@ -367,8 +367,6 @@ def find_fvgs(df, direction):
 
 def in_zone(price, zone):
     return zone["bottom"] <= price <= zone["top"]
-
-
 def analyze_coin(df, symbol, fng_val=50):
     try:
         df = add_indicators(df)
@@ -605,6 +603,25 @@ def main():
         send_telegram("ℹ️ اسکن بازار به اتمام رسید. در این چرخه سیگنال جدیدی با فیلترهای فعلی یافت نشد.")
         return
 
-    header_lines = [
-        f"🤖 <b>گزارش اسکن بازار ({TIMEFRAME_MAIN})</b>",
-        f"📅 شاخص ترس و طمع: <b>{fng_val} ({fng_cls})</b
+    header_text = (
+        "🤖 <b>گزارش اسکن بازار (" + TIMEFRAME_MAIN + ")</b>\n" +
+        "📅 شاخص ترس و طمع: <b>" + str(fng_val) + " (" + str(fng_cls) + ")</b>\n" +
+        "🔍 سیگنال‌های جدید تایید شده: <b>" + str(len(fresh_signals)) + "</b>"
+    )
+    
+    send_telegram(header_text)
+    time.sleep(1.0)
+
+    for sig in fresh_signals:
+        msg = build_msg(sig, fng_val)
+        send_telegram(msg)
+        time.sleep(1.2)
+
+    print("[TG] All signals sent successfully.", flush=True)
+    print("=" * 50, flush=True)
+    print("BOT FINISHED", flush=True)
+
+
+if __name__ == "__main__":
+    main()
+        
