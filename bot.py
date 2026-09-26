@@ -603,4 +603,4 @@ def main():
     with ThreadPoolExecutor(max_workers=PARALLEL_WORKERS) as executor:
         results = executor.map(process_coin, coins)
         for r in results:
-            if r is not N
+            if r is not None:
