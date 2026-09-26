@@ -16,30 +16,30 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 TIMEFRAME_MAIN = "4h"
 KLINE_LIMIT = 500
 
-# تنظیمات حرفه‌ای و کاربردی برای نوسان‌گیری ۴ ساعته
-MIN_SCORE = 70              # سخت‌گیری بیشتر برای ارسال فقط سیگنال‌های باکیفیت
-STRONG_SCORE = 85
-MIN_VOLUME_RATIO = 1.10     # حجم معاملات باید حداقل بالاتر از میانگین باشد
-MIN_24H_USDT_VOLUME = 20_000_000 # نقدشوندگی بالاتر بازار
+# تنظیمات بهینه‌شده و هوشمند برای نوسان‌گیری امن‌تر
+MIN_SCORE = 62
+STRONG_SCORE = 82
+MIN_VOLUME_RATIO = 1.05     # حجم معاملات باید کمی بالاتر از میانگین باشد
+MIN_24H_USDT_VOLUME = 15_000_000
 ATR_PERIOD = 14
 SL_ATR_MULTIPLIER = 1.50
-MAX_SL_PCT = 6.0            # ریسک منطقی و کنترل‌شده برای حد ضرر
+MAX_SL_PCT = 7.0
 TP1_RR = 1.60
 TP2_RR = 2.80
-RSI_OVERBOUGHT = 70         # جلوگیری از خرید در اشباع خرید بالا
-RSI_OVERSOLD = 30           # جلوگیری از فروش در اشباع فروش عمیق
+RSI_OVERBOUGHT = 65         # سخت‌گیری روی RSI برای جلوگیری از ورود در اشباع خرید
+RSI_OVERSOLD = 35           # نقطه امن برای معاملات فروش
 DIVERGENCE_LOOKBACK = 40
 DIVERGENCE_MIN_GAP = 3
 DIVERGENCE_MAX_GAP = 20
 OB_LOOKBACK = 40
-FVG_MIN_SIZE_ATR = 0.3
-VOL_REGIME_THRESHOLD = 1.15
+FVG_MIN_SIZE_ATR = 0.25
+VOL_REGIME_THRESHOLD = 1.10
 MAX_CONCURRENT_SIGNALS = 6
 STATE_FILE = "signals_state.json"
 SPOT_BASE = "https://data-api.binance.vision"
 FUT_BASE = "https://fapi.binance.com"
 PARALLEL_WORKERS = 20
-DEDUP_HOURS = 12            # عدم ارسال سیگنال تکراری تا ۱۲ ساعت آینده
+DEDUP_HOURS = 6
 
 
 def http_get(url, params=None, retries=2, timeout=6):
@@ -263,7 +263,7 @@ def bull_div(df):
         if len(idx) < 2: return False
         i1, i2 = idx[-2], idx[-1]
         if not (DIVERGENCE_MIN_GAP <= (i2 - i1) <= DIVERGENCE_MAX_GAP): return False
-        return r.loc[i2, "low"] < r.loc[i1, "low"] and r.loc[i2, "rsi"] > r.loc[i1, "rsi"] + 2
+        return r.loc[i2, "low"] < r.loc[i1, "low"] and r.loc[i2, "rsi"] > r.loc[i1, "rsi"] + 1.5
     except Exception:
         return False
 
@@ -276,7 +276,7 @@ def bear_div(df):
         if len(idx) < 2: return False
         i1, i2 = idx[-2], idx[-1]
         if not (DIVERGENCE_MIN_GAP <= (i2 - i1) <= DIVERGENCE_MAX_GAP): return False
-        return r.loc[i2, "high"] > r.loc[i1, "high"] and r.loc[i2, "rsi"] < r.loc[i1, "rsi"] - 2
+        return r.loc[i2, "high"] > r.loc[i1, "high"] and r.loc[i2, "rsi"] < r.loc[i1, "rsi"] - 1.5
     except Exception:
         return False
 
@@ -293,57 +293,44 @@ def analyze_coin(df, symbol, fng_val=50, btc_bullish=True):
         if not all(np.isfinite([close, atr, rsi, vr])) or atr <= 0:
             return None
         
-        # فیلتر سخت‌گیرانه حجم معاملات برای جلوگیری از ورود در بازارهای خنثی
         if vr < MIN_VOLUME_RATIO:
             return None
 
-        e9, e21, e50 = last["ema9"], last["ema21"], last["ema50"]
+        e9, e21 = last["ema9"], last["ema21"]
         direction = None
         score = 50
         reasons = []
 
-        # تشخیص روند با میانگین متحرک
-        if e9 > e21 and e21 > e50:
+        if e9 > e21:
             direction = "BUY"
-            score += 15
-            reasons.append("• آرایش صعودی EMA 9/21/50")
-        elif e9 < e21 and e21 < e50:
+            score += 12
+            reasons.append("• تقاطع صعودی EMA 9/21")
+        elif e9 < e21:
             direction = "SELL"
-            score += 15
-            reasons.append("• آرایش نزولی EMA 9/21/50")
+            score += 12
+            reasons.append("• تقاطع نزولی EMA 9/21")
         else:
             return None
 
-        # فیلتر حیاتی جهت جلوگیری از خرید در اشباع خرید بالا یا فروش در اشباع فروش عمیق
+        # فیلتر سخت‌گیرانه برای جلوگیری از خرید در RSI بالای ۶۵
         if direction == "BUY" and rsi > RSI_OVERBOUGHT:
             return None
         if direction == "SELL" and rsi < RSI_OVERSOLD:
             return None
 
-        # بررسی هم‌جهتی با بیت‌کوین برای خرید
-        if direction == "BUY" and not btc_bullish:
-            return None
+        score += 10
+        reasons.append(f"• حجم مناسب و RSI در محدوده امن ({rsi:.1f})")
 
-        # امتیازدهی به حجم قوی
-        if vr >= 1.3:
-            score += 12
-            reasons.append(f"• حجم معاملات عالی ({vr:.2f}x)")
-        else:
-            score += 8
-            reasons.append(f"• حجم معاملات مناسب ({vr:.2f}x)")
-
-        # واگرایی‌ها
         if direction == "BUY" and bull_div(df):
-            score += 18
-            reasons.append("• تایید واگرایی صعودی معتبر")
+            score += 15
+            reasons.append("• تایید واگرایی صعودی")
         elif direction == "SELL" and bear_div(df):
-            score += 18
-            reasons.append("• تایید واگرایی نزولی معتبر")
+            score += 15
+            reasons.append("• تایید واگرایی نزولی")
 
         if score < MIN_SCORE:
             return None
 
-        # مدیریت ریسک و محاسبه حدود سود و ضرر
         if direction == "BUY":
             sl = close - (atr * SL_ATR_MULTIPLIER)
             risk = close - sl
@@ -396,7 +383,7 @@ def filter_dups(signals, state):
 
 def build_msg(sig, fng_val):
     emoji = "🟢" if sig["direction"] == "BUY" else "🔴"
-    stype = "سیگنال نوسانی قوی (4H)" if sig["strong"] else "سیگنال نوسانی استاندارد (4H)"
+    stype = "سیگنال نوسانی امن (4H)"
     tag = "#" + sig["symbol"].replace("USDT", "")
     
     risk_usd = 10.0
@@ -443,9 +430,9 @@ def build_msg(sig, fng_val):
 
 def main():
     print("=" * 50, flush=True)
-    print("BOT STARTED - OPTIMIZED 4H SWING", flush=True)
+    print("BOT STARTED - OPTIMIZED RSI SWING", flush=True)
 
-    send_telegram("🤖 ربات نوسان‌گیر حرفه‌ای ۴ ساعته با فیلترهای بهینه‌شده روشن شد...")
+    send_telegram("🤖 ربات نوسان‌گیر با فیلتر RSI ایمن (زیر ۶۵) روشن شد...")
 
     fng_val, fng_cls = get_fear_greed_index()
 
@@ -493,10 +480,10 @@ def main():
     save_json(STATE_FILE, state)
 
     if not fresh_signals:
-        send_telegram("ℹ️ اسکن بازار ۴ ساعته کامل شد. در حال حاضر سیگنال باکیفیت و استانداردی جهت نوسان‌گیری تایید نشد.")
+        send_telegram("ℹ️ اسکن بازار تمام شد. در حال حاضر سیگنالی با RSI ایمن یافت نشد.")
         return
 
-    header_text = f"🤖 <b>گزارش نوسان‌گیری بازار ({TIMEFRAME_MAIN})</b>\n📅 شاخص ترس و طمع: <b>{fng_val} ({fng_cls})</b>\n🔍 سیگنال‌های تاییدشده: <b>{len(fresh_signals)}</b>"
+    header_text = f"🤖 <b>گزارش نوسان‌گیری بازار ({TIMEFRAME_MAIN})</b>\n📅 شاخص ترس و طمع: <b>{fng_val} ({fng_cls})</b>\n🔍 سیگنال‌های ایمن: <b>{len(fresh_signals)}</b>"
     
     send_telegram(header_text)
     time.sleep(1.0)
@@ -511,4 +498,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-                
