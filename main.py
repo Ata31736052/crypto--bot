@@ -16,18 +16,18 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 TIMEFRAME_MAIN = "4h"
 KLINE_LIMIT = 500
 
-# تنظیمات بهینه‌شده و هوشمند با فیلتر MACD و RSI ایمن
-MIN_SCORE = 62
-STRONG_SCORE = 82
-MIN_VOLUME_RATIO = 1.05     # حجم معاملات باید کمی بالاتر از میانگین باشد
+# تنظیمات متعادل‌شده برای یافتن سیگنال‌های امن اما کاربردی
+MIN_SCORE = 58
+STRONG_SCORE = 78
+MIN_VOLUME_RATIO = 1.0      # حجم معاملات در حد نرمال یا بالاتر
 MIN_24H_USDT_VOLUME = 15_000_000
 ATR_PERIOD = 14
 SL_ATR_MULTIPLIER = 1.50
 MAX_SL_PCT = 7.0
 TP1_RR = 1.60
 TP2_RR = 2.80
-RSI_OVERBOUGHT = 65         # سخت‌گیری روی RSI برای جلوگیری از ورود در اشباع خرید
-RSI_OVERSOLD = 35           # نقطه امن برای معاملات فروش
+RSI_OVERBOUGHT = 65         # همچنان ایمن و زیر ۶۵ برای جلوگیری از اشباع خرید
+RSI_OVERSOLD = 35           
 DIVERGENCE_LOOKBACK = 40
 DIVERGENCE_MIN_GAP = 3
 DIVERGENCE_MAX_GAP = 20
@@ -213,13 +213,11 @@ def get_klines(symbol, interval="4h", limit=KLINE_LIMIT):
 
 def add_indicators(df):
     df = df.copy()
-    # EMAs
     df["ema9"] = df["close"].ewm(span=9, adjust=False).mean()
     df["ema21"] = df["close"].ewm(span=21, adjust=False).mean()
     df["ema50"] = df["close"].ewm(span=50, adjust=False).mean()
     df["ema200"] = df["close"].ewm(span=200, adjust=False).mean()
     
-    # RSI
     d = df["close"].diff()
     g = d.clip(lower=0)
     l = -d.clip(upper=0)
@@ -228,14 +226,12 @@ def add_indicators(df):
     rs = ag / al.replace(0, np.nan)
     df["rsi"] = 100 - (100 / (1 + rs))
     
-    # MACD
     ema12 = df["close"].ewm(span=12, adjust=False).mean()
     ema26 = df["close"].ewm(span=26, adjust=False).mean()
     df["macd"] = ema12 - ema26
     df["macd_signal"] = df["macd"].ewm(span=9, adjust=False).mean()
     df["macd_hist"] = df["macd"] - df["macd_signal"]
 
-    # ATR & Volume
     t1 = df["high"] - df["low"]
     t2 = (df["high"] - df["close"].shift()).abs()
     t3 = (df["low"] - df["close"].shift()).abs()
@@ -325,21 +321,21 @@ def analyze_coin(df, symbol, fng_val=50, btc_bullish=True):
         else:
             return None
 
-        # فیلتر سخت‌گیرانه برای جلوگیری از خرید در RSI بالای ۶۵
+        # فیلتر ایمنی RSI
         if direction == "BUY" and rsi > RSI_OVERBOUGHT:
             return None
         if direction == "SELL" and rsi < RSI_OVERSOLD:
             return None
 
-        score += 10
-        reasons.append(f"• حجم مناسب و RSI در محدوده امن ({rsi:.1f})")
+        score += 8
+        reasons.append(f"• وضعیت امن RSI ({rsi:.1f})")
 
-        # بررسی تاییدیه MACD
+        # بررسی اختیاری MACD (فقط امتیاز می‌دهد، مانع خرید/فروش نمی‌شود)
         if direction == "BUY" and macd_hist > 0:
-            score += 10
+            score += 8
             reasons.append("• تایید مومنتوم صعودی (MACD)")
         elif direction == "SELL" and macd_hist < 0:
-            score += 10
+            score += 8
             reasons.append("• تایید مومنتوم نزولی (MACD)")
 
         if direction == "BUY" and bull_div(df):
@@ -404,7 +400,7 @@ def filter_dups(signals, state):
 
 def build_msg(sig, fng_val):
     emoji = "🟢" if sig["direction"] == "BUY" else "🔴"
-    stype = "سیگنال نوسانی پیشرفته با MACD (4H)"
+    stype = "سیگنال نوسانی متوازن (4H)"
     tag = "#" + sig["symbol"].replace("USDT", "")
     
     risk_usd = 10.0
@@ -451,9 +447,9 @@ def build_msg(sig, fng_val):
 
 def main():
     print("=" * 50, flush=True)
-    print("BOT STARTED - OPTIMIZED RSI & MACD SWING", flush=True)
+    print("BOT STARTED - BALANCED SWING", flush=True)
 
-    send_telegram("🤖 ربات نوسان‌گیر مجهز به فیلتر RSI ایمن (زیر ۶۵) و تاییدیه MACD روشن شد...")
+    send_telegram("🤖 ربات نوسان‌گیر متوازن با فیلتر RSI ایمن روشن شد...")
 
     fng_val, fng_cls = get_fear_greed_index()
 
@@ -501,10 +497,10 @@ def main():
     save_json(STATE_FILE, state)
 
     if not fresh_signals:
-        send_telegram("ℹ️ اسکن بازار تمام شد. در حال حاضر سیگنالی با معیارهای ایمن یافت نشد.")
+        send_telegram("ℹ️ اسکن بازار تمام شد. در حال حاضر سیگنالی با معیارهای متوازن یافت نشد.")
         return
 
-    header_text = f"🤖 <b>گزارش نوسان‌گیری پیشرفته بازار ({TIMEFRAME_MAIN})</b>\n📅 شاخص ترس و طمع: <b>{fng_val} ({fng_cls})</b>\n🔍 سیگنال‌های تاییدشده: <b>{len(fresh_signals)}</b>"
+    header_text = f"🤖 <b>گزارش نوسان‌گیری بازار ({TIMEFRAME_MAIN})</b>\n📅 شاخص ترس و طمع: <b>{fng_val} ({fng_cls})</b>\n🔍 سیگنال‌های تاییدشده: <b>{len(fresh_signals)}</b>"
     
     send_telegram(header_text)
     time.sleep(1.0)
@@ -519,3 +515,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+            
