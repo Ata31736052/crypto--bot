@@ -1,5 +1,5 @@
 # =========================================================
-# Crypto Signal Bot - Final Patched Version
+# Crypto Signal Bot - Final Unified Version
 # =========================================================
 
 import os, json, time, logging
@@ -22,7 +22,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 TIMEFRAME_MAIN = "4h"
-KLINE_LIMIT = 500  # افزایش برای اعتبار EMA200
+KLINE_LIMIT = 500
 
 MIN_SCORE = 65
 STRONG_SCORE = 88
@@ -52,9 +52,11 @@ BINANCE_SPOT_BASE = "https://data-api.binance.vision"
 BINANCE_FUTURES_BASE = "https://fapi.binance.com"
 
 PARALLEL_WORKERS = 20
-DEDUP_HOURS = 6  # سیگنال تکراری در این بازه ارسال نشه# ---------- UTILS ----------
+DEDUP_HOURS = 6
+
+
+# ---------- UTILS ----------
 def http_get(url, params=None, retries=2, timeout=6):
-    """GET با retry نمایی و jitter"""
     for attempt in range(retries + 1):
         try:
             r = requests.get(url, params=params, timeout=timeout)
@@ -101,7 +103,6 @@ def send_telegram(text):
 
 
 def send_telegram_chunks(text, max_len=3800):
-    """پیام بلند رو تکه‌تکه می‌فرسته"""
     if not text:
         return
     parts = []
@@ -148,7 +149,10 @@ def save_json(path, data):
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        log.error(f"[SAVE JSON] {path}: {e}")# ---------- DATA & FUTURES ----------
+        log.error(f"[SAVE JSON] {path}: {e}")
+
+
+# ---------- DATA & FUTURES ----------
 def get_fear_greed_index():
     data = http_get("https://api.alternative.me/fng/?limit=1")
     try:
@@ -160,11 +164,9 @@ def get_fear_greed_index():
 
 
 def fetch_futures_metrics_batch(symbols):
-    """دریافت فاندینگ و OI به‌صورت batch"""
     metrics = {sym: {"funding_rate": 0.0, "open_interest": 0.0, "oi_change": 0.0}
                for sym in symbols}
 
-    # فاندینگ ریت — یک درخواست برای همه
     pi_data = http_get(BINANCE_FUTURES_BASE + "/fapi/v1/premiumIndex", timeout=5)
     if isinstance(pi_data, list) and pi_data:
         pi_map = {item["symbol"]: float(item.get("lastFundingRate", 0) or 0)
@@ -173,7 +175,6 @@ def fetch_futures_metrics_batch(symbols):
         pi_map = {}
         log.warning("[FUTURES] premiumIndex unavailable — funding will be 0")
 
-    # OI برای هر نماد
     for sym in symbols:
         metrics[sym]["funding_rate"] = pi_map.get(sym, 0.0)
         oi_data = http_get(BINANCE_FUTURES_BASE + "/fapi/v1/openInterest",
@@ -198,7 +199,10 @@ def fetch_futures_metrics_batch(symbols):
 
     if not pi_map:
         log.warning("[FUTURES] no funding data — check API access (VPN?)")
-    return metricsdef get_scan_coins():
+    return metrics
+
+
+def get_scan_coins():
     all_coins = [
         "BTC", "ETH", "SOL", "BNB", "XRP", "TON", "ADA", "DOGE", "AVAX", "LINK",
         "DOT", "LTC", "BCH", "ETC", "XLM", "UNI", "FIL", "TRX", "ATOM", "NEAR",
@@ -242,7 +246,10 @@ def get_klines(symbol, interval="4h", limit=KLINE_LIMIT):
     ])
     for col in ["open", "high", "low", "close", "volume"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
-    return df.iloc[:-1].reset_index(drop=True)# ---------- INDICATORS ----------
+    return df.iloc[:-1].reset_index(drop=True)
+
+
+# ---------- INDICATORS ----------
 def add_indicators(df):
     df = df.copy()
     df["ema9"] = df["close"].ewm(span=9, adjust=False).mean()
@@ -328,7 +335,10 @@ def has_bearish_divergence(df):
             return False
         return p2 > p1 and r2 < r1 - 2
     except Exception:
-        return False# ---------- SMC ----------
+        return False
+
+
+# ---------- SMC ----------
 def find_order_blocks(df, direction):
     obs = []
     try:
@@ -358,7 +368,6 @@ def find_order_blocks(df, direction):
 
 
 def find_fair_value_gaps(df, direction):
-    """FVG های پرنشده"""
     fvgs = []
     try:
         recent = df.tail(OB_LOOKBACK).reset_index(drop=True)
@@ -387,7 +396,10 @@ def find_fair_value_gaps(df, direction):
 
 
 def is_price_in_zone(price, zone):
-    return zone["bottom"] <= price <= zone["top"]# ---------- ANALYZE ----------
+    return zone["bottom"] <= price <= zone["top"]
+
+
+# ---------- ANALYZE ----------
 def analyze_coin(df, symbol, fng_val=50):
     try:
         df = add_indicators(df)
@@ -400,7 +412,6 @@ def analyze_coin(df, symbol, fng_val=50):
         if not all(np.isfinite([close, atr, rsi, volume_ratio])) or atr <= 0:
             return None
 
-        # فیلتر حجم بسیار کم
         if volume_ratio < 0.8:
             return None
 
@@ -408,7 +419,6 @@ def analyze_coin(df, symbol, fng_val=50):
         direction, score = None, 50
         reasons = []
 
-        # جهت از EMA
         if last["ema9"] > last["ema21"] and last["ema21"] > last["ema50"]:
             direction = "BUY"
             score += 15
@@ -420,25 +430,21 @@ def analyze_coin(df, symbol, fng_val=50):
         else:
             return None
 
-        # فیلتر اشباع RSI
         if direction == "BUY" and rsi > RSI_OVERBOUGHT:
             return None
         if direction == "SELL" and rsi < RSI_OVERSOLD:
             return None
 
-        # EMA200
         if np.isfinite(last["ema200"]):
             if direction == "BUY" and close > last["ema200"]:
                 reasons.append("• بالای EMA200 (4H)")
             elif direction == "SELL" and close < last["ema200"]:
                 reasons.append("• زیر EMA200 (4H)")
 
-        # حجم
         if volume_ratio >= MIN_VOLUME_RATIO:
             score += 10
             reasons.append(f"• حجم قوی ({volume_ratio:.2f}x)")
 
-        # RSI مومنتوم
         if direction == "BUY" and 45 <= rsi <= 65:
             score += 10
             reasons.append(f"• RSI مومنتوم ({rsi:.1f})")
@@ -446,7 +452,6 @@ def analyze_coin(df, symbol, fng_val=50):
             score += 10
             reasons.append(f"• RSI مومنتوم ({rsi:.1f})")
 
-        # واگرایی
         if direction == "BUY" and has_bullish_divergence(df):
             score += 15
             reasons.append("• واگرایی صعودی (Bullish Div)")
@@ -454,7 +459,6 @@ def analyze_coin(df, symbol, fng_val=50):
             score += 15
             reasons.append("• واگرایی نزولی (Bearish Div)")
 
-        # OB / FVG
         obs = find_order_blocks(df, direction)
         fvgs = find_fair_value_gaps(df, direction)
         if any(is_price_in_zone(close, ob) for ob in obs) or \
@@ -462,7 +466,6 @@ def analyze_coin(df, symbol, fng_val=50):
             score += 10
             reasons.append("• در محدوده Order Block / FVG")
 
-        # جریمه بر اساس ترس و طمع
         if fng_val > 70 and direction == "BUY":
             score -= 15
             reasons.append(f"⚠️ جریمه: بازار Greed ({fng_val})")
@@ -473,7 +476,6 @@ def analyze_coin(df, symbol, fng_val=50):
         if score < MIN_SCORE:
             return None
 
-        # SL/TP
         if direction == "BUY":
             sl = close - (atr * SL_ATR_MULTIPLIER)
             risk = close - sl
@@ -489,7 +491,6 @@ def analyze_coin(df, symbol, fng_val=50):
         tp1_pct = ((tp1 - close) / close) * 100
         tp2_pct = ((tp2 - close) / close) * 100
 
-        # فیلتر حداکثر SL
         if abs(sl_pct) > MAX_SL_PCT:
             return None
 
@@ -502,7 +503,10 @@ def analyze_coin(df, symbol, fng_val=50):
         }
     except Exception as e:
         log.error(f"[ANALYZE ERROR] {symbol}: {e}")
-        return None# ---------- DEDUP ----------
+        return None
+
+
+# ---------- DEDUP ----------
 def load_sent_state():
     return load_json(STATE_FILE, default={"signals": {}})
 
@@ -549,11 +553,9 @@ def main():
     signals.sort(key=lambda x: x["score"], reverse=True)
     top_signals = signals[:MAX_CONCURRENT_SIGNALS]
 
-    # Dedup
     state = load_sent_state()
     top_signals, state = filter_duplicates(top_signals, state)
 
-    # Futures data
     if top_signals:
         syms = [s["symbol"] for s in top_signals]
         futures_data = fetch_futures_metrics_batch(syms)
@@ -561,7 +563,6 @@ def main():
             fm = futures_data.get(sig["symbol"], {})
             sig.update(fm)
 
-    # ساخت گزارش
     if not top_signals:
         report = (f"📊 <b>Market Status</b>\n"
                   f"😱 ترس و طمع: {fng_val} ({fng_text})\n\n"
@@ -574,47 +575,4 @@ def main():
         for sig in top_signals:
             emoji = "🟢" if sig["direction"] == "BUY" else "🔴"
             stype = "سیگنال قوی (4H)" if sig["strong"] else "سیگنال معمولی (4H)"
-            tag = "#" + sig["symbol"].replace("USDT", "")
-
-            risk_usd = 10.0
-            price_risk = abs(sig["close"] - sig["sl"])
-            units = risk_usd / price_risk if price_risk > 0 else 0
-            notional = units * sig["close"]
-
-            v = sig["volume_ratio"]
-            v_text = f"قوی {v:.2f}x" if v >= 1.5 else f"متوسط {v:.2f}x"
-
-            msg = f"\n{emoji} <b>{stype}</b>\n\n"
-            msg += f"نماد: <b>{tag}</b>\n"
-            msg += f"جهت: <b>{sig['direction']}</b>\n"
-            msg += f"ورود: <code>{sig['close']:.4f}</code>\n\n"
-            msg += f"🛑 SL: <code>{sig['sl']:.4f}</code> ({sig['sl_pct']:+.2f}%)\n"
-            msg += f"🎯 TP1: <code>{sig['tp1']:.4f}</code> ({sig['tp1_pct']:+.2f}%)\n"
-            msg += f"🎯 TP2: <code>{sig['tp2']:.4f}</code> ({sig['tp2_pct']:+.2f}%)\n\n"
-            msg += f"پیشنهاد حجم (سرمایه $1000، ریسک 1%):\n"
-            msg += f"🔹 <code>{units:.4f}</code> واحد | نوشنال ~$<code>{notional:.2f}</code>\n\n"
-            msg += f"📊 امتیاز: <b>{sig['score']}/100</b> | RSI: {sig['rsi']:.1f}\n"
-            msg += f"📦 حجم: {v_text}\n"
-
-            if sig.get("funding_rate", 0) != 0.0:
-                msg += f"⚡ فاندینگ: <code>{sig['funding_rate']*100:.4f}%</code>\n"
-            if sig.get("open_interest", 0) > 0:
-                msg += f"💼 OI: <code>{format_num(sig['open_interest'])}</code> | {sig['oi_change']:+.1f}%\n"
-
-            msg += f"🌊 رژیم بازار: {sig['regime']}\n"
-            msg += f"😱 ترس و طمع: {fng_val}\n\n"
-            msg += "دلایل:\n" + "\n".join(sig["reasons"]) + "\n" + "—" * 20
-            report += msg
-
-    send_telegram_chunks(report)
-
-    # ذخیره state
-    state["last_run"] = time.time()
-    state["last_count"] = len(top_signals)
-    save_json(STATE_FILE, state)
-
-    log.info(f"=== Done: {len(top_signals)} signals sent ===")
-
-
-if __name__ == "__main__":
-    main()
+       
