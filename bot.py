@@ -2,7 +2,7 @@
 # Crypto Signal Bot - Final Complete Version
 # =========================================================
 
-import os, json, time, logging
+import os, sys, json, time, logging
 import requests, pandas as pd, numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -10,12 +10,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.FileHandler("bot.log", encoding="utf-8"),
-        logging.StreamHandler()
-    ]
+    handlers=[logging.StreamHandler(sys.stdout)],
+    force=True
 )
 log = logging.getLogger(__name__)
+log.setLevel(logging.INFO)
 
 # ---------- SETTINGS ----------
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
@@ -77,7 +76,7 @@ def http_get(url, params=None, retries=2, timeout=6):
 
 def send_telegram(text):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        log.warning("[TELEGRAM] missing token/chat_id")
+        print("[TELEGRAM] missing token/chat_id", flush=True)
         return False
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {
@@ -90,21 +89,21 @@ def send_telegram(text):
         res = requests.post(url, json=payload, timeout=10)
         if res.status_code == 429:
             retry_after = res.json().get("parameters", {}).get("retry_after", 5)
-            log.warning(f"[TELEGRAM 429] retry after {retry_after}s")
+            print(f"[TELEGRAM 429] retry after {retry_after}s", flush=True)
             time.sleep(retry_after + 1)
             return send_telegram(text)
         if res.status_code != 200:
-            log.error(f"[TELEGRAM ERROR] {res.status_code}: {res.text[:300]}")
+            print(f"[TELEGRAM ERROR] {res.status_code}: {res.text[:300]}", flush=True)
             return False
         return True
     except Exception as e:
-        log.error(f"[TELEGRAM EXC] {e}")
+        print(f"[TELEGRAM EXC] {e}", flush=True)
         return False
 
 
 def send_telegram_chunks(text, max_len=3800):
     if not text:
-        return
+        return True
     parts = []
     while text:
         if len(text) <= max_len:
@@ -115,11 +114,15 @@ def send_telegram_chunks(text, max_len=3800):
             cut = max_len
         parts.append(text[:cut])
         text = text[cut:].lstrip("\n")
+    all_ok = True
     for i, part in enumerate(parts):
         if len(parts) > 1:
             part = f"<i>({i+1}/{len(parts)})</i>\n" + part
-        send_telegram(part)
+        ok = send_telegram(part)
+        if not ok:
+            all_ok = False
         time.sleep(1.2)
+    return all_ok
 
 
 def format_num(n):
@@ -149,7 +152,7 @@ def save_json(path, data):
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        log.error(f"[SAVE JSON] {path}: {e}")
+        print(f"[SAVE JSON] {path}: {e}", flush=True)
 
 
 # ---------- DATA & FUTURES ----------
@@ -173,7 +176,7 @@ def fetch_futures_metrics_batch(symbols):
                   for item in pi_data if "symbol" in item}
     else:
         pi_map = {}
-        log.warning("[FUTURES] premiumIndex unavailable - funding will be 0")
+        print("[FUTURES] premiumIndex unavailable - funding will be 0", flush=True)
 
     for sym in symbols:
         metrics[sym]["funding_rate"] = pi_map.get(sym, 0.0)
@@ -198,7 +201,7 @@ def fetch_futures_metrics_batch(symbols):
                 pass
 
     if not pi_map:
-        log.warning("[FUTURES] no funding data - check API access")
+        print("[FUTURES] no funding data - check API access", flush=True)
     return metrics
 
 
@@ -232,7 +235,7 @@ def get_scan_coins():
         symbol = coin + "USDT"
         if valid_volumes.get(symbol, 0) >= MIN_24H_USDT_VOLUME:
             result.append({"coin": coin, "symbol": symbol})
-    log.info(f"[SCAN] {len(result)} coins passed volume filter")
+    print(f"[SCAN] {len(result)} coins passed volume filter", flush=True)
     return result
 
 
@@ -364,7 +367,7 @@ def find_order_blocks(df, direction):
                     if len(obs) >= 2:
                         break
     except Exception as e:
-        log.debug(f"[OB] {e}")
+        print(f"[OB] {e}", flush=True)
     return obs
 
 
@@ -392,7 +395,7 @@ def find_fair_value_gaps(df, direction):
         if len(fvgs) > 3:
             fvgs = fvgs[-3:]
     except Exception as e:
-        log.debug(f"[FVG] {e}")
+        print(f"[FVG] {e}", flush=True)
     return fvgs
 
 
@@ -503,7 +506,7 @@ def analyze_coin(df, symbol, fng_val=50):
             "reasons": reasons, "strong": score >= STRONG_SCORE,
         }
     except Exception as e:
-        log.error(f"[ANALYZE ERROR] {symbol}: {e}")
+        print(f"[ANALYZE ERROR] {symbol}: {e}", flush=True)
         return None
 
 
@@ -520,7 +523,7 @@ def filter_duplicates(signals, state):
         key = f"{sig['symbol']}_{sig['direction']}"
         last_ts = sent.get(key, 0)
         if (now - last_ts) < DEDUP_HOURS * 3600:
-            log.info(f"[DEDUP] skipped {key}")
+            print(f"[DEDUP] skipped {key}", flush=True)
             continue
         filtered.append(sig)
         sent[key] = now
@@ -530,22 +533,35 @@ def filter_duplicates(signals, state):
 
 # ---------- MAIN ----------
 def main():
+    print("=" * 60, flush=True)
+    print("BOT STARTED", flush=True)
+    print(f"TOKEN set: {bool(TELEGRAM_TOKEN)} (len={len(TELEGRAM_TOKEN)})", flush=True)
+    print(f"CHAT set: {bool(TELEGRAM_CHAT_ID)} (val={TELEGRAM_CHAT_ID!r})", flush=True)
+    print("=" * 60, flush=True)
+
     log.info("=== Crypto Signal Bot Started ===")
 
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        print("[FATAL] TELEGRAM_TOKEN or TELEGRAM_CHAT_ID missing!", flush=True)
         log.error("[FATAL] TELEGRAM_TOKEN or TELEGRAM_CHAT_ID missing!")
-        log.error("Set them in GitHub Secrets.")
         return
 
+    print("[TEST] Sending startup notification...", flush=True)
+    test_ok = send_telegram("🤖 ربات روشن شد — شروع اسکن...")
+    print(f"[TEST] Startup notification result: {test_ok}", flush=True)
+    if not test_ok:
+        print("[WARN] Startup notification failed — check token/chat_id", flush=True)
+
     fng_val, fng_text = get_fear_greed_index()
+    print(f"[FNG] Fear & Greed: {fng_val} ({fng_text})", flush=True)
     log.info(f"Fear & Greed: {fng_val} ({fng_text})")
 
     coins = get_scan_coins()
     if not coins:
-        log.error("[FATAL] No coins passed volume filter. Check Binance API access.")
+        print("[FATAL] No coins passed volume filter.", flush=True)
         send_telegram("⚠️ ربات: هیچ کوینی از فیلتر حجم رد نشد.")
         return
-    log.info(f"Scanning {len(coins)} coins...")
+    print(f"[SCAN] Scanning {len(coins)} coins...", flush=True)
 
     signals = []
     with ThreadPoolExecutor(max_workers=PARALLEL_WORKERS) as executor:
@@ -553,26 +569,4 @@ def main():
         for future in as_completed(futures):
             c = futures[future]
             try:
-                df = future.result()
-                if df is not None:
-                    res = analyze_coin(df, c["symbol"], fng_val=fng_val)
-                    if res:
-                        signals.append(res)
-            except Exception as e:
-                log.error(f"[ERROR] {c['symbol']}: {e}")
-
-    log.info(f"[ANALYZE] {len(signals)} raw signals found")
-
-    signals.sort(key=lambda x: x["score"], reverse=True)
-    top_signals = signals[:MAX_CONCURRENT_SIGNALS]
-
-    state = load_sent_state()
-    top_signals, state = filter_duplicates(top_signals, state)
-    log.info(f"[DEDUP] {len(top_signals)} signals after dedup")
-
-    if top_signals:
-        syms = [s["symbol"] for s in top_signals]
-        futures_data = fetch_futures_metrics_batch(syms)
-        for sig in top_signals:
-            fm = futures_data.get(sig["symbol"], {})
            
