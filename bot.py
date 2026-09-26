@@ -1,5 +1,5 @@
 # =========================================================
-# Crypto Signal Bot - Final Unified Version
+# Crypto Signal Bot - Final Complete Version
 # =========================================================
 
 import os, json, time, logging
@@ -94,7 +94,7 @@ def send_telegram(text):
             time.sleep(retry_after + 1)
             return send_telegram(text)
         if res.status_code != 200:
-            log.error(f"[TELEGRAM ERROR] {res.status_code}: {res.text[:200]}")
+            log.error(f"[TELEGRAM ERROR] {res.status_code}: {res.text[:300]}")
             return False
         return True
     except Exception as e:
@@ -232,6 +232,7 @@ def get_scan_coins():
         symbol = coin + "USDT"
         if valid_volumes.get(symbol, 0) >= MIN_24H_USDT_VOLUME:
             result.append({"coin": coin, "symbol": symbol})
+    log.info(f"[SCAN] {len(result)} coins passed volume filter")
     return result
 
 
@@ -530,10 +531,21 @@ def filter_duplicates(signals, state):
 # ---------- MAIN ----------
 def main():
     log.info("=== Crypto Signal Bot Started ===")
+
+    # چک اولیه
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        log.error("[FATAL] TELEGRAM_TOKEN or TELEGRAM_CHAT_ID missing!")
+        log.error("Set them in GitHub Secrets.")
+        return
+
     fng_val, fng_text = get_fear_greed_index()
     log.info(f"Fear & Greed: {fng_val} ({fng_text})")
 
     coins = get_scan_coins()
+    if not coins:
+        log.error("[FATAL] No coins passed volume filter. Check Binance API access.")
+        send_telegram("⚠️ ربات: هیچ کوینی از فیلتر حجم رد نشد. احتمالاً IP گیت‌هاب از بایننس بلاک شده.")
+        return
     log.info(f"Scanning {len(coins)} coins...")
 
     signals = []
@@ -550,29 +562,17 @@ def main():
             except Exception as e:
                 log.error(f"[ERROR] {c['symbol']}: {e}")
 
+    log.info(f"[ANALYZE] {len(signals)} raw signals found")
+
     signals.sort(key=lambda x: x["score"], reverse=True)
     top_signals = signals[:MAX_CONCURRENT_SIGNALS]
 
     state = load_sent_state()
     top_signals, state = filter_duplicates(top_signals, state)
+    log.info(f"[DEDUP] {len(top_signals)} signals after dedup")
 
     if top_signals:
         syms = [s["symbol"] for s in top_signals]
         futures_data = fetch_futures_metrics_batch(syms)
         for sig in top_signals:
-            fm = futures_data.get(sig["symbol"], {})
-            sig.update(fm)
-
-    if not top_signals:
-        report = (f"📊 <b>Market Status</b>\n"
-                  f"😱 ترس و طمع: {fng_val} ({fng_text})\n\n"
-                  f"سیگنالی یافت نشد.")
-    else:
-        report = (f"📊 <b>Market Status</b>\n"
-                  f"😱 ترس و طمع: {fng_val} ({fng_text})\n\n"
-                  f"تعداد سیگنال: <b>{len(top_signals)}</b>\n")
-
-        for sig in top_signals:
-            emoji = "🟢" if sig["direction"] == "BUY" else "🔴"
-            stype = "سیگنال قوی (4H)" if sig["strong"] else "سیگنال معمولی (4H)"
-       
+  
