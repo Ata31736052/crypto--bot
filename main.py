@@ -660,6 +660,283 @@ def get_scan_coins():
         final_result.append(item)
 
     final_result.sort(
+def get_scan_coins():
+
+    """
+    انتخاب ارزها فقط از بازارهای فعال USDT نوبیتکس.
+    قیمت، کندل و حجم از Binance.
+    """
+
+    # --------------------------------------------------------
+    # Nobitex API
+    # --------------------------------------------------------
+
+    nobitex_urls = [
+        "https://apiv2.nobitex.ir/market/stats",
+        "https://api.nobitex.ir/market/stats"
+    ]
+
+    data = None
+
+    for url in nobitex_urls:
+
+        log.info(
+            f"Trying Nobitex API: {url}"
+        )
+
+        data = http_get(
+            url,
+            timeout=20,
+            retries=2
+        )
+
+        if isinstance(data, dict):
+
+            if data.get("status") == "ok":
+
+                log.info(
+                    f"Nobitex API connected: {url}"
+                )
+
+                break
+
+            data = None
+
+    if data is None:
+
+        log.error(
+            "All Nobitex API endpoints failed"
+        )
+
+        return []
+
+    stats = data.get(
+        "stats",
+        {}
+    )
+
+    if not isinstance(stats, dict):
+
+        log.error(
+            "Nobitex stats is not a dictionary"
+        )
+
+        return []
+
+    nobitex_coins = set()
+
+    for market, info in stats.items():
+
+        try:
+
+            if not isinstance(
+                market,
+                str
+            ):
+                continue
+
+            market = market.lower()
+
+            if not market.endswith(
+                "-usdt"
+            ):
+                continue
+
+            if not isinstance(
+                info,
+                dict
+            ):
+                continue
+
+            if info.get(
+                "isClosed"
+            ) is True:
+                continue
+
+            base_coin = (
+                market
+                .split("-")[0]
+                .upper()
+            )
+
+            if base_coin:
+                nobitex_coins.add(
+                    base_coin
+                )
+
+        except Exception:
+            continue
+
+    log.info(
+        f"Nobitex active USDT markets: "
+        f"{len(nobitex_coins)}"
+    )
+
+    if not nobitex_coins:
+
+        log.error(
+            "No active Nobitex USDT markets found"
+        )
+
+        return []
+
+    # --------------------------------------------------------
+    # Binance Exchange Info
+    # --------------------------------------------------------
+
+    exchange_info = http_get(
+        "https://api.binance.com/api/v3/exchangeInfo",
+        timeout=20
+    )
+
+    if not isinstance(
+        exchange_info,
+        dict
+    ):
+
+        log.error(
+            "Binance exchangeInfo unavailable"
+        )
+
+        return []
+
+    binance_symbols = set()
+
+    for item in exchange_info.get(
+        "symbols",
+        []
+    ):
+
+        try:
+
+            symbol = item.get(
+                "symbol"
+            )
+
+            status = item.get(
+                "status"
+            )
+
+            quote_asset = item.get(
+                "quoteAsset"
+            )
+
+            if not symbol:
+                continue
+
+            if status != "TRADING":
+                continue
+
+            if quote_asset != "USDT":
+                continue
+
+            binance_symbols.add(
+                symbol.upper()
+            )
+
+        except Exception:
+            continue
+
+    # --------------------------------------------------------
+    # Nobitex + Binance
+    # --------------------------------------------------------
+
+    result = []
+
+    for coin in sorted(
+        nobitex_coins
+    ):
+
+        symbol = coin + "USDT"
+
+        if symbol not in binance_symbols:
+            continue
+
+        result.append({
+            "coin": coin,
+            "symbol": symbol
+        })
+
+    log.info(
+        f"Nobitex ∩ Binance USDT markets: "
+        f"{len(result)}"
+    )
+
+    if not result:
+        return []
+
+    # --------------------------------------------------------
+    # Binance 24H Volume
+    # --------------------------------------------------------
+
+    tickers = http_get(
+        CFG.spot_base +
+        "/api/v3/ticker/24hr",
+        timeout=20
+    )
+
+    if not isinstance(
+        tickers,
+        list
+    ):
+
+        log.error(
+            "Binance 24h ticker unavailable"
+        )
+
+        return []
+
+    volumes = {}
+
+    for ticker in tickers:
+
+        try:
+
+            symbol = ticker.get(
+                "symbol"
+            )
+
+            if not symbol:
+                continue
+
+            symbol = symbol.upper()
+
+            if not symbol.endswith(
+                "USDT"
+            ):
+                continue
+
+            quote_volume = float(
+                ticker.get(
+                    "quoteVolume",
+                    0
+                ) or 0
+            )
+
+            volumes[symbol] = quote_volume
+
+        except Exception:
+            continue
+
+    final_result = []
+
+    for item in result:
+
+        symbol = item["symbol"]
+
+        volume = volumes.get(
+            symbol,
+            0.0
+        )
+
+        if volume < CFG.min_24h_usdt_volume:
+            continue
+
+        item["volume_24h"] = volume
+
+        final_result.append(item)
+
+    final_result.sort(
         key=lambda x:
         x["volume_24h"],
         reverse=True
