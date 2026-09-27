@@ -378,6 +378,7 @@ def mark_signal_sent(
 # ============================================================
 
 def get_scan_coins():
+def get_scan_coins():
 
     """
     انتخاب ارزها فقط از بازارهای فعال USDT نوبیتکس.
@@ -385,61 +386,46 @@ def get_scan_coins():
     قیمت، کندل و حجم:
     Binance
     """
-# --------------------------------------------------------
-# Nobitex API
-# --------------------------------------------------------
 
-nobitex_urls = [
-    "https://apiv2.nobitex.ir/market/stats",
-    "https://api.nobitex.ir/market/stats"
-]
+    # --------------------------------------------------------
+    # Nobitex API
+    # --------------------------------------------------------
 
-data = None
+    nobitex_urls = [
+        "https://apiv2.nobitex.ir/market/stats",
+        "https://api.nobitex.ir/market/stats"
+    ]
 
-for url in nobitex_urls:
+    data = None
 
-    log.info(
-        f"Trying Nobitex API: {url}"
-    )
+    for url in nobitex_urls:
 
-    data = http_get(
-        url,
-        timeout=20,
-        retries=2
-    )
-
-    if isinstance(data, dict):
-
-        if data.get("status") == "ok":
-
-            log.info(
-                f"Nobitex API connected: {url}"
-            )
-
-            break
-
-        data = None
-
-if data is None:
-
-    log.error(
-        "All Nobitex API endpoints failed"
-    )
-
-    return []
-
-    if not isinstance(data, dict):
-
-        log.error(
-            "Nobitex market/stats unavailable"
+        log.info(
+            f"Trying Nobitex API: {url}"
         )
 
-        return []
+        data = http_get(
+            url,
+            timeout=20,
+            retries=2
+        )
 
-    if data.get("status") != "ok":
+        if isinstance(data, dict):
+
+            if data.get("status") == "ok":
+
+                log.info(
+                    f"Nobitex API connected: {url}"
+                )
+
+                break
+
+            data = None
+
+    if data is None:
 
         log.error(
-            f"Nobitex API error: {data}"
+            "All Nobitex API endpoints failed"
         )
 
         return []
@@ -448,6 +434,7 @@ if data is None:
         "stats",
         {}
     )
+
 
     if not isinstance(stats, dict):
 
