@@ -1,9 +1,8 @@
 # ============================================================
-# Crypto Signal Bot
+# CRYPTO SIGNAL BOT
 # Nobitex-listed USDT coins
 # Market data: Binance
 # Timeframe: 4H
-# Telegram Alerts
 # ============================================================
 
 import os
@@ -12,6 +11,7 @@ import time
 import math
 import logging
 import tempfile
+
 from datetime import datetime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -26,22 +26,30 @@ import numpy as np
 
 class Config:
 
-    # Telegram
-    telegram_token = os.getenv("TELEGRAM_TOKEN", "").strip()
-    telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+    telegram_token = os.getenv(
+        "TELEGRAM_TOKEN",
+        ""
+    ).strip()
+
+    telegram_chat_id = os.getenv(
+        "TELEGRAM_CHAT_ID",
+        ""
+    ).strip()
 
     # Binance
     spot_base = "https://data-api.binance.vision"
-    futures_base = "https://fapi.binance.com"
 
     # Nobitex
-    nobitex_base = "https://api.nobitex.ir"
+    nobitex_urls = [
+        "https://apiv2.nobitex.ir/market/stats",
+        "https://api.nobitex.ir/market/stats"
+    ]
 
     # Timeframe
     timeframe_main = "4h"
     kline_limit = 300
 
-    # Signal thresholds
+    # Signal
     min_score = 65
     strong_score = 78
 
@@ -63,25 +71,29 @@ class Config:
     risk_pct = 1.0
     max_position_usdt = 1000.0
 
-    # Stop Loss / Take Profit
+    # SL / TP
     sl_atr_multiplier = 1.30
     tp1_rr = 1.50
     tp2_rr = 2.80
     max_sl_percent = 8.0
 
-    # Deduplication
+    # State
     state_file = "signals_state.json"
     dedup_hours = 8
 
     # Scanner
     max_workers = 10
+    max_signals_per_run = 6
 
     # Telegram
     send_no_signal_report = True
 
     # Iran timezone
     iran_tz = timezone(
-        timedelta(hours=3, minutes=30)
+        timedelta(
+            hours=3,
+            minutes=30
+        )
     )
 
 
@@ -97,7 +109,9 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s"
 )
 
-log = logging.getLogger("crypto-bot")
+log = logging.getLogger(
+    "crypto-bot"
+)
 
 
 # ============================================================
@@ -107,14 +121,14 @@ log = logging.getLogger("crypto-bot")
 SESSION = requests.Session()
 
 SESSION.headers.update({
-    "User-Agent": "Mozilla/5.0 CryptoSignalBot/1.0"
+    "User-Agent": "Mozilla/5.0 CryptoSignalBot/2.0"
 })
 
 
 def http_get(
     url,
     params=None,
-    timeout=15,
+    timeout=20,
     retries=3
 ):
 
@@ -132,11 +146,11 @@ def http_get(
 
             if response.status_code == 429:
 
-                wait = 2 + attempt * 2
+                wait = 3 + attempt * 3
 
                 log.warning(
-                    f"Rate limit from {url}. "
-                    f"Waiting {wait}s..."
+                    f"Rate limit: {url} "
+                    f"| waiting {wait}s"
                 )
 
                 time.sleep(wait)
@@ -159,26 +173,39 @@ def http_get(
             else:
 
                 log.error(
-                    f"GET failed: {url} | {exc}"
+                    f"GET failed: {url} "
+                    f"| {last_error}"
                 )
 
-    return None# ============================================================
+    return None
+
+
+# ============================================================
 # 4. TELEGRAM
 # ============================================================
 
 def send_telegram(message):
 
     if not CFG.telegram_token:
-        log.error("TELEGRAM_TOKEN is missing")
+
+        log.error(
+            "TELEGRAM_TOKEN is missing"
+        )
+
         return False
 
     if not CFG.telegram_chat_id:
-        log.error("TELEGRAM_CHAT_ID is missing")
+
+        log.error(
+            "TELEGRAM_CHAT_ID is missing"
+        )
+
         return False
 
     url = (
-        f"https://api.telegram.org/bot"
-        f"{CFG.telegram_token}/sendMessage"
+        "https://api.telegram.org/bot"
+        + CFG.telegram_token
+        + "/sendMessage"
     )
 
     payload = {
@@ -215,6 +242,7 @@ def send_telegram(message):
             data = response.json()
 
             if data.get("ok"):
+
                 return True
 
             log.error(
@@ -229,16 +257,15 @@ def send_telegram(message):
 
             time.sleep(2)
 
-    return False
-
-
-# ============================================================
+    return False# ============================================================
 # 5. STATE
 # ============================================================
 
 def load_state():
 
-    if not os.path.exists(CFG.state_file):
+    if not os.path.exists(
+        CFG.state_file
+    ):
         return {}
 
     try:
@@ -251,8 +278,8 @@ def load_state():
 
             data = json.load(f)
 
-            if isinstance(data, dict):
-                return data
+        if isinstance(data, dict):
+            return data
 
     except Exception as exc:
 
@@ -264,6 +291,8 @@ def load_state():
 
 
 def save_state(state):
+
+    temp_path = None
 
     try:
 
@@ -305,6 +334,13 @@ def save_state(state):
             f"Could not save state: {exc}"
         )
 
+        if temp_path:
+
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
+
         return False
 
 
@@ -312,7 +348,9 @@ def cleanup_state(state):
 
     now = time.time()
 
-    max_age = CFG.dedup_hours * 3600
+    max_age = (
+        CFG.dedup_hours * 3600
+    )
 
     cleaned = {}
 
@@ -327,10 +365,15 @@ def cleanup_state(state):
                 )
             )
 
-            if now - timestamp < max_age:
+            if (
+                now - timestamp
+                < max_age
+            ):
+
                 cleaned[key] = value
 
         except Exception:
+
             continue
 
     return cleaned
@@ -380,9 +423,10 @@ def mark_signal_sent(
 def get_scan_coins():
 
     """
-    انتخاب ارزها فقط از بازارهای فعال USDT نوبیتکس.
+    ارزهای قابل اسکن:
+    فقط بازارهای فعال USDT نوبیتکس
 
-    قیمت، کندل و حجم:
+    داده قیمت و کندل:
     Binance
     """
 
@@ -390,14 +434,9 @@ def get_scan_coins():
     # Nobitex API
     # --------------------------------------------------------
 
-    nobitex_urls = [
-        "https://apiv2.nobitex.ir/market/stats",
-        "https://api.nobitex.ir/market/stats"
-    ]
-
     data = None
 
-    for url in nobitex_urls:
+    for url in CFG.nobitex_urls:
 
         log.info(
             f"Trying Nobitex API: {url}"
@@ -409,12 +448,18 @@ def get_scan_coins():
             retries=2
         )
 
-        if isinstance(data, dict):
+        if isinstance(
+            data,
+            dict
+        ):
 
-            if data.get("status") == "ok":
+            if data.get(
+                "status"
+            ) == "ok":
 
                 log.info(
-                    f"Nobitex API connected: {url}"
+                    f"Nobitex API connected: "
+                    f"{url}"
                 )
 
                 break
@@ -434,293 +479,20 @@ def get_scan_coins():
         {}
     )
 
-
-    if not isinstance(stats, dict):
-
-        log.error(
-            "Nobitex stats is not a dictionary"
-        )
-
-        return []
-
-    nobitex_coins = set()
-
-    for market, info in stats.items():
-
-        try:
-
-            if not isinstance(
-                market,
-                str
-            ):
-                continue
-
-            market = market.lower()
-
-            if not market.endswith(
-                "-usdt"
-            ):
-                continue
-
-            if not isinstance(
-                info,
-                dict
-            ):
-                continue
-
-            if info.get(
-                "isClosed"
-            ) is True:
-                continue
-
-            base_coin = (
-                market
-                .split("-")[0]
-                .upper()
-            )
-
-            if not base_coin:
-                continue
-
-            nobitex_coins.add(
-                base_coin
-            )
-
-        except Exception:
-            continue
-
-    log.info(
-        f"Nobitex active USDT markets: "
-        f"{len(nobitex_coins)}"
-    )
-
-    if not nobitex_coins:
-
-        log.error(
-            "No active Nobitex USDT markets found"
-        )
-
-        return []
-
-    # --------------------------------------------------------
-    # Binance Exchange Info
-    # --------------------------------------------------------
-
-    exchange_info = http_get(
-        "https://api.binance.com/api/v3/exchangeInfo",
-        timeout=20
-    )
-
     if not isinstance(
-        exchange_info,
+        stats,
         dict
     ):
 
         log.error(
-            "Binance exchangeInfo unavailable"
+            "Nobitex stats is invalid"
         )
 
         return []
 
-    binance_symbols = set()
-
-    for item in exchange_info.get(
-        "symbols",
-        []
-    ):
-
-        try:
-
-            symbol = item.get(
-                "symbol"
-            )
-
-            status = item.get(
-                "status"
-            )
-
-            quote_asset = item.get(
-                "quoteAsset"
-            )
-
-            if not symbol:
-                continue
-
-            if status != "TRADING":
-                continue
-
-            if quote_asset != "USDT":
-                continue
-
-            binance_symbols.add(
-                symbol.upper()
-            )
-
-        except Exception:
-            continue
-
     # --------------------------------------------------------
-    # Nobitex + Binance
+    # Extract USDT coins
     # --------------------------------------------------------
-
-    result = []
-
-    for coin in sorted(
-        nobitex_coins
-    ):
-
-        symbol = coin + "USDT"
-
-        if symbol not in binance_symbols:
-            continue
-
-        result.append({
-            "coin": coin,
-            "symbol": symbol
-        })
-
-    log.info(
-        f"Nobitex ∩ Binance USDT markets: "
-        f"{len(result)}"
-    )
-
-    if not result:
-        return []
-
-    # --------------------------------------------------------
-    # Binance 24H Volume
-    # --------------------------------------------------------
-
-    tickers = http_get(
-        CFG.spot_base +
-        "/api/v3/ticker/24hr",
-        timeout=20
-    )
-
-    if not isinstance(
-        tickers,
-        list
-    ):
-
-        log.error(
-            "Binance 24h ticker unavailable"
-        )
-
-        return []
-
-    volumes = {}
-
-    for ticker in tickers:
-
-        try:
-
-            symbol = ticker.get(
-                "symbol"
-            )
-
-            if not symbol:
-                continue
-
-            symbol = symbol.upper()
-
-            if not symbol.endswith(
-                "USDT"
-            ):
-                continue
-
-            quote_volume = float(
-                ticker.get(
-                    "quoteVolume",
-                    0
-                ) or 0
-            )
-
-            volumes[symbol] = quote_volume
-
-        except Exception:
-            continue
-
-    final_result = []
-
-    for item in result:
-
-        symbol = item["symbol"]
-
-        volume = volumes.get(
-            symbol,
-            0.0
-        )
-
-        if volume < CFG.min_24h_usdt_volume:
-            continue
-
-        item["volume_24h"] = volume
-
-        final_result.append(item)
-
-    final_result.sort(
-def get_scan_coins():
-
-    """
-    انتخاب ارزها فقط از بازارهای فعال USDT نوبیتکس.
-    قیمت، کندل و حجم از Binance.
-    """
-
-    # --------------------------------------------------------
-    # Nobitex API
-    # --------------------------------------------------------
-
-    nobitex_urls = [
-        "https://apiv2.nobitex.ir/market/stats",
-        "https://api.nobitex.ir/market/stats"
-    ]
-
-    data = None
-
-    for url in nobitex_urls:
-
-        log.info(
-            f"Trying Nobitex API: {url}"
-        )
-
-        data = http_get(
-            url,
-            timeout=20,
-            retries=2
-        )
-
-        if isinstance(data, dict):
-
-            if data.get("status") == "ok":
-
-                log.info(
-                    f"Nobitex API connected: {url}"
-                )
-
-                break
-
-            data = None
-
-    if data is None:
-
-        log.error(
-            "All Nobitex API endpoints failed"
-        )
-
-        return []
-
-    stats = data.get(
-        "stats",
-        {}
-    )
-
-    if not isinstance(stats, dict):
-
-        log.error(
-            "Nobitex stats is not a dictionary"
-        )
-
-        return []
 
     nobitex_coins = set()
 
@@ -752,18 +524,20 @@ def get_scan_coins():
             ) is True:
                 continue
 
-            base_coin = (
+            coin = (
                 market
                 .split("-")[0]
                 .upper()
             )
 
-            if base_coin:
+            if coin:
+
                 nobitex_coins.add(
-                    base_coin
+                    coin
                 )
 
         except Exception:
+
             continue
 
     log.info(
@@ -774,7 +548,7 @@ def get_scan_coins():
     if not nobitex_coins:
 
         log.error(
-            "No active Nobitex USDT markets found"
+            "No Nobitex USDT markets found"
         )
 
         return []
@@ -785,7 +559,8 @@ def get_scan_coins():
 
     exchange_info = http_get(
         "https://api.binance.com/api/v3/exchangeInfo",
-        timeout=20
+        timeout=20,
+        retries=3
     )
 
     if not isinstance(
@@ -834,6 +609,7 @@ def get_scan_coins():
             )
 
         except Exception:
+
             continue
 
     # --------------------------------------------------------
@@ -846,7 +622,9 @@ def get_scan_coins():
         nobitex_coins
     ):
 
-        symbol = coin + "USDT"
+        symbol = (
+            coin + "USDT"
+        )
 
         if symbol not in binance_symbols:
             continue
@@ -857,11 +635,16 @@ def get_scan_coins():
         })
 
     log.info(
-        f"Nobitex ∩ Binance USDT markets: "
+        f"Nobitex + Binance markets: "
         f"{len(result)}"
     )
 
     if not result:
+
+        log.error(
+            "No common Nobitex/Binance markets"
+        )
+
         return []
 
     # --------------------------------------------------------
@@ -871,7 +654,8 @@ def get_scan_coins():
     tickers = http_get(
         CFG.spot_base +
         "/api/v3/ticker/24hr",
-        timeout=20
+        timeout=20,
+        retries=3
     )
 
     if not isinstance(
@@ -912,10 +696,17 @@ def get_scan_coins():
                 ) or 0
             )
 
-            volumes[symbol] = quote_volume
+            volumes[symbol] = (
+                quote_volume
+            )
 
         except Exception:
+
             continue
+
+    # --------------------------------------------------------
+    # Volume filter
+    # --------------------------------------------------------
 
     final_result = []
 
@@ -928,12 +719,17 @@ def get_scan_coins():
             0.0
         )
 
-        if volume < CFG.min_24h_usdt_volume:
+        if (
+            volume
+            < CFG.min_24h_usdt_volume
+        ):
             continue
 
         item["volume_24h"] = volume
 
-        final_result.append(item)
+        final_result.append(
+            item
+        )
 
     final_result.sort(
         key=lambda x:
@@ -949,8 +745,8 @@ def get_scan_coins():
     if final_result:
 
         preview = ", ".join(
-            x["coin"]
-            for x in final_result[:30]
+            item["coin"]
+            for item in final_result[:30]
         )
 
         log.info(
@@ -970,10 +766,14 @@ def get_klines(symbol):
             "interval": CFG.timeframe_main,
             "limit": CFG.kline_limit
         },
-        timeout=15
+        timeout=20,
+        retries=3
     )
 
-    if not isinstance(data, list):
+    if not isinstance(
+        data,
+        list
+    ):
         return None
 
     if len(data) < 100:
@@ -1022,11 +822,16 @@ def get_klines(symbol):
             errors="coerce"
         )
 
+        df["close_time"] = pd.to_numeric(
+            df["close_time"],
+            errors="coerce"
+        )
+
+        # حذف کندل 4H که هنوز بسته نشده
         now_ms = int(
             time.time() * 1000
         )
 
-        # حذف کندل فعلی که هنوز بسته نشده
         df = df[
             df["close_time"] <= now_ms
         ].copy()
@@ -1060,7 +865,7 @@ def get_klines(symbol):
 
 
 # ============================================================
-# 8. INDICATORS
+# 8. RSI
 # ============================================================
 
 def calculate_rsi(
@@ -1088,9 +893,12 @@ def calculate_rsi(
         adjust=False
     ).mean()
 
-    rs = avg_gain / avg_loss.replace(
-        0,
-        np.nan
+    rs = (
+        avg_gain /
+        avg_loss.replace(
+            0,
+            np.nan
+        )
     )
 
     rsi = 100 - (
@@ -1099,6 +907,10 @@ def calculate_rsi(
 
     return rsi.fillna(50)
 
+
+# ============================================================
+# 9. ATR
+# ============================================================
 
 def calculate_atr(
     df,
@@ -1122,7 +934,11 @@ def calculate_atr(
     ).abs()
 
     tr = pd.concat(
-        [tr1, tr2, tr3],
+        [
+            tr1,
+            tr2,
+            tr3
+        ],
         axis=1
     ).max(axis=1)
 
@@ -1131,6 +947,10 @@ def calculate_atr(
         adjust=False
     ).mean()
 
+
+# ============================================================
+# 10. ADD INDICATORS
+# ============================================================
 
 def add_indicators(df):
 
@@ -1214,7 +1034,7 @@ def add_indicators(df):
 
 
 # ============================================================
-# 9. BTC CONTEXT
+# 11. BTC CONTEXT
 # ============================================================
 
 def get_btc_context():
@@ -1231,7 +1051,9 @@ def get_btc_context():
             "bearish": False
         }
 
-    df = add_indicators(df)
+    df = add_indicators(
+        df
+    )
 
     row = df.iloc[-1]
 
@@ -1277,7 +1099,7 @@ def get_btc_context():
 
 
 # ============================================================
-# 10. RSI DIVERGENCE
+# 12. RSI DIVERGENCE
 # ============================================================
 
 def detect_rsi_divergence(df):
@@ -1303,29 +1125,38 @@ def detect_rsi_divergence(df):
 
     half = lookback // 2
 
-    # --------------------------------------------------------
     # Bullish divergence
-    # --------------------------------------------------------
-
-    first_price = np.min(
+    first_low_index = np.argmin(
         recent_prices[:half]
     )
 
-    second_price = np.min(
+    second_low_index = np.argmin(
         recent_prices[half:]
     )
 
-    first_rsi = recent_rsi[
-        np.argmin(
-            recent_prices[:half]
-        )
-    ]
+    first_price = (
+        recent_prices[
+            first_low_index
+        ]
+    )
 
-    second_rsi = recent_rsi[
-        half + np.argmin(
-            recent_prices[half:]
-        )
-    ]
+    second_price = (
+        recent_prices[
+            half + second_low_index
+        ]
+    )
+
+    first_rsi = (
+        recent_rsi[
+            first_low_index
+        ]
+    )
+
+    second_rsi = (
+        recent_rsi[
+            half + second_low_index
+        ]
+    )
 
     if (
         second_price < first_price
@@ -1334,29 +1165,38 @@ def detect_rsi_divergence(df):
 
         return "BULLISH"
 
-    # --------------------------------------------------------
     # Bearish divergence
-    # --------------------------------------------------------
-
-    first_price_high = np.max(
+    first_high_index = np.argmax(
         recent_prices[:half]
     )
 
-    second_price_high = np.max(
+    second_high_index = np.argmax(
         recent_prices[half:]
     )
 
-    first_rsi_high = recent_rsi[
-        np.argmax(
-            recent_prices[:half]
-        )
-    ]
+    first_price_high = (
+        recent_prices[
+            first_high_index
+        ]
+    )
 
-    second_rsi_high = recent_rsi[
-        half + np.argmax(
-            recent_prices[half:]
-        )
-    ]
+    second_price_high = (
+        recent_prices[
+            half + second_high_index
+        ]
+    )
+
+    first_rsi_high = (
+        recent_rsi[
+            first_high_index
+        ]
+    )
+
+    second_rsi_high = (
+        recent_rsi[
+            half + second_high_index
+        ]
+    )
 
     if (
         second_price_high > first_price_high
@@ -1369,7 +1209,7 @@ def detect_rsi_divergence(df):
 
 
 # ============================================================
-# 11. SAFE NUMBER
+# 13. SAFE FLOAT
 # ============================================================
 
 def safe_float(
@@ -1381,7 +1221,10 @@ def safe_float(
 
         value = float(value)
 
-        if not math.isfinite(value):
+        if not math.isfinite(
+            value
+        ):
+
             return default
 
         return value
@@ -1389,7 +1232,7 @@ def safe_float(
     except Exception:
 
         return default# ============================================================
-# 12. ANALYZE COIN
+# 14. ANALYZE COIN
 # ============================================================
 
 def analyze_coin(
@@ -1400,12 +1243,16 @@ def analyze_coin(
     symbol = item["symbol"]
     coin = item["coin"]
 
-    df = get_klines(symbol)
+    df = get_klines(
+        symbol
+    )
 
     if df is None:
         return None
 
-    df = add_indicators(df)
+    df = add_indicators(
+        df
+    )
 
     if len(df) < 100:
         return None
@@ -1466,7 +1313,10 @@ def analyze_coin(
         1.0
     )
 
-    if close <= 0 or atr <= 0:
+    if (
+        close <= 0
+        or atr <= 0
+    ):
         return None
 
     # --------------------------------------------------------
@@ -1503,7 +1353,7 @@ def analyze_coin(
     reasons = []
 
     # ========================================================
-    # EMA structure
+    # EMA
     # ========================================================
 
     if direction == "LONG":
@@ -1622,6 +1472,10 @@ def analyze_coin(
 
             score += 7
 
+            reasons.append(
+                "RSI نسبتاً بالا"
+            )
+
         elif rsi > 70:
 
             score += 9
@@ -1692,7 +1546,10 @@ def analyze_coin(
     # Volume
     # ========================================================
 
-    if volume_ratio >= CFG.min_volume_ratio:
+    if (
+        volume_ratio
+        >= CFG.min_volume_ratio
+    ):
 
         score += 10
 
@@ -1722,6 +1579,10 @@ def analyze_coin(
 
             score -= 8
 
+            reasons.append(
+                "روند BTC نزولی"
+            )
+
     else:
 
         if btc_context["bearish"]:
@@ -1736,11 +1597,17 @@ def analyze_coin(
 
             score -= 8
 
+            reasons.append(
+                "روند BTC صعودی"
+            )
+
     # ========================================================
     # RSI Divergence
     # ========================================================
 
-    divergence = detect_rsi_divergence(df)
+    divergence = detect_rsi_divergence(
+        df
+    )
 
     if (
         direction == "LONG"
@@ -1770,11 +1637,13 @@ def analyze_coin(
 
     score = max(
         0,
-        min(100, score)
+        min(
+            100,
+            score
+        )
     )
 
     if score < CFG.min_score:
-
         return None
 
     # ========================================================
@@ -1784,8 +1653,8 @@ def analyze_coin(
     if direction == "LONG":
 
         sl = (
-            close -
-            atr * CFG.sl_atr_multiplier
+            close
+            - atr * CFG.sl_atr_multiplier
         )
 
         risk_distance = (
@@ -1795,8 +1664,8 @@ def analyze_coin(
     else:
 
         sl = (
-            close +
-            atr * CFG.sl_atr_multiplier
+            close
+            + atr * CFG.sl_atr_multiplier
         )
 
         risk_distance = (
@@ -1807,12 +1676,14 @@ def analyze_coin(
         return None
 
     sl_percent = (
-        risk_distance /
-        close
+        risk_distance
+        / close
     ) * 100
 
-    if sl_percent > CFG.max_sl_percent:
-
+    if (
+        sl_percent
+        > CFG.max_sl_percent
+    ):
         return None
 
     # ========================================================
@@ -1822,25 +1693,25 @@ def analyze_coin(
     if direction == "LONG":
 
         tp1 = (
-            close +
-            risk_distance * CFG.tp1_rr
+            close
+            + risk_distance * CFG.tp1_rr
         )
 
         tp2 = (
-            close +
-            risk_distance * CFG.tp2_rr
+            close
+            + risk_distance * CFG.tp2_rr
         )
 
     else:
 
         tp1 = (
-            close -
-            risk_distance * CFG.tp1_rr
+            close
+            - risk_distance * CFG.tp1_rr
         )
 
         tp2 = (
-            close -
-            risk_distance * CFG.tp2_rr
+            close
+            - risk_distance * CFG.tp2_rr
         )
 
     # ========================================================
@@ -1848,14 +1719,14 @@ def analyze_coin(
     # ========================================================
 
     risk_usdt = (
-        CFG.account_size_usdt *
-        CFG.risk_pct /
-        100
+        CFG.account_size_usdt
+        * CFG.risk_pct
+        / 100
     )
 
     position_usdt = (
-        risk_usdt /
-        (sl_percent / 100)
+        risk_usdt
+        / (sl_percent / 100)
     )
 
     position_usdt = min(
@@ -1868,8 +1739,8 @@ def analyze_coin(
         return None
 
     quantity = (
-        position_usdt /
-        close
+        position_usdt
+        / close
     )
 
     # ========================================================
@@ -1881,12 +1752,13 @@ def analyze_coin(
     )
 
     # ========================================================
-    # Return
+    # Result
     # ========================================================
 
     return {
 
         "coin": coin,
+
         "symbol": symbol,
 
         "direction": direction,
@@ -1929,21 +1801,17 @@ def analyze_coin(
 
         "reasons": reasons
     }# ============================================================
-# 13. FORMAT SIGNAL
+# 15. FORMAT SIGNAL
 # ============================================================
 
 def format_signal(signal):
 
-    direction = signal["direction"]
-
-    if direction == "LONG":
+    if signal["direction"] == "LONG":
         title = "🟢 <b>LONG SIGNAL</b>"
     else:
         title = "🔴 <b>SHORT SIGNAL</b>"
 
-    score = signal["score"]
-
-    if score >= CFG.strong_score:
+    if signal["score"] >= CFG.strong_score:
         quality = "🔥 STRONG"
     else:
         quality = "⚡ NORMAL"
@@ -1956,16 +1824,16 @@ def format_signal(signal):
     reasons = signal["reasons"][:7]
 
     reasons_text = "\n".join(
-        f"• {x}"
-        for x in reasons
+        f"• {reason}"
+        for reason in reasons
     )
 
-    message = f"""
+    return f"""
 {title}
 <b>{signal["coin"]}/USDT</b>
-کیفیت: <b>{quality}</b>
 
-📊 Score: <b>{score}/100</b>
+کیفیت: <b>{quality}</b>
+📊 Score: <b>{signal["score"]}/100</b>
 
 💰 Entry:
 <b>{signal["entry"]:.8g}</b>
@@ -1986,7 +1854,7 @@ def format_signal(signal):
 📊 Volume:
 <b>{signal["volume_ratio"]:.2f}x</b>
 
-📉 BTC Trend:
+₿ BTC Trend:
 <b>{signal["btc_trend"]}</b>
 
 🔄 RSI Divergence:
@@ -2007,20 +1875,19 @@ def format_signal(signal):
 ⏰ Candle:
 {candle_dt.strftime("%Y-%m-%d %H:%M")}
 
-⚠️ این پیام صرفاً سیگنال و محاسبه ریسک است؛ معامله خودکار انجام نمی‌شود.
+⚠️ فقط سیگنال و محاسبه ریسک؛ معامله خودکار انجام نمی‌شود.
 """.strip()
-
-    return message
 
 
 # ============================================================
-# 14. SUMMARY
+# 16. NO SIGNAL REPORT
 # ============================================================
 
 def format_no_signal_summary(
     total_coins,
     analyzed,
-    signals,
+    candidates,
+    sent_count,
     btc_context
 ):
 
@@ -2028,31 +1895,33 @@ def format_no_signal_summary(
         CFG.iran_tz
     )
 
-    message = f"""
+    return f"""
 📊 <b>Crypto 4H Scan Report</b>
 
 ⏰ {now.strftime("%Y-%m-%d %H:%M")}
 
-🪙 Nobitex USDT coins:
+🪙 ارزهای نوبیتکس:
 <b>{total_coins}</b>
 
-🔎 Analyzed:
+🔎 بررسی‌شده:
 <b>{analyzed}</b>
 
-🚨 New signals:
-<b>{signals}</b>
+📌 کاندیداها:
+<b>{candidates}</b>
 
-₿ BTC Trend:
+🚨 سیگنال جدید ارسال‌شده:
+<b>{sent_count}</b>
+
+₿ روند BTC:
 <b>{btc_context["trend"]}</b>
 
-ℹ️ در این اسکن سیگنال جدیدی با امتیاز حداقل {CFG.min_score} پیدا نشد.
+ℹ️ حداقل امتیاز سیگنال:
+<b>{CFG.min_score}/100</b>
 """.strip()
-
-    return message
 
 
 # ============================================================
-# 15. MAIN
+# 17. MAIN
 # ============================================================
 
 def main():
@@ -2074,13 +1943,13 @@ def main():
     )
 
     # --------------------------------------------------------
-    # Telegram configuration
+    # Telegram check
     # --------------------------------------------------------
 
     if not CFG.telegram_token:
 
         log.error(
-            "TELEGRAM_TOKEN is not configured"
+            "TELEGRAM_TOKEN is missing"
         )
 
         return
@@ -2088,13 +1957,13 @@ def main():
     if not CFG.telegram_chat_id:
 
         log.error(
-            "TELEGRAM_CHAT_ID is not configured"
+            "TELEGRAM_CHAT_ID is missing"
         )
 
         return
 
     # --------------------------------------------------------
-    # Load state
+    # State
     # --------------------------------------------------------
 
     state = load_state()
@@ -2104,7 +1973,7 @@ def main():
     )
 
     # --------------------------------------------------------
-    # Get Nobitex coins
+    # Nobitex coins
     # --------------------------------------------------------
 
     coins = get_scan_coins()
@@ -2117,13 +1986,13 @@ def main():
 
         send_telegram(
             "⚠️ <b>Crypto Bot</b>\n\n"
-            "لیست ارزهای قابل اسکن از نوبیتکس دریافت نشد."
+            "لیست ارزهای نوبیتکس دریافت نشد."
         )
 
         return
 
     # --------------------------------------------------------
-    # BTC context
+    # BTC
     # --------------------------------------------------------
 
     btc_context = get_btc_context()
@@ -2134,7 +2003,7 @@ def main():
     )
 
     # --------------------------------------------------------
-    # Analyze coins
+    # Analyze
     # --------------------------------------------------------
 
     results = []
@@ -2181,7 +2050,7 @@ def main():
                 )
 
     # --------------------------------------------------------
-    # Sort by score
+    # Sort
     # --------------------------------------------------------
 
     results.sort(
@@ -2202,8 +2071,10 @@ def main():
 
     for signal in results:
 
-        # حداکثر ۶ سیگنال جدید در هر اجرا
-        if sent_count >= 6:
+        if (
+            sent_count
+            >= CFG.max_signals_per_run
+        ):
             break
 
         if signal_already_sent(
@@ -2263,17 +2134,15 @@ def main():
     )
 
     # --------------------------------------------------------
-    # No signal report
+    # Report
     # --------------------------------------------------------
 
-    if (
-        sent_count == 0
-        and CFG.send_no_signal_report
-    ):
+    if CFG.send_no_signal_report:
 
         summary = format_no_signal_summary(
             len(coins),
             analyzed,
+            len(results),
             sent_count,
             btc_context
         )
@@ -2316,7 +2185,7 @@ def main():
 
 
 # ============================================================
-# 16. RUN
+# 18. RUN
 # ============================================================
 
 if __name__ == "__main__":
