@@ -385,11 +385,48 @@ def get_scan_coins():
     قیمت، کندل و حجم:
     Binance
     """
+# --------------------------------------------------------
+# Nobitex API
+# --------------------------------------------------------
+
+nobitex_urls = [
+    "https://apiv2.nobitex.ir/market/stats",
+    "https://api.nobitex.ir/market/stats"
+]
+
+data = None
+
+for url in nobitex_urls:
+
+    log.info(
+        f"Trying Nobitex API: {url}"
+    )
 
     data = http_get(
-        CFG.nobitex_base + "/market/stats",
-        timeout=15
+        url,
+        timeout=20,
+        retries=2
     )
+
+    if isinstance(data, dict):
+
+        if data.get("status") == "ok":
+
+            log.info(
+                f"Nobitex API connected: {url}"
+            )
+
+            break
+
+        data = None
+
+if data is None:
+
+    log.error(
+        "All Nobitex API endpoints failed"
+    )
+
+    return []
 
     if not isinstance(data, dict):
 
