@@ -33,13 +33,13 @@ class Config:
         "https://api.nobitex.ir/market/stats",
     ]
 
-    # Main analysis timeframe
+    # Main timeframe
     timeframe = "4h"
 
-    # Binance candles
+    # Candles
     kline_limit = 300
 
-    # Signal filters
+    # Signal score
     min_score = 75
     strong_score = 84
 
@@ -66,28 +66,28 @@ class Config:
     risk_percent = 1.0
     max_position_usdt = 1000.0
 
-    # Stop / Take Profit
+    # Stop Loss
     sl_atr_multiplier = 1.40
+    max_sl_percent = 6.0
+
+    # Take Profit
     tp1_rr = 1.80
     tp2_rr = 3.00
 
-    # Maximum allowed stop loss
-    max_sl_percent = 6.0
-
-    # Maximum distance from EMA21
+    # EMA distance filter
     max_distance_from_ema21 = 4.0
 
-    # Maximum signals per run
+    # Maximum new signals per scan
     max_signals_per_run = 3
 
-    # State
+    # Duplicate protection
     state_file = "signals_state.json"
     dedup_hours = 8
 
-    # Threads
+    # Parallel analysis
     max_workers = 10
 
-    # Send report even when there are no signals
+    # Always send scan report
     send_no_signal_report = True
 
     # Iran timezone
@@ -129,16 +129,22 @@ SESSION.headers.update({
 def safe_float(value, default=0.0):
 
     try:
+
         if value is None:
             return default
 
         return float(value)
 
     except Exception:
+
         return default
 
 
-def http_get(url, params=None, timeout=20):
+def http_get(
+    url,
+    params=None,
+    timeout=20
+):
 
     for attempt in range(3):
 
@@ -188,11 +194,19 @@ def http_get(url, params=None, timeout=20):
 def send_telegram(message):
 
     if not CFG.telegram_token:
-        logger.error("TELEGRAM_TOKEN is missing")
+
+        logger.error(
+            "TELEGRAM_TOKEN is missing"
+        )
+
         return False
 
     if not CFG.telegram_chat_id:
-        logger.error("TELEGRAM_CHAT_ID is missing")
+
+        logger.error(
+            "TELEGRAM_CHAT_ID is missing"
+        )
+
         return False
 
     url = (
@@ -222,7 +236,10 @@ def send_telegram(message):
 
         if data.get("ok"):
 
-            logger.info("Telegram message sent")
+            logger.info(
+                "Telegram message sent"
+            )
+
             return True
 
         logger.error(
@@ -322,7 +339,10 @@ def get_nobitex_coins():
 
         try:
 
-            stats = data.get("stats", {})
+            stats = data.get(
+                "stats",
+                {}
+            )
 
             if not isinstance(stats, dict):
                 continue
@@ -463,14 +483,19 @@ def get_binance_volumes():
         for item in data:
 
             symbol = str(
-                item.get("symbol", "")
+                item.get(
+                    "symbol",
+                    ""
+                )
             ).upper()
 
             if not symbol.endswith("USDT"):
                 continue
 
             quote_volume = safe_float(
-                item.get("quoteVolume")
+                item.get(
+                    "quoteVolume"
+                )
             )
 
             base = symbol[:-4]
@@ -520,16 +545,24 @@ def get_scan_coins():
     for coin in common:
 
         volume = safe_float(
-            volumes.get(coin, 0)
+            volumes.get(
+                coin,
+                0
+            )
         )
 
         if volume < CFG.min_24h_usdt_volume:
             continue
 
-        final_coins.append(coin)
+        final_coins.append(
+            coin
+        )
 
     final_coins.sort(
-        key=lambda x: volumes.get(x, 0),
+        key=lambda x: volumes.get(
+            x,
+            0
+        ),
         reverse=True
     )
 
@@ -542,7 +575,9 @@ def get_scan_coins():
 
         logger.info(
             "Scan preview: %s",
-            ", ".join(final_coins[:30])
+            ", ".join(
+                final_coins[:30]
+            )
         )
 
     return final_coins# =========================================================
@@ -624,7 +659,7 @@ def get_klines(symbol, interval=None, limit=None):
             errors="coerce"
         )
 
-        # Remove current unfinished candle
+        # حذف کندل در حال تشکیل
         now_ms = int(
             time.time() * 1000
         )
@@ -680,13 +715,20 @@ def calculate_rsi(
         adjust=False
     ).mean()
 
-    rs = avg_gain / avg_loss.replace(
-        0,
-        np.nan
+    rs = (
+        avg_gain
+        / avg_loss.replace(
+            0,
+            np.nan
+        )
     )
 
-    rsi = 100 - (
-        100 / (1 + rs)
+    rsi = (
+        100
+        - (
+            100
+            / (1 + rs)
+        )
     )
 
     return rsi.fillna(50)
@@ -710,15 +752,21 @@ def calculate_atr(
     tr1 = high - low
 
     tr2 = (
-        high - previous_close
+        high
+        - previous_close
     ).abs()
 
     tr3 = (
-        low - previous_close
+        low
+        - previous_close
     ).abs()
 
     true_range = pd.concat(
-        [tr1, tr2, tr3],
+        [
+            tr1,
+            tr2,
+            tr3
+        ],
         axis=1
     ).max(axis=1)
 
@@ -731,7 +779,7 @@ def calculate_atr(
 
 
 # =========================================================
-# INDICATORS
+# ADD INDICATORS
 # =========================================================
 
 def add_indicators(df):
@@ -741,25 +789,37 @@ def add_indicators(df):
     # EMA
     df["ema9"] = (
         df["close"]
-        .ewm(span=9, adjust=False)
+        .ewm(
+            span=9,
+            adjust=False
+        )
         .mean()
     )
 
     df["ema21"] = (
         df["close"]
-        .ewm(span=21, adjust=False)
+        .ewm(
+            span=21,
+            adjust=False
+        )
         .mean()
     )
 
     df["ema50"] = (
         df["close"]
-        .ewm(span=50, adjust=False)
+        .ewm(
+            span=50,
+            adjust=False
+        )
         .mean()
     )
 
     df["ema200"] = (
         df["close"]
-        .ewm(span=200, adjust=False)
+        .ewm(
+            span=200,
+            adjust=False
+        )
         .mean()
     )
 
@@ -789,7 +849,8 @@ def add_indicators(df):
     )
 
     df["macd"] = (
-        ema_fast - ema_slow
+        ema_fast
+        - ema_slow
     )
 
     df["macd_signal"] = (
@@ -812,7 +873,7 @@ def add_indicators(df):
         CFG.atr_period
     )
 
-    # Volume MA
+    # Volume
     df["volume_ma20"] = (
         df["volume"]
         .rolling(20)
@@ -824,14 +885,17 @@ def add_indicators(df):
         / df["volume_ma20"]
     )
 
-    # Candle body ratio
+    # Candle body
     candle_range = (
         df["high"]
         - df["low"]
     )
 
     df["body_ratio"] = (
-        (df["close"] - df["open"]).abs()
+        (
+            df["close"]
+            - df["open"]
+        ).abs()
         / candle_range.replace(
             0,
             np.nan
@@ -888,13 +952,18 @@ def get_btc_trend(interval):
 
 
 # =========================================================
-# BTC MULTI-TIMEFRAME CONTEXT
+# BTC CONTEXT
 # =========================================================
 
 def get_btc_context():
 
-    btc_4h = get_btc_trend("4h")
-    btc_1d = get_btc_trend("1d")
+    btc_4h = get_btc_trend(
+        "4h"
+    )
+
+    btc_1d = get_btc_trend(
+        "1d"
+    )
 
     logger.info(
         "BTC trend 4H: %s",
@@ -910,15 +979,18 @@ def get_btc_context():
         btc_4h == "BULLISH"
         and btc_1d != "BEARISH"
     ):
+
         combined = "BULLISH"
 
     elif (
         btc_4h == "BEARISH"
         and btc_1d != "BULLISH"
     ):
+
         combined = "BEARISH"
 
     else:
+
         combined = "NEUTRAL"
 
     return {
@@ -937,41 +1009,68 @@ def detect_rsi_divergence(df):
     if len(df) < 60:
         return "NONE"
 
-    recent = df.tail(60).copy()
+    recent = df.tail(
+        60
+    ).copy()
 
     half = len(recent) // 2
 
-    first = recent.iloc[:half]
-    second = recent.iloc[half:]
+    first = recent.iloc[
+        :half
+    ]
 
-    price_low_1 = first["low"].min()
-    price_low_2 = second["low"].min()
+    second = recent.iloc[
+        half:
+    ]
 
-    rsi_low_1 = first["rsi"].min()
-    rsi_low_2 = second["rsi"].min()
+    # Lows
+    price_low_1 = first[
+        "low"
+    ].min()
 
-    price_high_1 = first["high"].max()
-    price_high_2 = second["high"].max()
+    price_low_2 = second[
+        "low"
+    ].min()
 
-    rsi_high_1 = first["rsi"].max()
-    rsi_high_2 = second["rsi"].max()
+    rsi_low_1 = first[
+        "rsi"
+    ].min()
 
-    # Bullish divergence:
-    # price makes lower low,
-    # RSI makes higher low.
+    rsi_low_2 = second[
+        "rsi"
+    ].min()
+
+    # Highs
+    price_high_1 = first[
+        "high"
+    ].max()
+
+    price_high_2 = second[
+        "high"
+    ].max()
+
+    rsi_high_1 = first[
+        "rsi"
+    ].max()
+
+    rsi_high_2 = second[
+        "rsi"
+    ].max()
+
+    # Bullish divergence
     if (
         price_low_2 < price_low_1
         and rsi_low_2 > rsi_low_1
     ):
+
         return "BULLISH"
 
-    # Bearish divergence:
-    # price makes higher high,
-    # RSI makes lower high.
+    # Bearish divergence
     if (
         price_high_2 > price_high_1
         and rsi_high_2 < rsi_high_1
     ):
+
         return "BEARISH"
 
     return "NONE"# =========================================================
@@ -980,755 +1079,837 @@ def detect_rsi_divergence(df):
 
 def analyze_coin(symbol, btc_context):
 
+    result = {
+        "symbol": symbol,
+        "status": "UNKNOWN",
+        "direction": None,
+        "score": 0,
+        "price": 0,
+        "rsi": 0,
+        "volume_ratio": 0,
+        "sl_percent": 0,
+        "reason": ""
+    }
+
     try:
 
-        # ---------------------------------------------
+        # -------------------------------------------------
         # Get 4H candles
-        # ---------------------------------------------
+        # -------------------------------------------------
 
         df = get_klines(
-            symbol,
+            symbol + "USDT",
             CFG.timeframe,
             CFG.kline_limit
         )
 
         if df is None:
-            return None
+
+            result["status"] = "NO_DATA"
+            result["reason"] = "داده کندلی دریافت نشد"
+
+            return result
+
+        if len(df) < 200:
+
+            result["status"] = "NOT_ENOUGH_DATA"
+            result["reason"] = "تعداد کندل کافی نیست"
+
+            return result
+
+        # -------------------------------------------------
+        # Indicators
+        # -------------------------------------------------
 
         df = add_indicators(df)
 
-        if len(df) < 220:
-            return None
-
         last = df.iloc[-1]
-        previous = df.iloc[-2]
 
-        # ---------------------------------------------
-        # Current values
-        # ---------------------------------------------
+        price = safe_float(
+            last["close"]
+        )
 
-        close = safe_float(last["close"])
-        open_price = safe_float(last["open"])
-        high = safe_float(last["high"])
-        low = safe_float(last["low"])
+        ema9 = safe_float(
+            last["ema9"]
+        )
 
-        ema9 = safe_float(last["ema9"])
-        ema21 = safe_float(last["ema21"])
-        ema50 = safe_float(last["ema50"])
-        ema200 = safe_float(last["ema200"])
+        ema21 = safe_float(
+            last["ema21"]
+        )
 
-        rsi = safe_float(last["rsi"])
+        ema50 = safe_float(
+            last["ema50"]
+        )
 
-        macd = safe_float(last["macd"])
+        ema200 = safe_float(
+            last["ema200"]
+        )
+
+        rsi = safe_float(
+            last["rsi"]
+        )
+
+        macd = safe_float(
+            last["macd"]
+        )
+
         macd_signal = safe_float(
             last["macd_signal"]
         )
+
         macd_hist = safe_float(
             last["macd_hist"]
         )
 
-        previous_macd = safe_float(
-            previous["macd"]
+        atr = safe_float(
+            last["atr"]
         )
-        previous_signal = safe_float(
-            previous["macd_signal"]
-        )
-
-        atr = safe_float(last["atr"])
 
         volume_ratio = safe_float(
             last["volume_ratio"]
         )
 
-        body_ratio = safe_float(
-            last["body_ratio"]
-        )
+        result["price"] = price
+        result["rsi"] = rsi
+        result["volume_ratio"] = volume_ratio
 
-        # ---------------------------------------------
+        # -------------------------------------------------
         # Basic validation
-        # ---------------------------------------------
+        # -------------------------------------------------
 
-        if close <= 0:
-            return None
+        if price <= 0:
+
+            result["status"] = "INVALID_PRICE"
+            result["reason"] = "قیمت نامعتبر"
+
+            return result
 
         if atr <= 0:
-            return None
 
-        if ema21 <= 0:
-            return None
+            result["status"] = "INVALID_ATR"
+            result["reason"] = "ATR نامعتبر"
 
-        # ---------------------------------------------
-        # Determine direction
-        # ---------------------------------------------
+            return result
 
-        long_structure = (
-            ema9 > ema21
+        # -------------------------------------------------
+        # EMA structure
+        # -------------------------------------------------
+
+        bullish_structure = (
+            price > ema9
+            and ema9 > ema21
             and ema21 > ema50
             and ema50 > ema200
         )
 
-        short_structure = (
-            ema9 < ema21
+        bearish_structure = (
+            price < ema9
+            and ema9 < ema21
             and ema21 < ema50
             and ema50 < ema200
         )
 
-        if long_structure:
+        if not bullish_structure and not bearish_structure:
+
+            result["status"] = "NO_EMA_STRUCTURE"
+            result["reason"] = "ساختار EMA تأیید نمی‌شود"
+
+            return result
+
+        # -------------------------------------------------
+        # Direction
+        # -------------------------------------------------
+
+        if bullish_structure:
 
             direction = "LONG"
 
-        elif short_structure:
+        else:
 
             direction = "SHORT"
 
-        else:
+        result["direction"] = direction
 
-            return None
-
-        # ---------------------------------------------
+        # -------------------------------------------------
         # Distance from EMA21
-        # ---------------------------------------------
+        # -------------------------------------------------
 
-        distance_ema21 = (
-            abs(close - ema21)
+        ema21_distance = (
+            abs(price - ema21)
             / ema21
             * 100
         )
 
         if (
-            distance_ema21
+            ema21_distance
             > CFG.max_distance_from_ema21
         ):
-            return None
 
-        # ---------------------------------------------
+            result["status"] = "EMA21_DISTANCE"
+
+            result["reason"] = (
+                "فاصله قیمت از EMA21 زیاد است: "
+                f"{ema21_distance:.2f}%"
+            )
+
+            return result
+
+        # -------------------------------------------------
+        # Volume filter
+        # -------------------------------------------------
+
+        if volume_ratio < CFG.min_volume_ratio:
+
+            result["status"] = "LOW_VOLUME"
+
+            result["reason"] = (
+                "حجم پایین است: "
+                f"{volume_ratio:.2f}x"
+            )
+
+            return result
+
+        # -------------------------------------------------
+        # RSI extreme filter
+        # -------------------------------------------------
+
+        if (
+            direction == "LONG"
+            and rsi > 65
+        ):
+
+            result["status"] = "RSI_TOO_HIGH"
+
+            result["reason"] = (
+                "RSI برای خرید بالا است: "
+                f"{rsi:.1f}"
+            )
+
+            return result
+
+        if (
+            direction == "SHORT"
+            and rsi < 35
+        ):
+
+            result["status"] = "RSI_TOO_LOW"
+
+            result["reason"] = (
+                "RSI برای فروش پایین است: "
+                f"{rsi:.1f}"
+            )
+
+            return result
+
+        # -------------------------------------------------
         # RSI divergence
-        # ---------------------------------------------
+        # -------------------------------------------------
 
         divergence = detect_rsi_divergence(
             df
         )
 
-        # ---------------------------------------------
-        # Hard volume filter
-        # ---------------------------------------------
-
-        if (
-            volume_ratio
-            < CFG.min_volume_ratio
-        ):
-            return None
-
-        # ---------------------------------------------
-        # Hard RSI filter
-        # ---------------------------------------------
-
-        if direction == "LONG":
-
-            if rsi > 65:
-                return None
-
-        else:
-
-            if rsi < 35:
-                return None
-
-        # ---------------------------------------------
-        # Reject opposite divergence
-        # ---------------------------------------------
-
         if (
             direction == "LONG"
             and divergence == "BEARISH"
         ):
-            return None
+
+            result["status"] = (
+                "OPPOSITE_DIVERGENCE"
+            )
+
+            result["reason"] = (
+                "واگرایی نزولی مخالف سیگنال"
+            )
+
+            return result
 
         if (
             direction == "SHORT"
             and divergence == "BULLISH"
         ):
-            return None
 
-        # ---------------------------------------------
-        # Daily BTC filter
-        # ---------------------------------------------
+            result["status"] = (
+                "OPPOSITE_DIVERGENCE"
+            )
+
+            result["reason"] = (
+                "واگرایی صعودی مخالف سیگنال"
+            )
+
+            return result
+
+        # -------------------------------------------------
+        # BTC Daily context filter
+        # -------------------------------------------------
+
+        btc_daily = btc_context.get(
+            "1d",
+            "UNKNOWN"
+        )
 
         if (
             direction == "LONG"
-            and btc_context["1d"] == "BEARISH"
+            and btc_daily == "BEARISH"
         ):
-            return None
+
+            result["status"] = (
+                "BTC_DAILY_AGAINST"
+            )
+
+            result["reason"] = (
+                "روند Daily بیت‌کوین مخالف خرید است"
+            )
+
+            return result
 
         if (
             direction == "SHORT"
-            and btc_context["1d"] == "BULLISH"
+            and btc_daily == "BULLISH"
         ):
-            return None
 
-        # ---------------------------------------------
+            result["status"] = (
+                "BTC_DAILY_AGAINST"
+            )
+
+            result["reason"] = (
+                "روند Daily بیت‌کوین مخالف فروش است"
+            )
+
+            return result
+
+        # -------------------------------------------------
         # Score
-        # ---------------------------------------------
+        # -------------------------------------------------
 
         score = 0
-        reasons = []
 
-        # =============================================
-        # EMA STRUCTURE
-        # =============================================
+        # EMA structure
+        score += 25
 
-        if direction == "LONG":
-
-            score += 18
-            reasons.append(
-                "روند EMA صعودی"
-            )
-
-            if close > ema9:
-                score += 6
-
-            if ema9 > ema21:
-                score += 5
-
-            if ema21 > ema50:
-                score += 5
-
-        else:
-
-            score += 18
-            reasons.append(
-                "روند EMA نزولی"
-            )
-
-            if close < ema9:
-                score += 6
-
-            if ema9 < ema21:
-                score += 5
-
-            if ema21 < ema50:
-                score += 5
-
-        # =============================================
         # RSI
-        # =============================================
-
         if direction == "LONG":
 
-            if 45 <= rsi <= 58:
+            if 40 <= rsi <= 60:
+                score += 15
 
-                score += 12
+            elif 35 <= rsi < 40:
+                score += 10
 
-                reasons.append(
-                    "RSI مناسب خرید"
-                )
-
-            elif 58 < rsi <= 62:
-
-                score += 7
-
-                reasons.append(
-                    "RSI قابل قبول"
-                )
-
-            else:
-
-                score += 3
+            elif 60 < rsi <= 65:
+                score += 8
 
         else:
 
-            if 42 <= rsi <= 55:
+            if 40 <= rsi <= 60:
+                score += 15
 
-                score += 12
+            elif 60 < rsi <= 65:
+                score += 10
 
-                reasons.append(
-                    "RSI مناسب فروش"
-                )
+            elif 35 <= rsi < 40:
+                score += 8
 
-            elif 38 <= rsi < 42:
-
-                score += 7
-
-                reasons.append(
-                    "RSI قابل قبول"
-                )
-
-            else:
-
-                score += 3
-
-        # =============================================
         # MACD
-        # =============================================
-
         if direction == "LONG":
 
             if macd > macd_signal:
-                score += 8
-                reasons.append(
-                    "MACD مثبت"
-                )
+                score += 15
 
             if macd_hist > 0:
-                score += 4
-
-            if (
-                previous_macd
-                <= previous_signal
-                and macd
-                > macd_signal
-            ):
-                score += 3
-                reasons.append(
-                    "کراس صعودی MACD"
-                )
+                score += 5
 
         else:
 
             if macd < macd_signal:
-                score += 8
-                reasons.append(
-                    "MACD منفی"
-                )
+                score += 15
 
             if macd_hist < 0:
-                score += 4
+                score += 5
 
-            if (
-                previous_macd
-                >= previous_signal
-                and macd
-                < macd_signal
-            ):
-                score += 3
-                reasons.append(
-                    "کراس نزولی MACD"
-                )
+        # Volume
+        if volume_ratio >= CFG.strong_volume_ratio:
 
-        # =============================================
-        # VOLUME
-        # =============================================
+            score += 15
+
+        elif volume_ratio >= CFG.min_volume_ratio:
+
+            score += 8
+
+        # BTC context
+        btc_4h = btc_context.get(
+            "4h",
+            "UNKNOWN"
+        )
 
         if (
-            volume_ratio
-            >= CFG.strong_volume_ratio
+            direction == "LONG"
+            and btc_4h == "BULLISH"
         ):
 
-            score += 12
+            score += 10
 
-            reasons.append(
-                "حجم تأییدکننده"
-            )
+        elif (
+            direction == "SHORT"
+            and btc_4h == "BEARISH"
+        ):
 
-        elif volume_ratio >= 0.95:
+            score += 10
 
-            score += 7
-
-        else:
-
-            score += 2
-
-        # =============================================
-        # BTC 4H
-        # =============================================
-
-        if direction == "LONG":
-
-            if btc_context["4h"] == "BULLISH":
-
-                score += 8
-
-                reasons.append(
-                    "BTC 4H صعودی"
-                )
-
-            elif btc_context["4h"] == "BEARISH":
-
-                score -= 8
-
-        else:
-
-            if btc_context["4h"] == "BEARISH":
-
-                score += 8
-
-                reasons.append(
-                    "BTC 4H نزولی"
-                )
-
-            elif btc_context["4h"] == "BULLISH":
-
-                score -= 8
-
-        # =============================================
-        # BTC DAILY
-        # =============================================
-
-        if direction == "LONG":
-
-            if btc_context["1d"] == "BULLISH":
-
-                score += 6
-
-                reasons.append(
-                    "BTC Daily صعودی"
-                )
-
-        else:
-
-            if btc_context["1d"] == "BEARISH":
-
-                score += 6
-
-                reasons.append(
-                    "BTC Daily نزولی"
-                )
-
-        # =============================================
-        # RSI DIVERGENCE
-        # =============================================
-
+        # Divergence confirmation
         if (
             direction == "LONG"
             and divergence == "BULLISH"
         ):
 
-            score += 8
-
-            reasons.append(
-                "واگرایی مثبت RSI"
-            )
+            score += 10
 
         elif (
             direction == "SHORT"
             and divergence == "BEARISH"
         ):
 
-            score += 8
+            score += 10
 
-            reasons.append(
-                "واگرایی منفی RSI"
-            )
-
-        # =============================================
-        # CANDLE QUALITY
-        # =============================================
-
-        if body_ratio >= 0.55:
-
-            score += 5
-
-            reasons.append(
-                "کندل قدرتمند"
-            )
-
-        # ---------------------------------------------
-        # Score boundary
-        # ---------------------------------------------
-
-        score = max(
-            0,
-            min(
-                100,
-                int(score)
-            )
-        )
+        # -------------------------------------------------
+        # Minimum score
+        # -------------------------------------------------
 
         if score < CFG.min_score:
-            return None
 
-        # ---------------------------------------------
+            result["status"] = "LOW_SCORE"
+
+            result["score"] = score
+
+            result["reason"] = (
+                f"امتیاز کافی نیست: {score}"
+            )
+
+            return result
+
+        # -------------------------------------------------
         # Stop Loss
-        # ---------------------------------------------
-
-        stop_distance = (
-            atr
-            * CFG.sl_atr_multiplier
-        )
+        # -------------------------------------------------
 
         if direction == "LONG":
 
             stop_loss = (
-                close
-                - stop_distance
+                price
+                - atr * CFG.sl_atr_multiplier
+            )
+
+            if stop_loss <= 0:
+
+                result["status"] = "INVALID_SL"
+                result["reason"] = "حد ضرر نامعتبر"
+
+                return result
+
+            sl_percent = (
+                (price - stop_loss)
+                / price
+                * 100
             )
 
         else:
 
             stop_loss = (
-                close
-                + stop_distance
+                price
+                + atr * CFG.sl_atr_multiplier
             )
 
-        if stop_loss <= 0:
-            return None
+            sl_percent = (
+                (stop_loss - price)
+                / price
+                * 100
+            )
 
-        sl_percent = (
-            abs(close - stop_loss)
-            / close
-            * 100
-        )
+        result["sl_percent"] = sl_percent
 
-        # ---------------------------------------------
-        # Maximum SL filter
-        # ---------------------------------------------
+        # -------------------------------------------------
+        # Maximum Stop Loss
+        # -------------------------------------------------
 
-        if (
-            sl_percent
-            > CFG.max_sl_percent
-        ):
-            return None
+        if sl_percent > CFG.max_sl_percent:
 
-        # ---------------------------------------------
+            result["status"] = "SL_TOO_LARGE"
+
+            result["reason"] = (
+                "حد ضرر بیش از "
+                f"{CFG.max_sl_percent:.1f}% است: "
+                f"{sl_percent:.2f}%"
+            )
+
+            return result
+
+        # -------------------------------------------------
         # Take Profits
-        # ---------------------------------------------
+        # -------------------------------------------------
+
+        risk_distance = abs(
+            price - stop_loss
+        )
 
         if direction == "LONG":
 
             tp1 = (
-                close
-                + stop_distance
+                price
+                + risk_distance
                 * CFG.tp1_rr
             )
 
             tp2 = (
-                close
-                + stop_distance
+                price
+                + risk_distance
                 * CFG.tp2_rr
             )
 
         else:
 
             tp1 = (
-                close
-                - stop_distance
+                price
+                - risk_distance
                 * CFG.tp1_rr
             )
 
             tp2 = (
-                close
-                - stop_distance
+                price
+                - risk_distance
                 * CFG.tp2_rr
             )
 
-        # ---------------------------------------------
-        # Risk calculation
-        # ---------------------------------------------
+        # -------------------------------------------------
+        # Position size
+        # -------------------------------------------------
 
-        risk_usdt = (
+        risk_amount = (
             CFG.account_size_usdt
             * CFG.risk_percent
             / 100
         )
 
-        if sl_percent <= 0:
-            return None
+        if risk_distance <= 0:
+
+            result["status"] = "INVALID_SL"
+            result["reason"] = "فاصله ریسک نامعتبر"
+
+            return result
+
+        position_size = (
+            risk_amount
+            / risk_distance
+        )
 
         position_usdt = (
-            risk_usdt
-            / (sl_percent / 100)
+            position_size
+            * price
         )
 
         position_usdt = min(
             position_usdt,
-            CFG.max_position_usdt,
-            CFG.account_size_usdt
+            CFG.max_position_usdt
         )
 
-        quantity = (
-            position_usdt
-            / close
-        )
+        # -------------------------------------------------
+        # Final signal
+        # -------------------------------------------------
 
-        # ---------------------------------------------
-        # Signal quality
-        # ---------------------------------------------
+        result["status"] = "SIGNAL"
+
+        result["score"] = score
+
+        result["stop_loss"] = stop_loss
+        result["tp1"] = tp1
+        result["tp2"] = tp2
+
+        result["risk_amount"] = risk_amount
+
+        result["position_size"] = position_size
+
+        result["position_usdt"] = position_usdt
+
+        result["divergence"] = divergence
 
         if score >= CFG.strong_score:
 
-            quality = "STRONG"
+            result["strength"] = "STRONG"
 
         else:
 
-            quality = "NORMAL"
+            result["strength"] = "NORMAL"
 
-        # ---------------------------------------------
-        # Result
-        # ---------------------------------------------
-
-        return {
-            "symbol": symbol,
-            "direction": direction,
-            "score": score,
-            "quality": quality,
-            "entry": close,
-            "stop_loss": stop_loss,
-            "tp1": tp1,
-            "tp2": tp2,
-            "sl_percent": sl_percent,
-            "rsi": rsi,
-            "volume_ratio": volume_ratio,
-            "divergence": divergence,
-            "btc_4h": btc_context["4h"],
-            "btc_1d": btc_context["1d"],
-            "distance_ema21": distance_ema21,
-            "risk_usdt": risk_usdt,
-            "position_usdt": position_usdt,
-            "quantity": quantity,
-            "reasons": reasons
-        }
+        return result
 
     except Exception as e:
 
-        logger.warning(
-            "Analysis failed for %s: %s",
-            symbol,
-            e
+        logger.exception(
+            "Analysis error for %s",
+            symbol
         )
 
-        return None# =========================================================
-# FORMAT SIGNAL MESSAGE
+        result["status"] = "ERROR"
+
+        result["reason"] = (
+            f"خطای تحلیل: {str(e)[:100]}"
+        )
+
+        return result# =========================================================
+# SIGNAL FORMAT
 # =========================================================
 
-def format_signal(signal):
+def format_signal(result):
 
-    direction_icon = (
-        "🟢" if signal["direction"] == "LONG"
-        else "🔴"
+    symbol = result["symbol"]
+    direction = result["direction"]
+    score = result["score"]
+    price = result["price"]
+
+    stop_loss = result["stop_loss"]
+    tp1 = result["tp1"]
+    tp2 = result["tp2"]
+
+    rsi = result["rsi"]
+    volume_ratio = result["volume_ratio"]
+    sl_percent = result["sl_percent"]
+
+    position_usdt = result["position_usdt"]
+    risk_amount = result["risk_amount"]
+
+    strength = result.get(
+        "strength",
+        "NORMAL"
     )
 
-    quality_icon = (
-        "🔥" if signal["quality"] == "STRONG"
-        else "⚡"
+    if direction == "LONG":
+        direction_text = "🟢 LONG / خرید"
+    else:
+        direction_text = "🔴 SHORT / فروش"
+
+    if strength == "STRONG":
+        strength_text = "🔥 STRONG"
+    else:
+        strength_text = "✅ NORMAL"
+
+    return (
+        "🚨 <b>Crypto Signal</b>\n"
+        "━━━━━━━━━━━━━━━━\n"
+        f"🪙 <b>{symbol}</b>\n"
+        f"📌 جهت: <b>{direction_text}</b>\n"
+        f"⭐ قدرت: <b>{strength_text}</b>\n"
+        f"🏆 Score: <b>{score}/100</b>\n"
+        "\n"
+        f"💰 قیمت ورود: <b>{price:.8g}</b>\n"
+        f"🛑 حد ضرر: <b>{stop_loss:.8g}</b>\n"
+        f"📉 ریسک SL: <b>{sl_percent:.2f}%</b>\n"
+        f"🎯 TP1: <b>{tp1:.8g}</b>\n"
+        f"🎯 TP2: <b>{tp2:.8g}</b>\n"
+        "\n"
+        f"📊 RSI: <b>{rsi:.1f}</b>\n"
+        f"📦 Volume: <b>{volume_ratio:.2f}x</b>\n"
+        f"💵 حجم پوزیشن: <b>{position_usdt:.2f} USDT</b>\n"
+        f"⚠️ ریسک سرمایه: <b>{risk_amount:.2f} USDT</b>\n"
+        "\n"
+        "⏱ تایم‌فریم: <b>4H</b>\n"
+        "📡 Data: Binance\n"
+        "🔎 Market: Nobitex-listed\n"
+        "━━━━━━━━━━━━━━━━"
     )
-
-    divergence_text = signal["divergence"]
-
-    if divergence_text == "NONE":
-        divergence_text = "ندارد"
-
-    elif divergence_text == "BULLISH":
-        divergence_text = "مثبت"
-
-    elif divergence_text == "BEARISH":
-        divergence_text = "منفی"
-
-    reasons = signal.get(
-        "reasons",
-        []
-    )
-
-    reasons_text = "\n".join(
-        f"• {reason}"
-        for reason in reasons
-    )
-
-    return f"""
-{direction_icon} <b>{signal["symbol"]}/USDT {signal["direction"]}</b>
-{quality_icon} <b>{signal["quality"]}</b> | امتیاز: <b>{signal["score"]}/100</b>
-
-💰 <b>ورود:</b> {signal["entry"]:.8g}
-
-🛑 <b>حد ضرر:</b> {signal["stop_loss"]:.8g}
-📉 <b>فاصله SL:</b> {signal["sl_percent"]:.2f}%
-
-🎯 <b>TP1:</b> {signal["tp1"]:.8g}
-🎯 <b>TP2:</b> {signal["tp2"]:.8g}
-
-📊 <b>RSI:</b> {signal["rsi"]:.2f}
-📦 <b>Volume:</b> {signal["volume_ratio"]:.2f}x
-
-📈 <b>BTC 4H:</b> {signal["btc_4h"]}
-📅 <b>BTC Daily:</b> {signal["btc_1d"]}
-
-🔄 <b>واگرایی RSI:</b> {divergence_text}
-
-💵 <b>ریسک:</b> ${signal["risk_usdt"]:.2f}
-💼 <b>حجم پوزیشن:</b> ${signal["position_usdt"]:.2f}
-🪙 <b>Quantity:</b> {signal["quantity"]:.8g}
-
-<b>دلایل:</b>
-{reasons_text}
-
-⚠️ این پیام فقط سیگنال و محاسبه ریسک است و معامله خودکار انجام نمی‌شود.
-""".strip()
 
 
 # =========================================================
-# FORMAT SCAN REPORT
+# REJECTION REASONS
+# =========================================================
+
+REASON_NAMES = {
+
+    "NO_DATA":
+        "داده کندلی دریافت نشد",
+
+    "NOT_ENOUGH_DATA":
+        "کندل کافی نبود",
+
+    "INVALID_PRICE":
+        "قیمت نامعتبر",
+
+    "INVALID_ATR":
+        "ATR نامعتبر",
+
+    "NO_EMA_STRUCTURE":
+        "ساختار EMA تأیید نشد",
+
+    "EMA21_DISTANCE":
+        "فاصله زیاد از EMA21",
+
+    "LOW_VOLUME":
+        "حجم معاملات پایین",
+
+    "RSI_TOO_HIGH":
+        "RSI برای خرید بالا بود",
+
+    "RSI_TOO_LOW":
+        "RSI برای فروش پایین بود",
+
+    "OPPOSITE_DIVERGENCE":
+        "واگرایی مخالف",
+
+    "BTC_DAILY_AGAINST":
+        "روند Daily بیت‌کوین مخالف بود",
+
+    "LOW_SCORE":
+        "امتیاز کافی نبود",
+
+    "INVALID_SL":
+        "حد ضرر نامعتبر",
+
+    "SL_TOO_LARGE":
+        "حد ضرر بیشتر از حد مجاز",
+
+    "ERROR":
+        "خطای تحلیل",
+
+    "UNKNOWN":
+        "سایر"
+}
+
+
+# =========================================================
+# SCAN REPORT
 # =========================================================
 
 def format_scan_report(
     total_coins,
     analyzed,
-    candidates,
-    sent,
-    btc_context
+    signals,
+    new_signals,
+    btc_context,
+    results
 ):
 
-    return f"""
-📊 <b>گزارش اسکن Crypto Signal Bot</b>
+    from collections import Counter
 
-⏱ تایم‌فریم اصلی: <b>4H</b>
+    counter = Counter()
 
-🪙 ارزهای قابل اسکن: <b>{total_coins}</b>
-🔎 بررسی‌شده: <b>{analyzed}</b>
-🎯 کاندیداها: <b>{candidates}</b>
-📨 سیگنال‌های جدید: <b>{sent}</b>
+    for result in results:
 
-₿ <b>BTC 4H:</b> {btc_context["4h"]}
-📅 <b>BTC Daily:</b> {btc_context["1d"]}
-📌 <b>BTC وضعیت ترکیبی:</b> {btc_context["combined"]}
+        status = result.get(
+            "status",
+            "UNKNOWN"
+        )
 
-⚙️ حداقل امتیاز: <b>{CFG.min_score}</b>
-🔥 امتیاز STRONG: <b>{CFG.strong_score}</b>
+        if status != "SIGNAL":
+            counter[status] += 1
 
-🛡 ریسک هر سیگنال: <b>{CFG.risk_percent}%</b>
-🎯 حداقل RR: <b>{CFG.tp1_rr}:1</b>
+    lines = []
 
-ℹ️ اسکن بعدی طبق زمان‌بندی GitHub Actions انجام می‌شود.
-""".strip()
-
-
-# =========================================================
-# DEDUPLICATION
-# =========================================================
-
-def cleanup_state(state):
-
-    now = time.time()
-
-    max_age = (
-        CFG.dedup_hours
-        * 3600
+    lines.append(
+        "📊 <b>گزارش اسکن ارزها</b>"
     )
 
-    cleaned = {}
+    lines.append(
+        "━━━━━━━━━━━━━━━━"
+    )
 
-    for key, timestamp in state.items():
+    lines.append(
+        f"🪙 تعداد ارزها: <b>{total_coins}</b>"
+    )
 
-        try:
+    lines.append(
+        f"🔎 تحلیل‌شده: <b>{analyzed}</b>"
+    )
 
-            timestamp = float(timestamp)
+    lines.append(
+        f"🎯 کاندیدا: <b>{signals}</b>"
+    )
 
-            if (
-                now - timestamp
-                < max_age
-            ):
-                cleaned[key] = timestamp
+    lines.append(
+        f"🆕 سیگنال جدید: <b>{new_signals}</b>"
+    )
 
-        except Exception:
-            continue
+    lines.append("")
 
-    return cleaned
+    lines.append(
+        "₿ <b>روند بیت‌کوین</b>"
+    )
+
+    lines.append(
+        f"4H: <b>{btc_context.get('4h', 'UNKNOWN')}</b>"
+    )
+
+    lines.append(
+        f"Daily: <b>{btc_context.get('1d', 'UNKNOWN')}</b>"
+    )
+
+    lines.append(
+        f"Combined: <b>{btc_context.get('combined', 'UNKNOWN')}</b>"
+    )
+
+    lines.append("")
+
+    lines.append(
+        "❌ <b>دلایل رد شدن</b>"
+    )
+
+    if counter:
+
+        # بیشترین دلایل در ابتدا
+        sorted_reasons = sorted(
+            counter.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )
+
+        for status, count in sorted_reasons:
+
+            reason_name = REASON_NAMES.get(
+                status,
+                status
+            )
+
+            lines.append(
+                f"• {reason_name}: <b>{count}</b>"
+            )
+
+    else:
+
+        lines.append(
+            "• موردی برای رد شدن وجود ندارد"
+        )
+
+    lines.append("")
+
+    lines.append(
+        "⏱ <b>Timeframe: 4H</b>"
+    )
+
+    lines.append(
+        "📡 <b>Data: Binance</b>"
+    )
+
+    lines.append(
+        "🔎 <b>Coins: Nobitex-listed</b>"
+    )
+
+    return "\n".join(lines)
 
 
-def signal_key(signal):
+# =========================================================
+# SIGNAL DEDUPLICATION
+# =========================================================
 
-    symbol = signal["symbol"]
-    direction = signal["direction"]
+def get_signal_key(result):
 
-    # Current closed 4H candle
-    candle_time = int(
+    symbol = result.get(
+        "symbol",
+        ""
+    )
+
+    direction = result.get(
+        "direction",
+        ""
+    )
+
+    # زمان فعلی بر اساس بازه 4 ساعته
+    bucket = int(
         time.time()
         // (4 * 3600)
     )
@@ -1736,8 +1917,79 @@ def signal_key(signal):
     return (
         f"{symbol}_"
         f"{direction}_"
-        f"{candle_time}"
+        f"{bucket}"
     )
+
+
+def is_duplicate_signal(
+    result,
+    state
+):
+
+    key = get_signal_key(
+        result
+    )
+
+    old_time = safe_float(
+        state.get(key, 0)
+    )
+
+    if old_time <= 0:
+        return False
+
+    age_hours = (
+        time.time()
+        - old_time
+    ) / 3600
+
+    return (
+        age_hours
+        < CFG.dedup_hours
+    )
+
+
+def mark_signal_sent(
+    result,
+    state
+):
+
+    key = get_signal_key(
+        result
+    )
+
+    state[key] = time.time()
+
+
+# =========================================================
+# CLEAN OLD STATE
+# =========================================================
+
+def clean_old_state(state):
+
+    now = time.time()
+
+    max_age = (
+        CFG.dedup_hours
+        * 3600
+        * 3
+    )
+
+    cleaned = {}
+
+    for key, value in state.items():
+
+        old_time = safe_float(
+            value
+        )
+
+        if (
+            old_time > 0
+            and now - old_time < max_age
+        ):
+
+            cleaned[key] = value
+
+    return cleaned
 
 
 # =========================================================
@@ -1745,10 +1997,6 @@ def signal_key(signal):
 # =========================================================
 
 def main():
-
-    logger.info(
-        "======================================"
-    )
 
     logger.info(
         "Starting Crypto Signal Bot"
@@ -1759,57 +2007,71 @@ def main():
         CFG.timeframe
     )
 
-    logger.info(
-        "======================================"
-    )
+    # -----------------------------------------------------
+    # Telegram check
+    # -----------------------------------------------------
 
-    # ---------------------------------------------
+    if not CFG.telegram_token:
+
+        logger.error(
+            "TELEGRAM_TOKEN is missing"
+        )
+
+        return
+
+    if not CFG.telegram_chat_id:
+
+        logger.error(
+            "TELEGRAM_CHAT_ID is missing"
+        )
+
+        return
+
+    # -----------------------------------------------------
     # Load state
-    # ---------------------------------------------
+    # -----------------------------------------------------
 
     state = load_state()
 
-    state = cleanup_state(
+    state = clean_old_state(
         state
     )
 
-    # ---------------------------------------------
+    # -----------------------------------------------------
     # Get coins
-    # ---------------------------------------------
+    # -----------------------------------------------------
 
     coins = get_scan_coins()
 
     if not coins:
 
         logger.error(
-            "No coins available for scanning."
+            "No coins available for scanning"
         )
 
-        if CFG.send_no_signal_report:
-
-            send_telegram(
-                "⚠️ <b>Crypto Signal Bot</b>\n\n"
-                "لیست ارزهای قابل اسکن دریافت نشد."
-            )
+        send_telegram(
+            "⚠️ <b>Crypto Bot Error</b>\n\n"
+            "لیست ارزهای قابل اسکن دریافت نشد."
+        )
 
         return
 
-    # ---------------------------------------------
+    # -----------------------------------------------------
     # BTC context
-    # ---------------------------------------------
+    # -----------------------------------------------------
 
     btc_context = get_btc_context()
-
-    # ---------------------------------------------
-    # Analyze coins
-    # ---------------------------------------------
-
-    results = []
 
     logger.info(
         "Starting analysis of %s coins...",
         len(coins)
     )
+
+    # -----------------------------------------------------
+    # Analyze coins in parallel
+    # -----------------------------------------------------
+
+    results = []
 
     with ThreadPoolExecutor(
         max_workers=CFG.max_workers
@@ -1818,9 +2080,10 @@ def main():
         futures = {
             executor.submit(
                 analyze_coin,
-                coin + "USDT",
+                coin,
                 btc_context
             ): coin
+
             for coin in coins
         }
 
@@ -1828,111 +2091,129 @@ def main():
             futures
         ):
 
-            coin = futures[future]
+            coin = futures[
+                future
+            ]
 
             try:
 
                 result = future.result()
 
-                if result is not None:
-                    results.append(result)
+                if result:
+
+                    results.append(
+                        result
+                    )
 
             except Exception as e:
 
-                logger.warning(
-                    "Worker failed for %s: %s",
+                logger.error(
+                    "Future error for %s: %s",
                     coin,
                     e
                 )
 
-    # ---------------------------------------------
-    # Sort by score
-    # ---------------------------------------------
+                results.append({
+                    "symbol": coin,
+                    "status": "ERROR",
+                    "reason": str(e)
+                })
 
-    results.sort(
-        key=lambda x: (
-            x["score"],
-            x["volume_ratio"]
+    # -----------------------------------------------------
+    # Signal candidates
+    # -----------------------------------------------------
+
+    candidates = [
+        result
+        for result in results
+        if result.get(
+            "status"
+        ) == "SIGNAL"
+    ]
+
+    # مرتب‌سازی بر اساس Score
+    candidates.sort(
+        key=lambda x: x.get(
+            "score",
+            0
         ),
         reverse=True
     )
 
     logger.info(
         "Analysis finished. Candidates: %s",
-        len(results)
+        len(candidates)
     )
 
-    # ---------------------------------------------
+    # -----------------------------------------------------
     # Send new signals
-    # ---------------------------------------------
+    # -----------------------------------------------------
 
-    sent_count = 0
+    new_signals = 0
 
-    for signal in results:
+    for result in candidates:
 
-        if (
-            sent_count
-            >= CFG.max_signals_per_run
-        ):
+        if new_signals >= CFG.max_signals_per_run:
             break
 
-        key = signal_key(
-            signal
-        )
+        if is_duplicate_signal(
+            result,
+            state
+        ):
 
-        if key in state:
+            logger.info(
+                "Duplicate signal skipped: %s %s",
+                result.get("symbol"),
+                result.get("direction")
+            )
+
             continue
 
         message = format_signal(
-            signal
+            result
         )
 
         if send_telegram(
             message
         ):
 
-            state[key] = time.time()
-
-            sent_count += 1
-
-            logger.info(
-                "Signal sent: %s %s score=%s",
-                signal["symbol"],
-                signal["direction"],
-                signal["score"]
+            mark_signal_sent(
+                result,
+                state
             )
 
-    # ---------------------------------------------
+            new_signals += 1
+
+    # -----------------------------------------------------
     # Save state
-    # ---------------------------------------------
+    # -----------------------------------------------------
 
-    save_state(state)
+    save_state(
+        state
+    )
 
-    # ---------------------------------------------
-    # Summary report
-    # ---------------------------------------------
+    # -----------------------------------------------------
+    # Scan report
+    # -----------------------------------------------------
 
     if CFG.send_no_signal_report:
 
         report = format_scan_report(
             total_coins=len(coins),
-            analyzed=len(coins),
-            candidates=len(results),
-            sent=sent_count,
-            btc_context=btc_context
+            analyzed=len(results),
+            signals=len(candidates),
+            new_signals=new_signals,
+            btc_context=btc_context,
+            results=results
         )
 
         send_telegram(
             report
         )
 
-    # ---------------------------------------------
+    # -----------------------------------------------------
     # Final logs
-    # ---------------------------------------------
-
-    logger.info(
-        "======================================"
-    )
+    # -----------------------------------------------------
 
     logger.info(
         "Coins: %s",
@@ -1941,25 +2222,21 @@ def main():
 
     logger.info(
         "Analyzed: %s",
-        len(coins)
-    )
-
-    logger.info(
-        "Candidates: %s",
         len(results)
     )
 
     logger.info(
+        "Candidates: %s",
+        len(candidates)
+    )
+
+    logger.info(
         "New signals sent: %s",
-        sent_count
+        new_signals
     )
 
     logger.info(
         "Bot finished successfully"
-    )
-
-    logger.info(
-        "======================================"
     )
 
 
@@ -1968,4 +2245,5 @@ def main():
 # =========================================================
 
 if __name__ == "__main__":
+
     main()
