@@ -1,144 +1,146 @@
-# ============================================================
-# CRYPTO SIGNAL BOT
-# Nobitex-listed USDT coins
+# ==============================
+# Crypto Signal Bot
+# Nobitex-listed coins
 # Market data: Binance
-# Timeframe: 4H
-# ============================================================
+# Main timeframe: 4H
+# ==============================
 
 import os
 import json
 import time
-import math
 import logging
-import tempfile
-
-from datetime import datetime, timezone, timedelta
-from concurrent.futures import ThreadPoolExecutor, as_completed
-
 import requests
 import pandas as pd
 import numpy as np
 
+from datetime import datetime, timezone, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# ============================================================
-# 1. CONFIG
-# ============================================================
+
+# =========================================================
+# CONFIG
+# =========================================================
 
 class Config:
 
-    telegram_token = os.getenv(
-        "TELEGRAM_TOKEN",
-        ""
-    ).strip()
+    telegram_token = os.getenv("TELEGRAM_TOKEN", "").strip()
+    telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
-    telegram_chat_id = os.getenv(
-        "TELEGRAM_CHAT_ID",
-        ""
-    ).strip()
-
-    # Binance
-    # از این دامنه استفاده می‌کنیم تا مشکل 451
-    # api.binance.com در GitHub Actions نداشته باشیم.
     binance_base = "https://data-api.binance.vision"
 
-    # Nobitex
     nobitex_urls = [
         "https://apiv2.nobitex.ir/market/stats",
-        "https://api.nobitex.ir/market/stats"
+        "https://api.nobitex.ir/market/stats",
     ]
 
-    # Timeframe
+    # Main analysis timeframe
     timeframe = "4h"
+
+    # Binance candles
     kline_limit = 300
 
-    # Signal
-    min_score = 65
-    strong_score = 78
+    # Signal filters
+    min_score = 75
+    strong_score = 84
 
     # Volume
-    min_volume_ratio = 1.10
+    min_volume_ratio = 0.80
+    strong_volume_ratio = 1.10
+
+    # Minimum 24h USDT volume
     min_24h_usdt_volume = 5_000_000
 
-    # Indicators
+    # RSI
     rsi_period = 14
 
+    # MACD
     macd_fast = 12
     macd_slow = 26
     macd_signal = 9
 
+    # ATR
     atr_period = 14
 
-    # Risk
+    # Risk management
     account_size_usdt = 1000.0
     risk_percent = 1.0
     max_position_usdt = 1000.0
 
-    # Stop Loss / Take Profit
-    sl_atr_multiplier = 1.30
-    tp1_rr = 1.50
-    tp2_rr = 2.80
-    max_sl_percent = 8.0
+    # Stop / Take Profit
+    sl_atr_multiplier = 1.40
+    tp1_rr = 1.80
+    tp2_rr = 3.00
+
+    # Maximum allowed stop loss
+    max_sl_percent = 6.0
+
+    # Maximum distance from EMA21
+    max_distance_from_ema21 = 4.0
+
+    # Maximum signals per run
+    max_signals_per_run = 3
 
     # State
     state_file = "signals_state.json"
     dedup_hours = 8
 
-    # Scanner
+    # Threads
     max_workers = 10
-    max_signals_per_run = 6
 
-    # Telegram
+    # Send report even when there are no signals
     send_no_signal_report = True
 
     # Iran timezone
     iran_timezone = timezone(
-        timedelta(
-            hours=3,
-            minutes=30
-        )
+        timedelta(hours=3, minutes=30)
     )
 
 
 CFG = Config()
 
 
-# ============================================================
-# 2. LOGGING
-# ============================================================
+# =========================================================
+# LOGGING
+# =========================================================
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s"
 )
 
-log = logging.getLogger(
-    "crypto-signal-bot"
-)
+logger = logging.getLogger("crypto_bot")
 
 
-# ============================================================
-# 3. HTTP SESSION
-# ============================================================
+# =========================================================
+# HTTP SESSION
+# =========================================================
 
 SESSION = requests.Session()
 
 SESSION.headers.update({
-    "User-Agent": "Mozilla/5.0 CryptoSignalBot/3.0"
+    "User-Agent": "Mozilla/5.0 CryptoSignalBot/1.0"
 })
 
 
-def http_get(
-    url,
-    params=None,
-    timeout=20,
-    retries=3
-):
+# =========================================================
+# HELPERS
+# =========================================================
 
-    last_error = None
+def safe_float(value, default=0.0):
 
-    for attempt in range(
-        retries
-    ):
+    try:
+        if value is None:
+            return default
+
+        return float(value)
+
+    except Exception:
+        return default
+
+
+def http_get(url, params=None, timeout=20):
+
+    for attempt in range(3):
 
         try:
 
@@ -150,18 +152,14 @@ def http_get(
 
             if response.status_code == 429:
 
-                wait_seconds = (
-                    3 + attempt * 3
+                wait_time = 2 + attempt * 2
+
+                logger.warning(
+                    "HTTP 429. Waiting %s seconds...",
+                    wait_time
                 )
 
-                log.warning(
-                    f"Rate limit: {url} | "
-                    f"waiting {wait_seconds}s"
-                )
-
-                time.sleep(
-                    wait_seconds
-                )
+                time.sleep(wait_time)
 
                 continue
 
@@ -169,48 +167,32 @@ def http_get(
 
             return response.json()
 
-        except Exception as exc:
+        except Exception as e:
 
-            last_error = exc
+            logger.warning(
+                "HTTP error attempt %s/3: %s",
+                attempt + 1,
+                e
+            )
 
-            if attempt < retries - 1:
-
-                time.sleep(
-                    1.5 * (attempt + 1)
-                )
-
-            else:
-
-                log.error(
-                    f"GET failed: {url} | "
-                    f"{last_error}"
-                )
+            if attempt < 2:
+                time.sleep(2)
 
     return None
 
 
-# ============================================================
-# 4. TELEGRAM
-# ============================================================
+# =========================================================
+# TELEGRAM
+# =========================================================
 
-def send_telegram(
-    message
-):
+def send_telegram(message):
 
     if not CFG.telegram_token:
-
-        log.error(
-            "TELEGRAM_TOKEN is missing"
-        )
-
+        logger.error("TELEGRAM_TOKEN is missing")
         return False
 
     if not CFG.telegram_chat_id:
-
-        log.error(
-            "TELEGRAM_CHAT_ID is missing"
-        )
-
+        logger.error("TELEGRAM_CHAT_ID is missing")
         return False
 
     url = (
@@ -226,87 +208,44 @@ def send_telegram(
         "disable_web_page_preview": True
     }
 
-    for attempt in range(3):
-
-        try:
-
-            response = SESSION.post(
-                url,
-                json=payload,
-                timeout=15
-            )
-
-            if response.status_code == 429:
-
-                wait_seconds = (
-                    5 + attempt * 5
-                )
-
-                log.warning(
-                    "Telegram rate limit"
-                )
-
-                time.sleep(
-                    wait_seconds
-                )
-
-                continue
-
-            response.raise_for_status()
-
-            result = response.json()
-
-            if result.get("ok"):
-
-                return True
-
-            log.error(
-                f"Telegram error: {result}"
-            )
-
-        except Exception as exc:
-
-            log.error(
-                f"Telegram send error: {exc}"
-            )
-
-            time.sleep(2)
-
-    return False
-
-
-# ============================================================
-# 5. SAFE FLOAT
-# ============================================================
-
-def safe_float(
-    value,
-    default=0.0
-):
-
     try:
 
-        number = float(value)
+        response = SESSION.post(
+            url,
+            json=payload,
+            timeout=20
+        )
 
-        if not math.isfinite(
-            number
-        ):
+        response.raise_for_status()
 
-            return default
+        data = response.json()
 
-        return number
+        if data.get("ok"):
 
-    except Exception:
+            logger.info("Telegram message sent")
+            return True
 
-        return default# ============================================================
-# 6. STATE MANAGEMENT
-# ============================================================
+        logger.error(
+            "Telegram error: %s",
+            data
+        )
+
+        return False
+
+    except Exception as e:
+
+        logger.error(
+            "Telegram send failed: %s",
+            e
+        )
+
+        return False# =========================================================
+# STATE MANAGEMENT
+# =========================================================
 
 def load_state():
 
-    if not os.path.exists(
-        CFG.state_file
-    ):
+    if not os.path.exists(CFG.state_file):
         return {}
 
     try:
@@ -315,290 +254,140 @@ def load_state():
             CFG.state_file,
             "r",
             encoding="utf-8"
-        ) as file:
+        ) as f:
 
-            data = json.load(file)
+            data = json.load(f)
 
-        if isinstance(
-            data,
-            dict
-        ):
+        if isinstance(data, dict):
             return data
 
-    except Exception as exc:
+        return {}
 
-        log.warning(
-            f"Could not load state: {exc}"
+    except Exception as e:
+
+        logger.warning(
+            "Could not load state: %s",
+            e
         )
 
-    return {}
+        return {}
 
 
-def save_state(
-    state
-):
-
-    temp_path = None
+def save_state(state):
 
     try:
 
-        directory = os.path.dirname(
-            os.path.abspath(
-                CFG.state_file
-            )
-        )
-
-        file_descriptor, temp_path = (
-            tempfile.mkstemp(
-                dir=directory,
-                prefix="signals_state_",
-                suffix=".tmp"
-            )
-        )
-
-        with os.fdopen(
-            file_descriptor,
+        with open(
+            CFG.state_file,
             "w",
             encoding="utf-8"
-        ) as file:
+        ) as f:
 
             json.dump(
                 state,
-                file,
+                f,
                 ensure_ascii=False,
                 indent=2
             )
 
-        os.replace(
-            temp_path,
-            CFG.state_file
-        )
-
         return True
 
-    except Exception as exc:
+    except Exception as e:
 
-        log.error(
-            f"Could not save state: {exc}"
+        logger.error(
+            "Could not save state: %s",
+            e
         )
-
-        if temp_path:
-
-            try:
-                os.remove(
-                    temp_path
-                )
-            except Exception:
-                pass
 
         return False
 
 
-def cleanup_state(
-    state
-):
-
-    current_time = time.time()
-
-    max_age = (
-        CFG.dedup_hours * 3600
-    )
-
-    cleaned = {}
-
-    for key, value in state.items():
-
-        try:
-
-            timestamp = float(
-                value.get(
-                    "timestamp",
-                    0
-                )
-            )
-
-            if (
-                current_time - timestamp
-                < max_age
-            ):
-
-                cleaned[key] = value
-
-        except Exception:
-
-            continue
-
-    return cleaned
-
-
-def make_signal_key(
-    symbol,
-    direction,
-    candle_time
-):
-
-    return (
-        f"{symbol}_"
-        f"{direction}_"
-        f"{candle_time}"
-    )
-
-
-def signal_already_sent(
-    state,
-    symbol,
-    direction,
-    candle_time
-):
-
-    key = make_signal_key(
-        symbol,
-        direction,
-        candle_time
-    )
-
-    return key in state
-
-
-def mark_signal_sent(
-    state,
-    symbol,
-    direction,
-    candle_time
-):
-
-    key = make_signal_key(
-        symbol,
-        direction,
-        candle_time
-    )
-
-    state[key] = {
-        "timestamp": time.time(),
-        "symbol": symbol,
-        "direction": direction,
-        "candle_time": candle_time
-    }
-
-
-# ============================================================
-# 7. NOBITEX MARKET LIST
-# ============================================================
+# =========================================================
+# NOBITEX COINS
+# =========================================================
 
 def get_nobitex_coins():
 
-    data = None
-
     for url in CFG.nobitex_urls:
 
-        log.info(
-            f"Trying Nobitex API: {url}"
+        logger.info(
+            "Trying Nobitex API: %s",
+            url
         )
 
-        result = http_get(
-            url,
-            timeout=20,
-            retries=2
-        )
+        data = http_get(url)
 
-        if not isinstance(
-            result,
-            dict
-        ):
+        if not data:
             continue
-
-        if result.get(
-            "status"
-        ) == "ok":
-
-            data = result
-
-            log.info(
-                f"Nobitex API connected: "
-                f"{url}"
-            )
-
-            break
-
-    if data is None:
-
-        log.error(
-            "All Nobitex API endpoints failed"
-        )
-
-        return set()
-
-    stats = data.get(
-        "stats",
-        {}
-    )
-
-    if not isinstance(
-        stats,
-        dict
-    ):
-
-        log.error(
-            "Nobitex stats is invalid"
-        )
-
-        return set()
-
-    coins = set()
-
-    for market, info in stats.items():
 
         try:
 
-            if not isinstance(
-                market,
-                str
-            ):
+            stats = data.get("stats", {})
+
+            if not isinstance(stats, dict):
                 continue
 
-            market = market.lower()
+            coins = set()
 
-            if not market.endswith(
-                "-usdt"
-            ):
-                continue
+            for market, info in stats.items():
 
-            if not isinstance(
-                info,
-                dict
-            ):
-                continue
+                market_lower = str(
+                    market
+                ).lower()
 
-            if info.get(
-                "isClosed"
-            ) is True:
-                continue
+                if not market_lower.endswith("-usdt"):
+                    continue
 
-            coin = market.split(
-                "-"
-            )[0].upper()
+                if not isinstance(info, dict):
+                    continue
 
-            if coin:
-
-                coins.add(
-                    coin
+                is_closed = info.get(
+                    "isClosed",
+                    False
                 )
 
-        except Exception:
+                if is_closed:
+                    continue
 
-            continue
+                base = market_lower.replace(
+                    "-usdt",
+                    ""
+                ).upper()
 
-    log.info(
-        f"Nobitex active USDT markets: "
-        f"{len(coins)}"
+                if base:
+                    coins.add(base)
+
+            if coins:
+
+                logger.info(
+                    "Nobitex API connected: %s",
+                    url
+                )
+
+                logger.info(
+                    "Nobitex active USDT markets: %s",
+                    len(coins)
+                )
+
+                return coins
+
+        except Exception as e:
+
+            logger.warning(
+                "Nobitex parsing error: %s",
+                e
+            )
+
+    logger.error(
+        "Could not get Nobitex coin list"
     )
 
-    return coins
+    return set()
 
 
-# ============================================================
-# 8. BINANCE EXCHANGE INFO
-# ============================================================
+# =========================================================
+# BINANCE SYMBOLS
+# =========================================================
 
 def get_binance_symbols():
 
@@ -607,72 +396,53 @@ def get_binance_symbols():
         + "/api/v3/exchangeInfo"
     )
 
-    data = http_get(
-        url,
-        timeout=20,
-        retries=3
-    )
+    data = http_get(url)
 
-    if not isinstance(
-        data,
-        dict
-    ):
-
-        log.error(
-            "Binance exchangeInfo unavailable"
-        )
-
+    if not data:
         return set()
 
     symbols = set()
 
-    for item in data.get(
-        "symbols",
-        []
-    ):
+    try:
 
-        try:
+        for item in data.get(
+            "symbols",
+            []
+        ):
 
-            symbol = item.get(
-                "symbol"
-            )
-
-            status = item.get(
-                "status"
-            )
-
-            quote_asset = item.get(
-                "quoteAsset"
-            )
-
-            if not symbol:
+            if item.get("status") != "TRADING":
                 continue
 
-            if status != "TRADING":
+            if item.get("quoteAsset") != "USDT":
                 continue
 
-            if quote_asset != "USDT":
-                continue
-
-            symbols.add(
-                symbol.upper()
+            base = item.get(
+                "baseAsset"
             )
 
-        except Exception:
+            if base:
+                symbols.add(
+                    str(base).upper()
+                )
 
-            continue
+    except Exception as e:
 
-    log.info(
-        f"Binance active USDT symbols: "
-        f"{len(symbols)}"
+        logger.error(
+            "Binance symbol parsing error: %s",
+            e
+        )
+
+    logger.info(
+        "Binance active USDT symbols: %s",
+        len(symbols)
     )
 
     return symbols
 
 
-# ============================================================
-# 9. BINANCE 24H VOLUME
-# ============================================================
+# =========================================================
+# BINANCE 24H VOLUME
+# =========================================================
 
 def get_binance_volumes():
 
@@ -681,197 +451,147 @@ def get_binance_volumes():
         + "/api/v3/ticker/24hr"
     )
 
-    data = http_get(
-        url,
-        timeout=20,
-        retries=3
-    )
+    data = http_get(url)
 
-    if not isinstance(
-        data,
-        list
-    ):
-
-        log.error(
-            "Binance 24h ticker unavailable"
-        )
-
+    if not data:
         return {}
 
     volumes = {}
 
-    for item in data:
+    try:
 
-        try:
+        for item in data:
 
-            symbol = item.get(
-                "symbol"
-            )
+            symbol = str(
+                item.get("symbol", "")
+            ).upper()
 
-            if not symbol:
+            if not symbol.endswith("USDT"):
                 continue
 
-            symbol = symbol.upper()
-
-            if not symbol.endswith(
-                "USDT"
-            ):
-                continue
-
-            volume = safe_float(
-                item.get(
-                    "quoteVolume",
-                    0
-                )
+            quote_volume = safe_float(
+                item.get("quoteVolume")
             )
 
-            volumes[symbol] = volume
+            base = symbol[:-4]
 
-        except Exception:
+            volumes[base] = quote_volume
 
-            continue
+    except Exception as e:
+
+        logger.error(
+            "Binance volume parsing error: %s",
+            e
+        )
 
     return volumes
 
 
-# ============================================================
-# 10. FINAL SCAN LIST
-# ============================================================
+# =========================================================
+# FINAL SCAN LIST
+# =========================================================
 
 def get_scan_coins():
 
-    nobitex_coins = (
-        get_nobitex_coins()
-    )
+    nobitex_coins = get_nobitex_coins()
 
     if not nobitex_coins:
-
         return []
 
-    binance_symbols = (
-        get_binance_symbols()
-    )
+    binance_coins = get_binance_symbols()
 
-    if not binance_symbols:
-
+    if not binance_coins:
         return []
 
-    volumes = (
-        get_binance_volumes()
-    )
+    volumes = get_binance_volumes()
 
-    if not volumes:
-
-        return []
-
-    result = []
-
-    for coin in sorted(
+    common = (
         nobitex_coins
-    ):
+        & binance_coins
+    )
 
-        symbol = (
-            coin + "USDT"
+    logger.info(
+        "Nobitex + Binance markets: %s",
+        len(common)
+    )
+
+    final_coins = []
+
+    for coin in common:
+
+        volume = safe_float(
+            volumes.get(coin, 0)
         )
 
-        if symbol not in binance_symbols:
-
+        if volume < CFG.min_24h_usdt_volume:
             continue
 
-        volume = volumes.get(
-            symbol,
-            0.0
-        )
+        final_coins.append(coin)
 
-        if (
-            volume
-            < CFG.min_24h_usdt_volume
-        ):
-
-            continue
-
-        result.append({
-            "coin": coin,
-            "symbol": symbol,
-            "volume_24h": volume
-        })
-
-    result.sort(
-        key=lambda item:
-        item["volume_24h"],
+    final_coins.sort(
+        key=lambda x: volumes.get(x, 0),
         reverse=True
     )
 
-    log.info(
-        f"Nobitex + Binance markets: "
-        f"{len(result)}"
+    logger.info(
+        "Final scan list after liquidity filter: %s",
+        len(final_coins)
     )
 
-    if result:
+    if final_coins:
 
-        preview = ", ".join(
-            item["coin"]
-            for item in result[:30]
+        logger.info(
+            "Scan preview: %s",
+            ", ".join(final_coins[:30])
         )
 
-        log.info(
-            f"Scan preview: {preview}"
-        )
+    return final_coins# =========================================================
+# BINANCE KLINES
+# =========================================================
 
-    else:
+def get_klines(symbol, interval=None, limit=None):
 
-        log.error(
-            "No common Nobitex/Binance "
-            "markets passed volume filter"
-        )
+    if interval is None:
+        interval = CFG.timeframe
 
-    return result# ============================================================
-# 11. BINANCE KLINES
-# ============================================================
-
-def get_klines(symbol):
+    if limit is None:
+        limit = CFG.kline_limit
 
     url = (
         CFG.binance_base
         + "/api/v3/klines"
     )
 
+    params = {
+        "symbol": symbol,
+        "interval": interval,
+        "limit": limit
+    }
+
     data = http_get(
         url,
-        params={
-            "symbol": symbol,
-            "interval": CFG.timeframe,
-            "limit": CFG.kline_limit
-        },
-        timeout=20,
-        retries=3
+        params=params
     )
 
-    if not isinstance(
-        data,
-        list
-    ):
+    if not data:
         return None
-
-    if len(data) < 100:
-        return None
-
-    columns = [
-        "open_time",
-        "open",
-        "high",
-        "low",
-        "close",
-        "volume",
-        "close_time",
-        "quote_volume",
-        "trades",
-        "taker_base",
-        "taker_quote",
-        "ignore"
-    ]
 
     try:
+
+        columns = [
+            "open_time",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "close_time",
+            "quote_volume",
+            "trades",
+            "taker_buy_base",
+            "taker_buy_quote",
+            "ignore"
+        ]
 
         df = pd.DataFrame(
             data,
@@ -887,10 +607,10 @@ def get_klines(symbol):
             "quote_volume"
         ]
 
-        for column in numeric_columns:
+        for col in numeric_columns:
 
-            df[column] = pd.to_numeric(
-                df[column],
+            df[col] = pd.to_numeric(
+                df[col],
                 errors="coerce"
             )
 
@@ -904,7 +624,7 @@ def get_klines(symbol):
             errors="coerce"
         )
 
-        # فقط کندل‌های بسته‌شده
+        # Remove current unfinished candle
         now_ms = int(
             time.time() * 1000
         )
@@ -913,17 +633,6 @@ def get_klines(symbol):
             df["close_time"] <= now_ms
         ].copy()
 
-        df.dropna(
-            subset=[
-                "open",
-                "high",
-                "low",
-                "close",
-                "volume"
-            ],
-            inplace=True
-        )
-
         if len(df) < 100:
             return None
 
@@ -931,19 +640,20 @@ def get_klines(symbol):
             drop=True
         )
 
-    except Exception as exc:
+    except Exception as e:
 
-        log.error(
-            f"Kline parsing error "
-            f"{symbol}: {exc}"
+        logger.warning(
+            "Kline parsing failed for %s: %s",
+            symbol,
+            e
         )
 
         return None
 
 
-# ============================================================
-# 12. RSI
-# ============================================================
+# =========================================================
+# RSI
+# =========================================================
 
 def calculate_rsi(
     series,
@@ -960,22 +670,19 @@ def calculate_rsi(
         upper=0
     )
 
-    average_gain = gain.ewm(
+    avg_gain = gain.ewm(
         alpha=1 / period,
         adjust=False
     ).mean()
 
-    average_loss = loss.ewm(
+    avg_loss = loss.ewm(
         alpha=1 / period,
         adjust=False
     ).mean()
 
-    rs = (
-        average_gain
-        / average_loss.replace(
-            0,
-            np.nan
-        )
+    rs = avg_gain / avg_loss.replace(
+        0,
+        np.nan
     )
 
     rsi = 100 - (
@@ -985,9 +692,9 @@ def calculate_rsi(
     return rsi.fillna(50)
 
 
-# ============================================================
-# 13. ATR
-# ============================================================
+# =========================================================
+# ATR
+# =========================================================
 
 def calculate_atr(
     df,
@@ -1011,79 +718,87 @@ def calculate_atr(
     ).abs()
 
     true_range = pd.concat(
-        [
-            tr1,
-            tr2,
-            tr3
-        ],
+        [tr1, tr2, tr3],
         axis=1
-    ).max(
-        axis=1
-    )
+    ).max(axis=1)
 
-    return true_range.ewm(
+    atr = true_range.ewm(
         alpha=1 / period,
         adjust=False
     ).mean()
 
+    return atr
 
-# ============================================================
-# 14. INDICATORS
-# ============================================================
+
+# =========================================================
+# INDICATORS
+# =========================================================
 
 def add_indicators(df):
 
     df = df.copy()
 
-    close = df["close"]
-
     # EMA
-    df["ema9"] = close.ewm(
-        span=9,
-        adjust=False
-    ).mean()
+    df["ema9"] = (
+        df["close"]
+        .ewm(span=9, adjust=False)
+        .mean()
+    )
 
-    df["ema21"] = close.ewm(
-        span=21,
-        adjust=False
-    ).mean()
+    df["ema21"] = (
+        df["close"]
+        .ewm(span=21, adjust=False)
+        .mean()
+    )
 
-    df["ema50"] = close.ewm(
-        span=50,
-        adjust=False
-    ).mean()
+    df["ema50"] = (
+        df["close"]
+        .ewm(span=50, adjust=False)
+        .mean()
+    )
 
-    df["ema200"] = close.ewm(
-        span=200,
-        adjust=False
-    ).mean()
+    df["ema200"] = (
+        df["close"]
+        .ewm(span=200, adjust=False)
+        .mean()
+    )
 
     # RSI
     df["rsi"] = calculate_rsi(
-        close,
+        df["close"],
         CFG.rsi_period
     )
 
     # MACD
-    fast_ema = close.ewm(
-        span=CFG.macd_fast,
-        adjust=False
-    ).mean()
+    ema_fast = (
+        df["close"]
+        .ewm(
+            span=CFG.macd_fast,
+            adjust=False
+        )
+        .mean()
+    )
 
-    slow_ema = close.ewm(
-        span=CFG.macd_slow,
-        adjust=False
-    ).mean()
+    ema_slow = (
+        df["close"]
+        .ewm(
+            span=CFG.macd_slow,
+            adjust=False
+        )
+        .mean()
+    )
 
     df["macd"] = (
-        fast_ema - slow_ema
+        ema_fast - ema_slow
     )
 
     df["macd_signal"] = (
-        df["macd"].ewm(
+        df["macd"]
+        .ewm(
             span=CFG.macd_signal,
             adjust=False
-        ).mean()
+        )
+        .mean()
     )
 
     df["macd_hist"] = (
@@ -1097,7 +812,7 @@ def add_indicators(df):
         CFG.atr_period
     )
 
-    # Volume
+    # Volume MA
     df["volume_ma20"] = (
         df["volume"]
         .rolling(20)
@@ -1109,771 +824,798 @@ def add_indicators(df):
         / df["volume_ma20"]
     )
 
+    # Candle body ratio
+    candle_range = (
+        df["high"]
+        - df["low"]
+    )
+
+    df["body_ratio"] = (
+        (df["close"] - df["open"]).abs()
+        / candle_range.replace(
+            0,
+            np.nan
+        )
+    )
+
     return df
 
 
-# ============================================================
-# 15. BTC CONTEXT
-# ============================================================
+# =========================================================
+# BTC TREND
+# =========================================================
+
+def get_btc_trend(interval):
+
+    df = get_klines(
+        "BTCUSDT",
+        interval,
+        300
+    )
+
+    if df is None:
+        return "UNKNOWN"
+
+    df = add_indicators(df)
+
+    last = df.iloc[-1]
+
+    close = safe_float(
+        last["close"]
+    )
+
+    ema50 = safe_float(
+        last["ema50"]
+    )
+
+    ema200 = safe_float(
+        last["ema200"]
+    )
+
+    if (
+        close > ema50
+        and ema50 > ema200
+    ):
+        return "BULLISH"
+
+    if (
+        close < ema50
+        and ema50 < ema200
+    ):
+        return "BEARISH"
+
+    return "NEUTRAL"
+
+
+# =========================================================
+# BTC MULTI-TIMEFRAME CONTEXT
+# =========================================================
 
 def get_btc_context():
 
-    df = get_klines(
-        "BTCUSDT"
+    btc_4h = get_btc_trend("4h")
+    btc_1d = get_btc_trend("1d")
+
+    logger.info(
+        "BTC trend 4H: %s",
+        btc_4h
     )
 
-    if df is None:
-
-        return {
-            "trend": "UNKNOWN",
-            "bullish": False,
-            "bearish": False
-        }
-
-    df = add_indicators(
-        df
+    logger.info(
+        "BTC trend Daily: %s",
+        btc_1d
     )
 
-    row = df.iloc[-1]
+    if (
+        btc_4h == "BULLISH"
+        and btc_1d != "BEARISH"
+    ):
+        combined = "BULLISH"
 
-    close = safe_float(
-        row["close"]
-    )
-
-    ema50 = safe_float(
-        row["ema50"]
-    )
-
-    ema200 = safe_float(
-        row["ema200"]
-    )
-
-    bullish = (
-        close > ema50
-        and ema50 > ema200
-    )
-
-    bearish = (
-        close < ema50
-        and ema50 < ema200
-    )
-
-    if bullish:
-
-        trend = "BULLISH"
-
-    elif bearish:
-
-        trend = "BEARISH"
+    elif (
+        btc_4h == "BEARISH"
+        and btc_1d != "BULLISH"
+    ):
+        combined = "BEARISH"
 
     else:
-
-        trend = "NEUTRAL"
+        combined = "NEUTRAL"
 
     return {
-        "trend": trend,
-        "bullish": bullish,
-        "bearish": bearish
+        "4h": btc_4h,
+        "1d": btc_1d,
+        "combined": combined
     }
 
 
-# ============================================================
-# 16. RSI DIVERGENCE
-# ============================================================
+# =========================================================
+# RSI DIVERGENCE
+# =========================================================
 
 def detect_rsi_divergence(df):
 
-    if len(df) < 30:
-
+    if len(df) < 60:
         return "NONE"
 
-    prices = df["close"].values
-    rsi = df["rsi"].values
+    recent = df.tail(60).copy()
 
-    lookback = min(
-        40,
-        len(df) - 5
-    )
+    half = len(recent) // 2
 
-    recent_prices = (
-        prices[-lookback:]
-    )
+    first = recent.iloc[:half]
+    second = recent.iloc[half:]
 
-    recent_rsi = (
-        rsi[-lookback:]
-    )
+    price_low_1 = first["low"].min()
+    price_low_2 = second["low"].min()
 
-    half = lookback // 2
+    rsi_low_1 = first["rsi"].min()
+    rsi_low_2 = second["rsi"].min()
 
-    # --------------------------------------------------------
-    # Bullish divergence
-    # --------------------------------------------------------
+    price_high_1 = first["high"].max()
+    price_high_2 = second["high"].max()
 
-    first_low_index = np.argmin(
-        recent_prices[:half]
-    )
+    rsi_high_1 = first["rsi"].max()
+    rsi_high_2 = second["rsi"].max()
 
-    second_low_index = np.argmin(
-        recent_prices[half:]
-    )
-
-    first_price = recent_prices[
-        first_low_index
-    ]
-
-    second_price = recent_prices[
-        half + second_low_index
-    ]
-
-    first_rsi = recent_rsi[
-        first_low_index
-    ]
-
-    second_rsi = recent_rsi[
-        half + second_low_index
-    ]
-
+    # Bullish divergence:
+    # price makes lower low,
+    # RSI makes higher low.
     if (
-        second_price < first_price
-        and second_rsi > first_rsi
+        price_low_2 < price_low_1
+        and rsi_low_2 > rsi_low_1
     ):
-
         return "BULLISH"
 
-    # --------------------------------------------------------
-    # Bearish divergence
-    # --------------------------------------------------------
-
-    first_high_index = np.argmax(
-        recent_prices[:half]
-    )
-
-    second_high_index = np.argmax(
-        recent_prices[half:]
-    )
-
-    first_high = recent_prices[
-        first_high_index
-    ]
-
-    second_high = recent_prices[
-        half + second_high_index
-    ]
-
-    first_high_rsi = recent_rsi[
-        first_high_index
-    ]
-
-    second_high_rsi = recent_rsi[
-        half + second_high_index
-    ]
-
+    # Bearish divergence:
+    # price makes higher high,
+    # RSI makes lower high.
     if (
-        second_high > first_high
-        and second_high_rsi < first_high_rsi
+        price_high_2 > price_high_1
+        and rsi_high_2 < rsi_high_1
     ):
-
         return "BEARISH"
 
-    return "NONE"# ============================================================
-# 17. ANALYZE COIN
-# ============================================================
+    return "NONE"# =========================================================
+# COIN ANALYSIS
+# =========================================================
 
-def analyze_coin(
-    item,
-    btc_context
-):
+def analyze_coin(symbol, btc_context):
 
-    symbol = item["symbol"]
-    coin = item["coin"]
+    try:
 
-    df = get_klines(
-        symbol
-    )
+        # ---------------------------------------------
+        # Get 4H candles
+        # ---------------------------------------------
 
-    if df is None:
-        return None
+        df = get_klines(
+            symbol,
+            CFG.timeframe,
+            CFG.kline_limit
+        )
 
-    df = add_indicators(
-        df
-    )
+        if df is None:
+            return None
 
-    if len(df) < 100:
-        return None
+        df = add_indicators(df)
 
-    row = df.iloc[-1]
-    previous = df.iloc[-2]
+        if len(df) < 220:
+            return None
 
-    close = safe_float(
-        row["close"]
-    )
+        last = df.iloc[-1]
+        previous = df.iloc[-2]
 
-    ema9 = safe_float(
-        row["ema9"]
-    )
+        # ---------------------------------------------
+        # Current values
+        # ---------------------------------------------
 
-    ema21 = safe_float(
-        row["ema21"]
-    )
+        close = safe_float(last["close"])
+        open_price = safe_float(last["open"])
+        high = safe_float(last["high"])
+        low = safe_float(last["low"])
 
-    ema50 = safe_float(
-        row["ema50"]
-    )
+        ema9 = safe_float(last["ema9"])
+        ema21 = safe_float(last["ema21"])
+        ema50 = safe_float(last["ema50"])
+        ema200 = safe_float(last["ema200"])
 
-    ema200 = safe_float(
-        row["ema200"]
-    )
+        rsi = safe_float(last["rsi"])
 
-    rsi = safe_float(
-        row["rsi"]
-    )
+        macd = safe_float(last["macd"])
+        macd_signal = safe_float(
+            last["macd_signal"]
+        )
+        macd_hist = safe_float(
+            last["macd_hist"]
+        )
 
-    macd = safe_float(
-        row["macd"]
-    )
+        previous_macd = safe_float(
+            previous["macd"]
+        )
+        previous_signal = safe_float(
+            previous["macd_signal"]
+        )
 
-    macd_signal = safe_float(
-        row["macd_signal"]
-    )
+        atr = safe_float(last["atr"])
 
-    macd_hist = safe_float(
-        row["macd_hist"]
-    )
+        volume_ratio = safe_float(
+            last["volume_ratio"]
+        )
 
-    previous_macd = safe_float(
-        previous["macd"]
-    )
+        body_ratio = safe_float(
+            last["body_ratio"]
+        )
 
-    previous_macd_signal = safe_float(
-        previous["macd_signal"]
-    )
+        # ---------------------------------------------
+        # Basic validation
+        # ---------------------------------------------
 
-    atr = safe_float(
-        row["atr"]
-    )
+        if close <= 0:
+            return None
 
-    volume_ratio = safe_float(
-        row["volume_ratio"],
-        1.0
-    )
+        if atr <= 0:
+            return None
 
-    if (
-        close <= 0
-        or atr <= 0
-    ):
+        if ema21 <= 0:
+            return None
 
-        return None
+        # ---------------------------------------------
+        # Determine direction
+        # ---------------------------------------------
 
-    # ========================================================
-    # 18. MARKET STRUCTURE
-    # ========================================================
+        long_structure = (
+            ema9 > ema21
+            and ema21 > ema50
+            and ema50 > ema200
+        )
 
-    bullish_structure = (
-        ema9 > ema21
-        and ema21 > ema50
-    )
+        short_structure = (
+            ema9 < ema21
+            and ema21 < ema50
+            and ema50 < ema200
+        )
 
-    bearish_structure = (
-        ema9 < ema21
-        and ema21 < ema50
-    )
+        if long_structure:
 
-    if bullish_structure:
+            direction = "LONG"
 
-        direction = "LONG"
+        elif short_structure:
 
-    elif bearish_structure:
+            direction = "SHORT"
 
-        direction = "SHORT"
+        else:
 
-    else:
+            return None
 
-        return None
+        # ---------------------------------------------
+        # Distance from EMA21
+        # ---------------------------------------------
 
-    # ========================================================
-    # 19. SCORE
-    # ========================================================
+        distance_ema21 = (
+            abs(close - ema21)
+            / ema21
+            * 100
+        )
 
-    score = 0
+        if (
+            distance_ema21
+            > CFG.max_distance_from_ema21
+        ):
+            return None
 
-    reasons = []
+        # ---------------------------------------------
+        # RSI divergence
+        # ---------------------------------------------
 
-    # --------------------------------------------------------
-    # EMA
-    # --------------------------------------------------------
+        divergence = detect_rsi_divergence(
+            df
+        )
 
-    if direction == "LONG":
+        # ---------------------------------------------
+        # Hard volume filter
+        # ---------------------------------------------
 
-        if close > ema9:
+        if (
+            volume_ratio
+            < CFG.min_volume_ratio
+        ):
+            return None
+
+        # ---------------------------------------------
+        # Hard RSI filter
+        # ---------------------------------------------
+
+        if direction == "LONG":
+
+            if rsi > 65:
+                return None
+
+        else:
+
+            if rsi < 35:
+                return None
+
+        # ---------------------------------------------
+        # Reject opposite divergence
+        # ---------------------------------------------
+
+        if (
+            direction == "LONG"
+            and divergence == "BEARISH"
+        ):
+            return None
+
+        if (
+            direction == "SHORT"
+            and divergence == "BULLISH"
+        ):
+            return None
+
+        # ---------------------------------------------
+        # Daily BTC filter
+        # ---------------------------------------------
+
+        if (
+            direction == "LONG"
+            and btc_context["1d"] == "BEARISH"
+        ):
+            return None
+
+        if (
+            direction == "SHORT"
+            and btc_context["1d"] == "BULLISH"
+        ):
+            return None
+
+        # ---------------------------------------------
+        # Score
+        # ---------------------------------------------
+
+        score = 0
+        reasons = []
+
+        # =============================================
+        # EMA STRUCTURE
+        # =============================================
+
+        if direction == "LONG":
+
+            score += 18
+            reasons.append(
+                "روند EMA صعودی"
+            )
+
+            if close > ema9:
+                score += 6
+
+            if ema9 > ema21:
+                score += 5
+
+            if ema21 > ema50:
+                score += 5
+
+        else:
+
+            score += 18
+            reasons.append(
+                "روند EMA نزولی"
+            )
+
+            if close < ema9:
+                score += 6
+
+            if ema9 < ema21:
+                score += 5
+
+            if ema21 < ema50:
+                score += 5
+
+        # =============================================
+        # RSI
+        # =============================================
+
+        if direction == "LONG":
+
+            if 45 <= rsi <= 58:
+
+                score += 12
+
+                reasons.append(
+                    "RSI مناسب خرید"
+                )
+
+            elif 58 < rsi <= 62:
+
+                score += 7
+
+                reasons.append(
+                    "RSI قابل قبول"
+                )
+
+            else:
+
+                score += 3
+
+        else:
+
+            if 42 <= rsi <= 55:
+
+                score += 12
+
+                reasons.append(
+                    "RSI مناسب فروش"
+                )
+
+            elif 38 <= rsi < 42:
+
+                score += 7
+
+                reasons.append(
+                    "RSI قابل قبول"
+                )
+
+            else:
+
+                score += 3
+
+        # =============================================
+        # MACD
+        # =============================================
+
+        if direction == "LONG":
+
+            if macd > macd_signal:
+                score += 8
+                reasons.append(
+                    "MACD مثبت"
+                )
+
+            if macd_hist > 0:
+                score += 4
+
+            if (
+                previous_macd
+                <= previous_signal
+                and macd
+                > macd_signal
+            ):
+                score += 3
+                reasons.append(
+                    "کراس صعودی MACD"
+                )
+
+        else:
+
+            if macd < macd_signal:
+                score += 8
+                reasons.append(
+                    "MACD منفی"
+                )
+
+            if macd_hist < 0:
+                score += 4
+
+            if (
+                previous_macd
+                >= previous_signal
+                and macd
+                < macd_signal
+            ):
+                score += 3
+                reasons.append(
+                    "کراس نزولی MACD"
+                )
+
+        # =============================================
+        # VOLUME
+        # =============================================
+
+        if (
+            volume_ratio
+            >= CFG.strong_volume_ratio
+        ):
 
             score += 12
 
             reasons.append(
-                "قیمت بالای EMA9"
+                "حجم تأییدکننده"
             )
 
-        if ema9 > ema21:
-
-            score += 10
-
-            reasons.append(
-                "EMA9 > EMA21"
-            )
-
-        if ema21 > ema50:
-
-            score += 8
-
-            reasons.append(
-                "EMA21 > EMA50"
-            )
-
-        if close > ema200:
-
-            score += 8
-
-            reasons.append(
-                "قیمت بالای EMA200"
-            )
-
-    else:
-
-        if close < ema9:
-
-            score += 12
-
-            reasons.append(
-                "قیمت زیر EMA9"
-            )
-
-        if ema9 < ema21:
-
-            score += 10
-
-            reasons.append(
-                "EMA9 < EMA21"
-            )
-
-        if ema21 < ema50:
-
-            score += 8
-
-            reasons.append(
-                "EMA21 < EMA50"
-            )
-
-        if close < ema200:
-
-            score += 8
-
-            reasons.append(
-                "قیمت زیر EMA200"
-            )
-
-    # --------------------------------------------------------
-    # RSI
-    # --------------------------------------------------------
-
-    if direction == "LONG":
-
-        if 45 <= rsi <= 65:
-
-            score += 12
-
-            reasons.append(
-                "RSI مناسب خرید"
-            )
-
-        elif 35 <= rsi < 45:
+        elif volume_ratio >= 0.95:
 
             score += 7
 
-            reasons.append(
-                "RSI پایین و قابل بررسی"
-            )
+        else:
 
-        elif rsi < 30:
+            score += 2
 
-            score += 9
+        # =============================================
+        # BTC 4H
+        # =============================================
 
-            reasons.append(
-                "RSI اشباع فروش"
-            )
+        if direction == "LONG":
 
-        elif rsi > 70:
+            if btc_context["4h"] == "BULLISH":
 
-            score -= 5
+                score += 8
 
-    else:
+                reasons.append(
+                    "BTC 4H صعودی"
+                )
 
-        if 35 <= rsi <= 55:
+            elif btc_context["4h"] == "BEARISH":
 
-            score += 12
+                score -= 8
 
-            reasons.append(
-                "RSI مناسب فروش"
-            )
+        else:
 
-        elif 55 < rsi <= 65:
+            if btc_context["4h"] == "BEARISH":
 
-            score += 7
+                score += 8
 
-            reasons.append(
-                "RSI نسبتاً بالا"
-            )
+                reasons.append(
+                    "BTC 4H نزولی"
+                )
 
-        elif rsi > 70:
+            elif btc_context["4h"] == "BULLISH":
 
-            score += 9
+                score -= 8
 
-            reasons.append(
-                "RSI اشباع خرید"
-            )
+        # =============================================
+        # BTC DAILY
+        # =============================================
 
-        elif rsi < 30:
+        if direction == "LONG":
 
-            score -= 5
+            if btc_context["1d"] == "BULLISH":
 
-    # --------------------------------------------------------
-    # MACD
-    # --------------------------------------------------------
+                score += 6
 
-    if direction == "LONG":
+                reasons.append(
+                    "BTC Daily صعودی"
+                )
 
-        if macd > macd_signal:
+        else:
 
-            score += 12
+            if btc_context["1d"] == "BEARISH":
 
-            reasons.append(
-                "MACD مثبت"
-            )
+                score += 6
 
-        if macd_hist > 0:
+                reasons.append(
+                    "BTC Daily نزولی"
+                )
 
-            score += 5
-
-        if (
-            previous_macd <= previous_macd_signal
-            and macd > macd_signal
-        ):
-
-            score += 6
-
-            reasons.append(
-                "کراس صعودی MACD"
-            )
-
-    else:
-
-        if macd < macd_signal:
-
-            score += 12
-
-            reasons.append(
-                "MACD منفی"
-            )
-
-        if macd_hist < 0:
-
-            score += 5
+        # =============================================
+        # RSI DIVERGENCE
+        # =============================================
 
         if (
-            previous_macd >= previous_macd_signal
-            and macd < macd_signal
+            direction == "LONG"
+            and divergence == "BULLISH"
         ):
-
-            score += 6
-
-            reasons.append(
-                "کراس نزولی MACD"
-            )
-
-    # --------------------------------------------------------
-    # Volume
-    # --------------------------------------------------------
-
-    if (
-        volume_ratio
-        >= CFG.min_volume_ratio
-    ):
-
-        score += 10
-
-        reasons.append(
-            f"حجم {volume_ratio:.2f}x"
-        )
-
-    elif volume_ratio >= 0.90:
-
-        score += 4
-
-    # --------------------------------------------------------
-    # BTC Context
-    # --------------------------------------------------------
-
-    if direction == "LONG":
-
-        if btc_context["bullish"]:
 
             score += 8
 
             reasons.append(
-                "روند BTC صعودی"
+                "واگرایی مثبت RSI"
             )
 
-        elif btc_context["bearish"]:
-
-            score -= 8
-
-            reasons.append(
-                "روند BTC نزولی"
-            )
-
-    else:
-
-        if btc_context["bearish"]:
+        elif (
+            direction == "SHORT"
+            and divergence == "BEARISH"
+        ):
 
             score += 8
 
             reasons.append(
-                "روند BTC نزولی"
+                "واگرایی منفی RSI"
             )
 
-        elif btc_context["bullish"]:
+        # =============================================
+        # CANDLE QUALITY
+        # =============================================
 
-            score -= 8
+        if body_ratio >= 0.55:
+
+            score += 5
 
             reasons.append(
-                "روند BTC صعودی"
+                "کندل قدرتمند"
             )
 
-    # --------------------------------------------------------
-    # RSI Divergence
-    # --------------------------------------------------------
+        # ---------------------------------------------
+        # Score boundary
+        # ---------------------------------------------
 
-    divergence = detect_rsi_divergence(
-        df
-    )
-
-    if (
-        direction == "LONG"
-        and divergence == "BULLISH"
-    ):
-
-        score += 8
-
-        reasons.append(
-            "واگرایی مثبت RSI"
+        score = max(
+            0,
+            min(
+                100,
+                int(score)
+            )
         )
 
-    elif (
-        direction == "SHORT"
-        and divergence == "BEARISH"
-    ):
+        if score < CFG.min_score:
+            return None
 
-        score += 8
+        # ---------------------------------------------
+        # Stop Loss
+        # ---------------------------------------------
 
-        reasons.append(
-            "واگرایی منفی RSI"
+        stop_distance = (
+            atr
+            * CFG.sl_atr_multiplier
         )
 
-    # ========================================================
-    # 20. FINAL SCORE
-    # ========================================================
+        if direction == "LONG":
 
-    score = max(
-        0,
-        min(
-            100,
-            score
-        )
-    )
+            stop_loss = (
+                close
+                - stop_distance
+            )
 
-    if score < CFG.min_score:
+        else:
 
-        return None
+            stop_loss = (
+                close
+                + stop_distance
+            )
 
-    # ========================================================
-    # 21. STOP LOSS
-    # ========================================================
+        if stop_loss <= 0:
+            return None
 
-    if direction == "LONG":
-
-        stop_loss = (
-            close
-            - atr * CFG.sl_atr_multiplier
+        sl_percent = (
+            abs(close - stop_loss)
+            / close
+            * 100
         )
 
-        risk_distance = (
-            close - stop_loss
+        # ---------------------------------------------
+        # Maximum SL filter
+        # ---------------------------------------------
+
+        if (
+            sl_percent
+            > CFG.max_sl_percent
+        ):
+            return None
+
+        # ---------------------------------------------
+        # Take Profits
+        # ---------------------------------------------
+
+        if direction == "LONG":
+
+            tp1 = (
+                close
+                + stop_distance
+                * CFG.tp1_rr
+            )
+
+            tp2 = (
+                close
+                + stop_distance
+                * CFG.tp2_rr
+            )
+
+        else:
+
+            tp1 = (
+                close
+                - stop_distance
+                * CFG.tp1_rr
+            )
+
+            tp2 = (
+                close
+                - stop_distance
+                * CFG.tp2_rr
+            )
+
+        # ---------------------------------------------
+        # Risk calculation
+        # ---------------------------------------------
+
+        risk_usdt = (
+            CFG.account_size_usdt
+            * CFG.risk_percent
+            / 100
         )
 
-    else:
+        if sl_percent <= 0:
+            return None
 
-        stop_loss = (
-            close
-            + atr * CFG.sl_atr_multiplier
+        position_usdt = (
+            risk_usdt
+            / (sl_percent / 100)
         )
 
-        risk_distance = (
-            stop_loss - close
+        position_usdt = min(
+            position_usdt,
+            CFG.max_position_usdt,
+            CFG.account_size_usdt
         )
 
-    if risk_distance <= 0:
-
-        return None
-
-    sl_percent = (
-        risk_distance
-        / close
-        * 100
-    )
-
-    if (
-        sl_percent
-        > CFG.max_sl_percent
-    ):
-
-        return None
-
-    # ========================================================
-    # 22. TAKE PROFIT
-    # ========================================================
-
-    if direction == "LONG":
-
-        tp1 = (
-            close
-            + risk_distance * CFG.tp1_rr
+        quantity = (
+            position_usdt
+            / close
         )
 
-        tp2 = (
-            close
-            + risk_distance * CFG.tp2_rr
+        # ---------------------------------------------
+        # Signal quality
+        # ---------------------------------------------
+
+        if score >= CFG.strong_score:
+
+            quality = "STRONG"
+
+        else:
+
+            quality = "NORMAL"
+
+        # ---------------------------------------------
+        # Result
+        # ---------------------------------------------
+
+        return {
+            "symbol": symbol,
+            "direction": direction,
+            "score": score,
+            "quality": quality,
+            "entry": close,
+            "stop_loss": stop_loss,
+            "tp1": tp1,
+            "tp2": tp2,
+            "sl_percent": sl_percent,
+            "rsi": rsi,
+            "volume_ratio": volume_ratio,
+            "divergence": divergence,
+            "btc_4h": btc_context["4h"],
+            "btc_1d": btc_context["1d"],
+            "distance_ema21": distance_ema21,
+            "risk_usdt": risk_usdt,
+            "position_usdt": position_usdt,
+            "quantity": quantity,
+            "reasons": reasons
+        }
+
+    except Exception as e:
+
+        logger.warning(
+            "Analysis failed for %s: %s",
+            symbol,
+            e
         )
 
-    else:
-
-        tp1 = (
-            close
-            - risk_distance * CFG.tp1_rr
-        )
-
-        tp2 = (
-            close
-            - risk_distance * CFG.tp2_rr
-        )
-
-    # ========================================================
-    # 23. RISK / POSITION SIZE
-    # ========================================================
-
-    risk_usdt = (
-        CFG.account_size_usdt
-        * CFG.risk_percent
-        / 100
-    )
-
-    position_usdt = (
-        risk_usdt
-        / (sl_percent / 100)
-    )
-
-    position_usdt = min(
-        position_usdt,
-        CFG.max_position_usdt,
-        CFG.account_size_usdt
-    )
-
-    if position_usdt <= 0:
-
-        return None
-
-    quantity = (
-        position_usdt
-        / close
-    )
-
-    # ========================================================
-    # 24. CANDLE TIME
-    # ========================================================
-
-    candle_time = int(
-        row["open_time"]
-    )
-
-    # ========================================================
-    # 25. RESULT
-    # ========================================================
-
-    return {
-
-        "coin": coin,
-
-        "symbol": symbol,
-
-        "direction": direction,
-
-        "score": int(score),
-
-        "entry": close,
-
-        "sl": stop_loss,
-
-        "tp1": tp1,
-
-        "tp2": tp2,
-
-        "sl_percent": sl_percent,
-
-        "risk_usdt": risk_usdt,
-
-        "position_usdt": position_usdt,
-
-        "quantity": quantity,
-
-        "rsi": rsi,
-
-        "macd": macd,
-
-        "macd_signal": macd_signal,
-
-        "macd_hist": macd_hist,
-
-        "atr": atr,
-
-        "volume_ratio": volume_ratio,
-
-        "divergence": divergence,
-
-        "btc_trend": btc_context["trend"],
-
-        "candle_time": candle_time,
-
-        "reasons": reasons
-
-    }# ============================================================
-# 26. FORMAT SIGNAL
-# ============================================================
+        return None# =========================================================
+# FORMAT SIGNAL MESSAGE
+# =========================================================
 
 def format_signal(signal):
 
-    if signal["direction"] == "LONG":
-        title = "🟢 <b>LONG SIGNAL</b>"
-    else:
-        title = "🔴 <b>SHORT SIGNAL</b>"
-
-    if signal["score"] >= CFG.strong_score:
-        quality = "🔥 STRONG"
-    else:
-        quality = "⚡ NORMAL"
-
-    candle_dt = datetime.fromtimestamp(
-        signal["candle_time"] / 1000,
-        tz=CFG.iran_timezone
+    direction_icon = (
+        "🟢" if signal["direction"] == "LONG"
+        else "🔴"
     )
 
-    reasons = signal["reasons"][:7]
+    quality_icon = (
+        "🔥" if signal["quality"] == "STRONG"
+        else "⚡"
+    )
+
+    divergence_text = signal["divergence"]
+
+    if divergence_text == "NONE":
+        divergence_text = "ندارد"
+
+    elif divergence_text == "BULLISH":
+        divergence_text = "مثبت"
+
+    elif divergence_text == "BEARISH":
+        divergence_text = "منفی"
+
+    reasons = signal.get(
+        "reasons",
+        []
+    )
 
     reasons_text = "\n".join(
         f"• {reason}"
@@ -1881,144 +1623,149 @@ def format_signal(signal):
     )
 
     return f"""
-{title}
-<b>{signal["coin"]}/USDT</b>
+{direction_icon} <b>{signal["symbol"]}/USDT {signal["direction"]}</b>
+{quality_icon} <b>{signal["quality"]}</b> | امتیاز: <b>{signal["score"]}/100</b>
 
-کیفیت: <b>{quality}</b>
-📊 Score: <b>{signal["score"]}/100</b>
+💰 <b>ورود:</b> {signal["entry"]:.8g}
 
-💰 Entry:
-<b>{signal["entry"]:.8g}</b>
+🛑 <b>حد ضرر:</b> {signal["stop_loss"]:.8g}
+📉 <b>فاصله SL:</b> {signal["sl_percent"]:.2f}%
 
-🛑 Stop Loss:
-<b>{signal["sl"]:.8g}</b>
-({signal["sl_percent"]:.2f}%)
+🎯 <b>TP1:</b> {signal["tp1"]:.8g}
+🎯 <b>TP2:</b> {signal["tp2"]:.8g}
 
-🎯 TP1:
-<b>{signal["tp1"]:.8g}</b>
+📊 <b>RSI:</b> {signal["rsi"]:.2f}
+📦 <b>Volume:</b> {signal["volume_ratio"]:.2f}x
 
-🎯 TP2:
-<b>{signal["tp2"]:.8g}</b>
+📈 <b>BTC 4H:</b> {signal["btc_4h"]}
+📅 <b>BTC Daily:</b> {signal["btc_1d"]}
 
-📈 RSI:
-<b>{signal["rsi"]:.2f}</b>
+🔄 <b>واگرایی RSI:</b> {divergence_text}
 
-📊 Volume:
-<b>{signal["volume_ratio"]:.2f}x</b>
-
-₿ BTC Trend:
-<b>{signal["btc_trend"]}</b>
-
-🔄 RSI Divergence:
-<b>{signal["divergence"]}</b>
-
-💵 Risk:
-<b>${signal["risk_usdt"]:.2f}</b>
-
-📦 Position:
-<b>${signal["position_usdt"]:.2f}</b>
-
-🔢 Quantity:
-<b>{signal["quantity"]:.8g}</b>
+💵 <b>ریسک:</b> ${signal["risk_usdt"]:.2f}
+💼 <b>حجم پوزیشن:</b> ${signal["position_usdt"]:.2f}
+🪙 <b>Quantity:</b> {signal["quantity"]:.8g}
 
 <b>دلایل:</b>
 {reasons_text}
 
-⏰ Candle:
-{candle_dt.strftime("%Y-%m-%d %H:%M")}
-
-⚠️ فقط سیگنال و محاسبه ریسک؛ معامله خودکار انجام نمی‌شود.
+⚠️ این پیام فقط سیگنال و محاسبه ریسک است و معامله خودکار انجام نمی‌شود.
 """.strip()
 
 
-# ============================================================
-# 27. SCAN REPORT
-# ============================================================
+# =========================================================
+# FORMAT SCAN REPORT
+# =========================================================
 
 def format_scan_report(
     total_coins,
     analyzed,
     candidates,
-    sent_count,
+    sent,
     btc_context
 ):
 
-    now = datetime.now(
-        CFG.iran_timezone
-    )
-
     return f"""
-📊 <b>گزارش اسکن 4H</b>
+📊 <b>گزارش اسکن Crypto Signal Bot</b>
 
-⏰ {now.strftime("%Y-%m-%d %H:%M")}
+⏱ تایم‌فریم اصلی: <b>4H</b>
 
-🪙 ارزهای قابل اسکن:
-<b>{total_coins}</b>
+🪙 ارزهای قابل اسکن: <b>{total_coins}</b>
+🔎 بررسی‌شده: <b>{analyzed}</b>
+🎯 کاندیداها: <b>{candidates}</b>
+📨 سیگنال‌های جدید: <b>{sent}</b>
 
-🔎 بررسی‌شده:
-<b>{analyzed}</b>
+₿ <b>BTC 4H:</b> {btc_context["4h"]}
+📅 <b>BTC Daily:</b> {btc_context["1d"]}
+📌 <b>BTC وضعیت ترکیبی:</b> {btc_context["combined"]}
 
-📌 کاندیدا:
-<b>{candidates}</b>
+⚙️ حداقل امتیاز: <b>{CFG.min_score}</b>
+🔥 امتیاز STRONG: <b>{CFG.strong_score}</b>
 
-🚨 سیگنال جدید:
-<b>{sent_count}</b>
+🛡 ریسک هر سیگنال: <b>{CFG.risk_percent}%</b>
+🎯 حداقل RR: <b>{CFG.tp1_rr}:1</b>
 
-₿ روند BTC:
-<b>{btc_context["trend"]}</b>
-
-📊 حداقل Score:
-<b>{CFG.min_score}/100</b>
-
-ℹ️ این ربات فقط تحلیل و محاسبه ریسک انجام می‌دهد و معامله خودکار ندارد.
+ℹ️ اسکن بعدی طبق زمان‌بندی GitHub Actions انجام می‌شود.
 """.strip()
 
 
-# ============================================================
-# 28. MAIN
-# ============================================================
+# =========================================================
+# DEDUPLICATION
+# =========================================================
+
+def cleanup_state(state):
+
+    now = time.time()
+
+    max_age = (
+        CFG.dedup_hours
+        * 3600
+    )
+
+    cleaned = {}
+
+    for key, timestamp in state.items():
+
+        try:
+
+            timestamp = float(timestamp)
+
+            if (
+                now - timestamp
+                < max_age
+            ):
+                cleaned[key] = timestamp
+
+        except Exception:
+            continue
+
+    return cleaned
+
+
+def signal_key(signal):
+
+    symbol = signal["symbol"]
+    direction = signal["direction"]
+
+    # Current closed 4H candle
+    candle_time = int(
+        time.time()
+        // (4 * 3600)
+    )
+
+    return (
+        f"{symbol}_"
+        f"{direction}_"
+        f"{candle_time}"
+    )
+
+
+# =========================================================
+# MAIN
+# =========================================================
 
 def main():
 
-    log.info(
+    logger.info(
         "======================================"
     )
 
-    log.info(
+    logger.info(
         "Starting Crypto Signal Bot"
     )
 
-    log.info(
-        f"Timeframe: {CFG.timeframe}"
+    logger.info(
+        "Timeframe: %s",
+        CFG.timeframe
     )
 
-    log.info(
+    logger.info(
         "======================================"
     )
 
-    # --------------------------------------------------------
-    # Telegram
-    # --------------------------------------------------------
-
-    if not CFG.telegram_token:
-
-        log.error(
-            "TELEGRAM_TOKEN is missing"
-        )
-
-        return
-
-    if not CFG.telegram_chat_id:
-
-        log.error(
-            "TELEGRAM_CHAT_ID is missing"
-        )
-
-        return
-
-    # --------------------------------------------------------
-    # State
-    # --------------------------------------------------------
+    # ---------------------------------------------
+    # Load state
+    # ---------------------------------------------
 
     state = load_state()
 
@@ -2026,43 +1773,43 @@ def main():
         state
     )
 
-    # --------------------------------------------------------
+    # ---------------------------------------------
     # Get coins
-    # --------------------------------------------------------
+    # ---------------------------------------------
 
     coins = get_scan_coins()
 
     if not coins:
 
-        log.error(
-            "No coins available for scanning"
+        logger.error(
+            "No coins available for scanning."
         )
 
-        send_telegram(
-            "⚠️ <b>Crypto Bot</b>\n\n"
-            "لیست ارزهای قابل اسکن دریافت نشد."
-        )
+        if CFG.send_no_signal_report:
+
+            send_telegram(
+                "⚠️ <b>Crypto Signal Bot</b>\n\n"
+                "لیست ارزهای قابل اسکن دریافت نشد."
+            )
 
         return
 
-    # --------------------------------------------------------
+    # ---------------------------------------------
     # BTC context
-    # --------------------------------------------------------
+    # ---------------------------------------------
 
     btc_context = get_btc_context()
 
-    log.info(
-        f"BTC trend: "
-        f"{btc_context['trend']}"
-    )
-
-    # --------------------------------------------------------
+    # ---------------------------------------------
     # Analyze coins
-    # --------------------------------------------------------
+    # ---------------------------------------------
 
     results = []
 
-    analyzed = 0
+    logger.info(
+        "Starting analysis of %s coins...",
+        len(coins)
+    )
 
     with ThreadPoolExecutor(
         max_workers=CFG.max_workers
@@ -2071,56 +1818,53 @@ def main():
         futures = {
             executor.submit(
                 analyze_coin,
-                item,
+                coin + "USDT",
                 btc_context
-            ): item
-            for item in coins
+            ): coin
+            for coin in coins
         }
 
         for future in as_completed(
             futures
         ):
 
-            item = futures[future]
+            coin = futures[future]
 
             try:
 
                 result = future.result()
 
-                analyzed += 1
-
                 if result is not None:
+                    results.append(result)
 
-                    results.append(
-                        result
-                    )
+            except Exception as e:
 
-            except Exception as exc:
-
-                log.error(
-                    f"Analysis error "
-                    f"{item.get('symbol')}: "
-                    f"{exc}"
+                logger.warning(
+                    "Worker failed for %s: %s",
+                    coin,
+                    e
                 )
 
-    # --------------------------------------------------------
+    # ---------------------------------------------
     # Sort by score
-    # --------------------------------------------------------
+    # ---------------------------------------------
 
     results.sort(
-        key=lambda item:
-        item["score"],
+        key=lambda x: (
+            x["score"],
+            x["volume_ratio"]
+        ),
         reverse=True
     )
 
-    log.info(
-        f"Analysis finished. "
-        f"Candidates: {len(results)}"
+    logger.info(
+        "Analysis finished. Candidates: %s",
+        len(results)
     )
 
-    # --------------------------------------------------------
+    # ---------------------------------------------
     # Send new signals
-    # --------------------------------------------------------
+    # ---------------------------------------------
 
     sent_count = 0
 
@@ -2132,144 +1876,96 @@ def main():
         ):
             break
 
-        if signal_already_sent(
-            state,
-            signal["symbol"],
-            signal["direction"],
-            signal["candle_time"]
-        ):
+        key = signal_key(
+            signal
+        )
 
-            log.info(
-                f"Duplicate ignored: "
-                f"{signal['symbol']} "
-                f"{signal['direction']}"
-            )
-
+        if key in state:
             continue
 
         message = format_signal(
             signal
         )
 
-        success = send_telegram(
+        if send_telegram(
             message
-        )
+        ):
 
-        if success:
-
-            mark_signal_sent(
-                state,
-                signal["symbol"],
-                signal["direction"],
-                signal["candle_time"]
-            )
+            state[key] = time.time()
 
             sent_count += 1
 
-            log.info(
-                f"Signal sent: "
-                f"{signal['symbol']} "
-                f"{signal['direction']} "
-                f"score={signal['score']}"
+            logger.info(
+                "Signal sent: %s %s score=%s",
+                signal["symbol"],
+                signal["direction"],
+                signal["score"]
             )
 
-        else:
-
-            log.error(
-                f"Signal NOT sent: "
-                f"{signal['symbol']}"
-            )
-
-    # --------------------------------------------------------
+    # ---------------------------------------------
     # Save state
-    # --------------------------------------------------------
+    # ---------------------------------------------
 
-    save_state(
-        state
-    )
+    save_state(state)
 
-    # --------------------------------------------------------
-    # Telegram summary
-    # --------------------------------------------------------
+    # ---------------------------------------------
+    # Summary report
+    # ---------------------------------------------
 
     if CFG.send_no_signal_report:
 
         report = format_scan_report(
-            len(coins),
-            analyzed,
-            len(results),
-            sent_count,
-            btc_context
+            total_coins=len(coins),
+            analyzed=len(coins),
+            candidates=len(results),
+            sent=sent_count,
+            btc_context=btc_context
         )
 
         send_telegram(
             report
         )
 
-    # --------------------------------------------------------
-    # Final log
-    # --------------------------------------------------------
+    # ---------------------------------------------
+    # Final logs
+    # ---------------------------------------------
 
-    log.info(
+    logger.info(
         "======================================"
     )
 
-    log.info(
-        f"Coins: {len(coins)}"
+    logger.info(
+        "Coins: %s",
+        len(coins)
     )
 
-    log.info(
-        f"Analyzed: {analyzed}"
+    logger.info(
+        "Analyzed: %s",
+        len(coins)
     )
 
-    log.info(
-        f"Candidates: {len(results)}"
+    logger.info(
+        "Candidates: %s",
+        len(results)
     )
 
-    log.info(
-        f"New signals sent: {sent_count}"
+    logger.info(
+        "New signals sent: %s",
+        sent_count
     )
 
-    log.info(
+    logger.info(
         "Bot finished successfully"
     )
 
-    log.info(
+    logger.info(
         "======================================"
     )
 
 
-# ============================================================
-# 29. START
-# ============================================================
+# =========================================================
+# START
+# =========================================================
 
 if __name__ == "__main__":
-
-    try:
-
-        main()
-
-    except KeyboardInterrupt:
-
-        log.info(
-            "Bot stopped."
-        )
-
-    except Exception as exc:
-
-        log.exception(
-            f"Fatal error: {exc}"
-        )
-
-        try:
-
-            send_telegram(
-                "🚨 <b>Crypto Bot Error</b>\n\n"
-                f"<code>{str(exc)[:1000]}</code>"
-            )
-
-        except Exception:
-
-            pass
-
-        raise
+    main()
