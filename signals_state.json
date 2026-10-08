@@ -1,1 +1,9 @@
-{}
+{
+  "METUSDT": {
+    "entry": 0.4329,
+    "score": 86,
+    "sent_at": 1791477113.2706504,
+    "strategy": "CONFIRMED TREND",
+    "symbol": "METUSDT"
+  }
+}
