@@ -1,4 +1,11 @@
 {
+  "AMPUSDT": {
+    "entry": 0.0007,
+    "score": 82,
+    "sent_at": 1791525537.4840698,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "AMPUSDT"
+  },
   "METUSDT": {
     "entry": 0.4329,
     "score": 86,
