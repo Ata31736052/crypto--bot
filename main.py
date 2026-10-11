@@ -1100,8 +1100,10 @@ def analyze_symbol(symbol, btc_d, btc_h):
         stats["bottom_audit_buckets"][_score_bucket(bottom_audit["score"],"BOTTOM")] += 1
         if trend_audit["score"] >= 80:
             stats["trend_audit_top"].append((symbol, trend_audit["score"], trend_audit["raw"], "; ".join(trend_audit["missing"][:6])))
-        if bottom_audit["score"] >= 80:
-            stats["bottom_audit_top"].append((symbol, bottom_audit["score"], bottom_audit["raw"], "; ".join(bottom_audit["missing"][:6])))
+        # DIAGNOSTIC ONLY: retain every symbol so the final top-10 shows the
+        # strongest Bottom Hunter near-misses even when the entire market scores <80.
+        # This does not alter setup eligibility, score weights, or signal thresholds.
+        stats["bottom_audit_top"].append((symbol, bottom_audit["score"], bottom_audit["raw"], "; ".join(bottom_audit["missing"][:8])))
         stats["trend_potential_scores"].append(trend_potential)
         stats["bottom_potential_scores"].append(bottom_potential)
         stats["trend_potential_buckets"][_score_bucket(trend_potential,"TREND")] += 1
