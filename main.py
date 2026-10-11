@@ -453,6 +453,43 @@ def _rsi_divergence_details(h, lookback=42, pivot=2, min_gap=3, max_gap=25):
         return out
 
 
+
+def _rsi_divergence_pair_audit(h, lookback=42, pivot=2, min_gap=3, max_gap=25):
+    """Return every eligible confirmed price-pivot pair for read-only root-cause audit."""
+    pairs = []
+    if h is None or len(h) < max(35, pivot * 2 + 5):
+        return pairs
+    try:
+        x = h.tail(lookback).reset_index(drop=True)
+        lows = pd.to_numeric(x["low"], errors="coerce").to_numpy(float)
+        rsis = pd.to_numeric(x["rsi"], errors="coerce").to_numpy(float)
+        if not np.isfinite(lows).all() or not np.isfinite(rsis).all():
+            return pairs
+        pivots = []
+        for i in range(pivot, len(x) - pivot):
+            if lows[i] <= lows[i-pivot:i].min() and lows[i] < lows[i+1:i+pivot+1].min():
+                pivots.append(i)
+        for newer_pos, newer in enumerate(pivots):
+            for older in pivots[:newer_pos]:
+                gap = newer - older
+                if gap < min_gap or gap > max_gap:
+                    continue
+                price_change = float((lows[newer] / lows[older] - 1.0) * 100.0)
+                rsi_delta = float(rsis[newer] - rsis[older])
+                price_ok = bool(lows[newer] < lows[older] * 0.995)
+                rsi_ok = bool(rsis[newer] >= rsis[older] + 4.0)
+                pairs.append({
+                    "older_idx": int(older), "newer_idx": int(newer), "gap": int(gap),
+                    "older_low": float(lows[older]), "newer_low": float(lows[newer]),
+                    "older_rsi": float(rsis[older]), "newer_rsi": float(rsis[newer]),
+                    "price_change_pct": price_change, "rsi_delta": rsi_delta,
+                    "price_lower_low": price_ok, "delta_ge_4": rsi_ok,
+                    "both": bool(price_ok and rsi_ok),
+                })
+    except (KeyError, TypeError, ValueError, IndexError):
+        return []
+    return pairs
+
 def rsi_bullish_divergence(h):
     return bool(_rsi_divergence_details(h)["both"])
 
@@ -1084,6 +1121,20 @@ def analyze_symbol(symbol, btc_d, btc_h):
                 div_pair["price_change_pct"], div_pair["rsi_delta"],
                 div_pair["price_lower_low"], div_pair["delta_ge_4"], div_pair["both"],
             )
+        # Read-only root-cause audit: enumerate every eligible pivot pair without changing selection or scoring.
+        pair_rows = _rsi_divergence_pair_audit(h)
+        qualifying_pairs = [p for p in pair_rows if p["both"]]
+        log.info("RSI PAIR SET AUDIT | %s | eligible_pairs=%d | qualifying_pairs=%d | selected_pair_both=%s",
+                 symbol, len(pair_rows), len(qualifying_pairs), bool(div_pair.get("both", False)))
+        if not div_pair.get("both", False):
+            for pair in pair_rows:
+                log.info(
+                    "RSI ALTERNATE PAIR | %s | bars=%s->%s gap=%s | low=%.8g->%.8g | RSI=%.2f->%.2f | price_change=%.3f%% | RSI_delta=%.2f | price_ok=%s RSI_ok=%s BOTH=%s",
+                    symbol, pair["older_idx"], pair["newer_idx"], pair["gap"],
+                    pair["older_low"], pair["newer_low"], pair["older_rsi"], pair["newer_rsi"],
+                    pair["price_change_pct"], pair["rsi_delta"], pair["price_lower_low"],
+                    pair["delta_ge_4"], pair["both"],
+                )
         sub_diag = bottom_trigger_subconditions(h)
         stats["bottom_subcondition_audit"].update(k for k, v in sub_diag.items() if v)
         trigger_diag = bottom_trigger_diagnostics(h)
@@ -1518,6 +1569,9 @@ def self_test():
     assert div_result["gap"] == 12 and div_result["price_change_pct"] < -0.5
     assert div_result["rsi_delta"] == 5.0
     assert rsi_bullish_divergence(div_test) is True
+    pair_rows = _rsi_divergence_pair_audit(div_test)
+    assert any(p["older_idx"] == 22 and p["newer_idx"] == 34 and p["both"] for p in pair_rows)
+    assert all(3 <= p["gap"] <= 25 for p in pair_rows)
 
     # Price must be at least 0.5% lower; RSI strength alone is insufficient.
     weak_price = _div_frame(30, 42, older_low=90.0, newer_low=89.7)
