@@ -83,7 +83,7 @@ logging.basicConfig(
 log = logging.getLogger("crypto-bot")
 
 session = requests.Session()
-session.headers.update({"User-Agent": "CryptoSignalBot/ApexSignal-v3.23.0"})
+session.headers.update({"User-Agent": "CryptoSignalBot/ApexSignal-v3.24.0"})
 
 
 # ---------------- HTTP ----------------
@@ -712,6 +712,23 @@ def trend_setup(d, h, h1, btc_d, btc_h, daily_state):
 
 
 
+
+def bottom_reversal_quality_gate(trigger_audit, structure, vol_ratio):
+    """Require independent reversal evidence; location or total score alone is insufficient."""
+    parts=trigger_audit.get("parts",{})
+    raw=int(trigger_audit.get("raw",0) or 0)
+    active=sum(1 for value in parts.values() if value>0)
+    retest=bool((structure or {}).get("retest"))
+    # Normal path: >=12/24 raw reversal points from at least two trigger families.
+    if raw>=12 and active>=2:
+        return True, f"reversal evidence PASS ({raw}/24, {active} trigger families)"
+    # Retest exception: confirmed structure retest may qualify with >=9/24,
+    # but only when participation is at least normal (volume >=1.0x).
+    if retest and raw>=9 and float(vol_ratio)>=1.0:
+        return True, f"retest reversal PASS ({raw}/24, volume {float(vol_ratio):.2f}x)"
+    return False, f"reversal evidence weak ({raw}/24, {active} trigger families; need >=12 points across >=2 families, or retest + >=9 points + volume >=1.0x)"
+
+
 def bottom_setup(d, h, h1, btc_d, btc_h):
     """Bottom Hunter uses Daily+4H for setup; 1H confirms entry only."""
     r=h.iloc[-1]
@@ -721,6 +738,9 @@ def bottom_setup(d, h, h1, btc_d, btc_h):
     triggers=(rsi_bullish_divergence(h),rejection_candle(h),macd_turn(h),reclaim_4h(h))
     if not (near_low or fib_ok or sum(triggers)>=3 or ms.get("retest")): return None,["no bottom location/reversal evidence"]
     if r.vol_ratio < BOTTOM_VOL_MIN: return None,["4H volume critically weak"]
+    trigger_audit=bottom_reversal_trigger_points(h)
+    reversal_ok,reversal_reason=bottom_reversal_quality_gate(trigger_audit,ms,float(r.vol_ratio))
+    if not reversal_ok: return None,[reversal_reason]
     audit=unified_bottom_score_audit(d,h,h1,btc_d,btc_h)
     if audit["score"]<BOTTOM_MIN_SCORE: return None,[f"setup score {audit['score']} < {BOTTOM_MIN_SCORE}","SCORE MISSING="+" | ".join(audit["missing"][:8])]
     reasons=[k for k,v in audit["components"].items() if v>=0.75*audit["weights"][k]]
@@ -948,7 +968,9 @@ def fmt_price(x):
 def signal_text(symbol, setup, trade, d, h, btc_d, btc_h):
     r = h.iloc[-1]
     score = setup["score"]
-    strength = "🔥 STRONG" if score >= STRONG_SCORE else "✅ QUALITY"
+    strength = ("🔥 STRONG" if score >= STRONG_SCORE else
+                "⚠️ EARLY REVERSAL" if setup["strategy"] == "BOTTOM HUNTER" else
+                "✅ QUALITY")
 
     pos = position_size(trade)
 
@@ -1585,7 +1607,7 @@ def main():
 
 
 def self_test():
-    """v3.23.0 regression tests for calibrated score gates, RSI divergence and fail-closed confirmation."""
+    """v3.24.0 regression tests for Bottom Hunter reversal quality gate, calibrated score gates and RSI divergence."""
     assert MIN_SCORE==80 and BOTTOM_MIN_SCORE==66 and STRONG_SCORE==90 and BOTTOM_STRONG_SCORE==90
     assert BOTTOM_LOW_LOOKBACK_H4==42 and BOTTOM_LOW_DISTANCE_PCT==5.0
     assert MAX_SL_PCT==13.0 and BOTTOM_MAX_SL_PCT==15.0
@@ -1712,15 +1734,20 @@ def self_test():
     audit_keys = bottom_trigger_diagnostics(test_h)
     assert all(k in audit_keys for k in ("location:near 7d low", "location:Fibonacci zone", "structure:retest", "structure:CHOCH", "structure:BOS", "structure:higher low", "trigger:RSI divergence", "trigger:rejection candle", "trigger:MACD turn", "trigger:4H reclaim", "data:insufficient history", "data:diagnostic error"))
     assert BOTTOM_MIN_SCORE == 66 and BOTTOM_LOW_LOOKBACK_H4 == 42 and BOTTOM_LOW_DISTANCE_PCT == 5.0
+    # Bottom Hunter must have independent reversal evidence, not location/score alone.
+    assert bottom_reversal_quality_gate({"raw":12,"parts":{"RSI divergence":8,"MACD turn":4}}, {"retest":False}, 1.0)[0] is True
+    assert bottom_reversal_quality_gate({"raw":9,"parts":{"MACD turn":5,"4H reclaim":4}}, {"retest":False}, 1.0)[0] is False
+    assert bottom_reversal_quality_gate({"raw":9,"parts":{"MACD turn":5,"4H reclaim":4}}, {"retest":True}, 1.0)[0] is True
+    assert bottom_reversal_quality_gate({"raw":9,"parts":{"MACD turn":5,"4H reclaim":4}}, {"retest":True}, 0.99)[0] is False
     trigger_test = bottom_reversal_trigger_points(test_h)
     assert 0 <= trigger_test["raw"] <= 24
     assert sum(trigger_test["parts"].values()) == trigger_test["raw"]
-    log.info("v3.23.0 CALIBRATED SCORE GATES + EARLY REVERSAL + ALL-PAIR RSI SELF-TEST: PASS")
+    log.info("v3.24.0 BOTTOM REVERSAL QUALITY GATE + CALIBRATED SCORE + ALL-PAIR RSI SELF-TEST: PASS")
 
 
 
 
-DEPLOYMENT_ID = "ApexSignal-v3.23.0-calibrated-scheduled-delivery-20261011"
+DEPLOYMENT_ID = "ApexSignal-v3.24.0-bottom-reversal-quality-gate-20261011"
 
 if __name__ == "__main__":
     log.info("DEPLOYMENT_ID: %s", DEPLOYMENT_ID)
