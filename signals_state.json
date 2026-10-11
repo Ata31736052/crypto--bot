@@ -1,9 +1,30 @@
 {
+  "APTUSDT": {
+    "entry": 0.8502,
+    "score": 80,
+    "sent_at": 1791704541.4509969,
+    "strategy": "CONFIRMED TREND",
+    "symbol": "APTUSDT"
+  },
   "ARPAUSDT": {
     "entry": 0.01179,
     "score": 83,
     "sent_at": 1791696987.2572596,
     "strategy": "CONFIRMED TREND",
     "symbol": "ARPAUSDT"
+  },
+  "FILUSDT": {
+    "entry": 1.0819,
+    "score": 66,
+    "sent_at": 1791704541.642861,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "FILUSDT"
+  },
+  "WLDUSDT": {
+    "entry": 0.5423,
+    "score": 80,
+    "sent_at": 1791704541.1651185,
+    "strategy": "CONFIRMED TREND",
+    "symbol": "WLDUSDT"
   }
 }
