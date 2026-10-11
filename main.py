@@ -1,6 +1,6 @@
 
 # ============================================================
-# ApexSignal v3.21.1 | BOTTOM NEAR-MISS AUDIT
+# ApexSignal v3.21.3 | RSI PAIR-LEVEL DIAGNOSTICS
 # Binance Spot | Daily + 4H primary | 1H confirmation
 # Trend + Bottom Hunter | Telegram signals only | NO AUTO-TRADING
 # ============================================================
@@ -416,7 +416,9 @@ def market_structure(h, lookback=64, pivot=2):
 
 def _rsi_divergence_details(h, lookback=42, pivot=2, min_gap=3, max_gap=25):
     """Compare RSI at two confirmed 4H swing lows; avoid arbitrary window minima."""
-    out = {"two_pivots": False, "price_lower_low": False, "delta_ge_4": False, "both": False}
+    out = {"two_pivots": False, "price_lower_low": False, "delta_ge_4": False, "both": False,
+           "older_idx": None, "newer_idx": None, "older_low": None, "newer_low": None,
+           "older_rsi": None, "newer_rsi": None, "gap": None, "price_change_pct": None, "rsi_delta": None}
     if h is None or len(h) < max(35, pivot * 2 + 5):
         return out
     try:
@@ -437,6 +439,12 @@ def _rsi_divergence_details(h, lookback=42, pivot=2, min_gap=3, max_gap=25):
             return out
         older = older_candidates[-1]
         out["two_pivots"] = True
+        out["older_idx"], out["newer_idx"] = int(older), int(newer)
+        out["older_low"], out["newer_low"] = float(lows[older]), float(lows[newer])
+        out["older_rsi"], out["newer_rsi"] = float(rsis[older]), float(rsis[newer])
+        out["gap"] = int(newer - older)
+        out["price_change_pct"] = float((lows[newer] / lows[older] - 1.0) * 100.0)
+        out["rsi_delta"] = float(rsis[newer] - rsis[older])
         out["price_lower_low"] = bool(lows[newer] < lows[older] * 0.995)
         out["delta_ge_4"] = bool(rsis[newer] >= rsis[older] + 4.0)
         out["both"] = bool(out["price_lower_low"] and out["delta_ge_4"])
@@ -1064,6 +1072,18 @@ def analyze_symbol(symbol, btc_d, btc_h):
         if daily_state not in {"BULLISH", "EARLY_BULLISH", "NEUTRAL", "BEARISH"}:
             raise RuntimeError(f"Daily state invariant failure: {daily_state!r}")
         if min(len(d),len(h),len(h1))<210: return None,stats,"insufficient data"
+        # Read-only pair-level audit: explains why the selected confirmed price pivots
+        # do or do not satisfy both RSI-divergence thresholds. No scoring or gate changes.
+        div_pair = _rsi_divergence_details(h)
+        if div_pair["two_pivots"]:
+            log.info(
+                "RSI PAIR AUDIT | %s | bars=%s->%s gap=%s | low=%.8g->%.8g | RSI=%.2f->%.2f | price_change=%.3f%% | RSI_delta=%.2f | price_ok=%s RSI_ok=%s BOTH=%s",
+                symbol, div_pair["older_idx"], div_pair["newer_idx"], div_pair["gap"],
+                div_pair["older_low"], div_pair["newer_low"],
+                div_pair["older_rsi"], div_pair["newer_rsi"],
+                div_pair["price_change_pct"], div_pair["rsi_delta"],
+                div_pair["price_lower_low"], div_pair["delta_ge_4"], div_pair["both"],
+            )
         sub_diag = bottom_trigger_subconditions(h)
         stats["bottom_subcondition_audit"].update(k for k, v in sub_diag.items() if v)
         trigger_diag = bottom_trigger_diagnostics(h)
@@ -1462,7 +1482,7 @@ def main():
 
 
 def self_test():
-    """v3.21.2 regression tests for bottom history, RSI pivots, and fail-closed confirmation."""
+    """v3.21.3 regression tests for RSI pair diagnostics and fail-closed confirmation."""
     assert MIN_SCORE==82 and BOTTOM_MIN_SCORE==82 and STRONG_SCORE==90 and BOTTOM_STRONG_SCORE==90
     assert BOTTOM_LOW_LOOKBACK_H4==42 and BOTTOM_LOW_DISTANCE_PCT==5.0
     assert MAX_SL_PCT==13.0 and BOTTOM_MAX_SL_PCT==15.0
@@ -1492,7 +1512,11 @@ def self_test():
 
     # Positive control: price makes a meaningful lower low and RSI is >=4 points higher.
     div_test = _div_frame(30, 42)
-    assert _rsi_divergence_details(div_test)["both"] is True
+    div_result = _rsi_divergence_details(div_test)
+    assert div_result["both"] is True
+    assert div_result["older_idx"] == 30 and div_result["newer_idx"] == 42
+    assert div_result["gap"] == 12 and div_result["price_change_pct"] < -0.5
+    assert div_result["rsi_delta"] == 5.0
     assert rsi_bullish_divergence(div_test) is True
 
     # Price must be at least 0.5% lower; RSI strength alone is insufficient.
@@ -1562,12 +1586,12 @@ def self_test():
     audit_keys = bottom_trigger_diagnostics(test_h)
     assert all(k in audit_keys for k in ("location:near 7d low", "location:Fibonacci zone", "structure:retest", "structure:CHOCH", "structure:BOS", "structure:higher low", "trigger:RSI divergence", "trigger:rejection candle", "trigger:MACD turn", "trigger:4H reclaim", "data:insufficient history", "data:diagnostic error"))
     assert BOTTOM_MIN_SCORE == 82 and BOTTOM_LOW_LOOKBACK_H4 == 42 and BOTTOM_LOW_DISTANCE_PCT == 5.0
-    log.info("v3.21.2 RSI PIVOT REGRESSION + BOTTOM AUDIT SELF-TEST: PASS")
+    log.info("v3.21.3 RSI PAIR AUDIT + REGRESSION SELF-TEST: PASS")
 
 
 
 
-DEPLOYMENT_ID = "ApexSignal-v3.21.2-rsi-pivot-regression-tests-20261011"
+DEPLOYMENT_ID = "ApexSignal-v3.21.3-rsi-pair-audit-20261011"
 
 if __name__ == "__main__":
     log.info("DEPLOYMENT_ID: %s", DEPLOYMENT_ID)
