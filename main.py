@@ -1,6 +1,6 @@
 
 # ============================================================
-# ApexSignal v3.21.0 | SWING-LOW DIVERGENCE + BOTTOM VOLUME ALIGNMENT
+# ApexSignal v3.21.1 | BOTTOM NEAR-MISS AUDIT
 # Binance Spot | Daily + 4H primary | 1H confirmation
 # Trend + Bottom Hunter | Telegram signals only | NO AUTO-TRADING
 # ============================================================
@@ -1219,7 +1219,7 @@ def aggregate(dst, src):
 
 
 def main():
-    log.info("Starting ApexSignal v3.21.0 | SWING-LOW DIVERGENCE + BOTTOM VOLUME ALIGNMENT | DAILY+4H SCORE | 1H CONFIRMATION-ONLY | FAIL-CLOSED")
+    log.info("Starting ApexSignal v3.21.1 | BOTTOM NEAR-MISS AUDIT | DAILY+4H SCORE | 1H CONFIRMATION-ONLY | FAIL-CLOSED")
     log.info("Primary: Daily direction + 4H setup | Entry confirmation: 1H | Trend + Bottom Hunter")
     log.info("No auto-trading.")
 
@@ -1522,12 +1522,12 @@ def self_test():
     audit_keys = bottom_trigger_diagnostics(test_h)
     assert all(k in audit_keys for k in ("location:near 7d low", "location:Fibonacci zone", "structure:retest", "structure:CHOCH", "structure:BOS", "structure:higher low", "trigger:RSI divergence", "trigger:rejection candle", "trigger:MACD turn", "trigger:4H reclaim", "data:insufficient history", "data:diagnostic error"))
     assert BOTTOM_MIN_SCORE == 82 and BOTTOM_LOW_LOOKBACK_H4 == 42 and BOTTOM_LOW_DISTANCE_PCT == 5.0
-    log.info("v3.21.0 SWING-LOW DIVERGENCE + BOTTOM VOLUME ALIGNMENT SELF-TEST: PASS")
+    log.info("v3.21.1 BOTTOM NEAR-MISS AUDIT SELF-TEST: PASS")
 
 
 
 
-DEPLOYMENT_ID = "ApexSignal-v3.21.0-swing-low-divergence-volume-align-20261011"
+DEPLOYMENT_ID = "ApexSignal-v3.21.1-bottom-near-miss-audit-20261011"
 
 if __name__ == "__main__":
     log.info("DEPLOYMENT_ID: %s", DEPLOYMENT_ID)
