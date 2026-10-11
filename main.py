@@ -1,6 +1,6 @@
 
 # ============================================================
-# ApexSignal v3.21.3 | RSI PAIR-LEVEL DIAGNOSTICS
+# ApexSignal v3.21.4 | ALL-PAIR RSI DIVERGENCE
 # Binance Spot | Daily + 4H primary | 1H confirmation
 # Trend + Bottom Hunter | Telegram signals only | NO AUTO-TRADING
 # ============================================================
@@ -491,7 +491,12 @@ def _rsi_divergence_pair_audit(h, lookback=42, pivot=2, min_gap=3, max_gap=25):
     return pairs
 
 def rsi_bullish_divergence(h):
-    return bool(_rsi_divergence_details(h)["both"])
+    """Accept divergence if ANY eligible pair of confirmed pivots qualifies.
+
+    The selected-pair details remain diagnostic-only. Runtime checks every
+    confirmed price-pivot pair in the same 42-bar / 3-25 gap window.
+    """
+    return any(pair["both"] for pair in _rsi_divergence_pair_audit(h))
 
 
 def rejection_candle(h):
@@ -1533,7 +1538,7 @@ def main():
 
 
 def self_test():
-    """v3.21.3 regression tests for RSI pair diagnostics and fail-closed confirmation."""
+    """v3.21.4 regression tests for all-pair RSI divergence and fail-closed confirmation."""
     assert MIN_SCORE==82 and BOTTOM_MIN_SCORE==82 and STRONG_SCORE==90 and BOTTOM_STRONG_SCORE==90
     assert BOTTOM_LOW_LOOKBACK_H4==42 and BOTTOM_LOW_DISTANCE_PCT==5.0
     assert MAX_SL_PCT==13.0 and BOTTOM_MAX_SL_PCT==15.0
@@ -1584,6 +1589,8 @@ def self_test():
     all_pairs = _rsi_divergence_pair_audit(multi)
     assert selected["two_pivots"] is True and selected["both"] is False
     assert any(p["older_idx"] == 12 and p["newer_idx"] == 36 and p["both"] for p in all_pairs)
+    # Runtime must accept the older qualifying pair even though the selected pair fails.
+    assert rsi_bullish_divergence(multi) is True
 
     # Price must be at least 0.5% lower; RSI strength alone is insufficient.
     weak_price = _div_frame(30, 42, older_low=90.0, newer_low=89.7)
@@ -1652,12 +1659,12 @@ def self_test():
     audit_keys = bottom_trigger_diagnostics(test_h)
     assert all(k in audit_keys for k in ("location:near 7d low", "location:Fibonacci zone", "structure:retest", "structure:CHOCH", "structure:BOS", "structure:higher low", "trigger:RSI divergence", "trigger:rejection candle", "trigger:MACD turn", "trigger:4H reclaim", "data:insufficient history", "data:diagnostic error"))
     assert BOTTOM_MIN_SCORE == 82 and BOTTOM_LOW_LOOKBACK_H4 == 42 and BOTTOM_LOW_DISTANCE_PCT == 5.0
-    log.info("v3.21.3 RSI PAIR AUDIT + REGRESSION SELF-TEST: PASS")
+    log.info("v3.21.4 ALL-PAIR RSI DIVERGENCE + REGRESSION SELF-TEST: PASS")
 
 
 
 
-DEPLOYMENT_ID = "ApexSignal-v3.21.3-rsi-pair-audit-20261011"
+DEPLOYMENT_ID = "ApexSignal-v3.21.4-all-pair-rsi-divergence-20261011"
 
 if __name__ == "__main__":
     log.info("DEPLOYMENT_ID: %s", DEPLOYMENT_ID)
