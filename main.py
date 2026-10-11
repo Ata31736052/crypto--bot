@@ -1573,6 +1573,18 @@ def self_test():
     assert any(p["older_idx"] == 22 and p["newer_idx"] == 34 and p["both"] for p in pair_rows)
     assert all(3 <= p["gap"] <= 25 for p in pair_rows)
 
+    # Regression: latest eligible pair can fail while an older eligible pair passes.
+    multi = pd.DataFrame({"low": [110.0]*42, "rsi": [35.0]*42})
+    for idx, low, rsi_value in ((12, 100.0, 25.0), (25, 98.0, 40.0), (36, 97.0, 32.0)):
+        multi.loc[idx, "low"] = low
+        multi.loc[idx, "rsi"] = rsi_value
+        multi.loc[idx-1, "low"] = 111.0
+        multi.loc[idx+1, "low"] = 111.0
+    selected = _rsi_divergence_details(multi)
+    all_pairs = _rsi_divergence_pair_audit(multi)
+    assert selected["two_pivots"] is True and selected["both"] is False
+    assert any(p["older_idx"] == 12 and p["newer_idx"] == 36 and p["both"] for p in all_pairs)
+
     # Price must be at least 0.5% lower; RSI strength alone is insufficient.
     weak_price = _div_frame(30, 42, older_low=90.0, newer_low=89.7)
     assert _rsi_divergence_details(weak_price)["price_lower_low"] is False
