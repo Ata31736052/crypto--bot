@@ -1,6 +1,6 @@
 
 # ============================================================
-# ApexSignal v3.22.0 | EARLY REVERSAL BOTTOM HUNTER
+# ApexSignal v3.23.0 | SCHEDULED SIGNAL DELIVERY CALIBRATION
 # Binance Spot | Daily + 4H primary | 1H confirmation
 # Trend + Bottom Hunter | Telegram signals only | NO AUTO-TRADING
 # ============================================================
@@ -35,11 +35,13 @@ MAX_SIGNALS = 3  # maximum Telegram messages, NOT a coin/universe limit
 # The liquidity floor is a quality/data-safety filter, not a coin-count limit.
 # Universe is not capped by coin count. Symbols must pass the explicit $10M 24h quote-volume floor.
 MIN_24H_USDT_VOLUME = 10_000_000
-MIN_SCORE = 82
+# Calibrated against the latest live score distribution: trend max=80, bottom max=66.
+# 1H confirmation, volume, risk, and RR gates remain mandatory after this score gate.
+MIN_SCORE = 80
 STRONG_SCORE = 90
 TREND_SCORE_MAX = 100  # exact sum of reachable trend score components
 BOTTOM_SCORE_MAX = 100  # calibrated 100-point bottom score
-BOTTOM_MIN_SCORE = 82
+BOTTOM_MIN_SCORE = 66
 BOTTOM_STRONG_SCORE = 90
 BOTTOM_LOW_LOOKBACK_H4 = 42  # seven days of confirmed 4H candles
 BOTTOM_LOW_DISTANCE_PCT = 5.0
@@ -81,7 +83,7 @@ logging.basicConfig(
 log = logging.getLogger("crypto-bot")
 
 session = requests.Session()
-session.headers.update({"User-Agent": "CryptoSignalBot/ApexSignal-v3.20.1"})
+session.headers.update({"User-Agent": "CryptoSignalBot/ApexSignal-v3.23.0"})
 
 
 # ---------------- HTTP ----------------
@@ -1340,7 +1342,7 @@ def aggregate(dst, src):
 
 
 def main():
-    log.info("Starting %s | BOTTOM NEAR-MISS AUDIT | DAILY+4H SCORE | 1H CONFIRMATION-ONLY | FAIL-CLOSED", DEPLOYMENT_ID)
+    log.info("Starting %s | CALIBRATED SCORE GATES | DAILY+4H SETUP | 1H CONFIRMATION | FAIL-CLOSED", DEPLOYMENT_ID)
     log.info("Primary: Daily direction + 4H setup | Entry confirmation: 1H | Trend + Bottom Hunter")
     log.info("No auto-trading.")
 
@@ -1583,8 +1585,8 @@ def main():
 
 
 def self_test():
-    """v3.22.0 regression tests for early-reversal scoring, all-pair RSI divergence and fail-closed confirmation."""
-    assert MIN_SCORE==82 and BOTTOM_MIN_SCORE==82 and STRONG_SCORE==90 and BOTTOM_STRONG_SCORE==90
+    """v3.23.0 regression tests for calibrated score gates, RSI divergence and fail-closed confirmation."""
+    assert MIN_SCORE==80 and BOTTOM_MIN_SCORE==66 and STRONG_SCORE==90 and BOTTOM_STRONG_SCORE==90
     assert BOTTOM_LOW_LOOKBACK_H4==42 and BOTTOM_LOW_DISTANCE_PCT==5.0
     assert MAX_SL_PCT==13.0 and BOTTOM_MAX_SL_PCT==15.0
     assert HTTP_RETRIES>=2 and RETRY_BACKOFF>0
@@ -1709,16 +1711,16 @@ def self_test():
     assert all(k in sub_keys for k in ("rsi:two_pivots_found", "rsi:price_lower_low", "rsi:delta_ge_4", "rsi:both_conditions_pass", "rsi:price_only", "rsi:delta_only", "rsi:neither", "rejection:wick_ge_35pct", "rejection:bullish_close", "rejection:close_top_40pct", "macd:hist_rising", "macd:above_signal", "macd:fresh_cross", "reclaim:close_above_ema9", "reclaim:above_prev_high_or_ema21", "reclaim:ema9_nonfalling", "volume:lt_0.60", "volume:0.60_to_0.75", "volume:0.75_to_1.00", "volume:1.00_to_1.40", "volume:ge_1.40", "data:subcondition_error"))
     audit_keys = bottom_trigger_diagnostics(test_h)
     assert all(k in audit_keys for k in ("location:near 7d low", "location:Fibonacci zone", "structure:retest", "structure:CHOCH", "structure:BOS", "structure:higher low", "trigger:RSI divergence", "trigger:rejection candle", "trigger:MACD turn", "trigger:4H reclaim", "data:insufficient history", "data:diagnostic error"))
-    assert BOTTOM_MIN_SCORE == 82 and BOTTOM_LOW_LOOKBACK_H4 == 42 and BOTTOM_LOW_DISTANCE_PCT == 5.0
+    assert BOTTOM_MIN_SCORE == 66 and BOTTOM_LOW_LOOKBACK_H4 == 42 and BOTTOM_LOW_DISTANCE_PCT == 5.0
     trigger_test = bottom_reversal_trigger_points(test_h)
     assert 0 <= trigger_test["raw"] <= 24
     assert sum(trigger_test["parts"].values()) == trigger_test["raw"]
-    log.info("v3.22.0 EARLY REVERSAL SCORING + ALL-PAIR RSI DIVERGENCE SELF-TEST: PASS")
+    log.info("v3.23.0 CALIBRATED SCORE GATES + EARLY REVERSAL + ALL-PAIR RSI SELF-TEST: PASS")
 
 
 
 
-DEPLOYMENT_ID = "ApexSignal-v3.22.0-early-reversal-bottom-hunter-20261011"
+DEPLOYMENT_ID = "ApexSignal-v3.23.0-calibrated-scheduled-delivery-20261011"
 
 if __name__ == "__main__":
     log.info("DEPLOYMENT_ID: %s", DEPLOYMENT_ID)
