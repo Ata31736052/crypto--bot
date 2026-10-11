@@ -1462,7 +1462,7 @@ def main():
 
 
 def self_test():
-    """v3.20.1 regression tests for bottom-history and fail-closed confirmation."""
+    """v3.21.2 regression tests for bottom history, RSI pivots, and fail-closed confirmation."""
     assert MIN_SCORE==82 and BOTTOM_MIN_SCORE==82 and STRONG_SCORE==90 and BOTTOM_STRONG_SCORE==90
     assert BOTTOM_LOW_LOOKBACK_H4==42 and BOTTOM_LOW_DISTANCE_PCT==5.0
     assert MAX_SL_PCT==13.0 and BOTTOM_MAX_SL_PCT==15.0
@@ -1474,13 +1474,49 @@ def self_test():
     assert callable(professional_signal_quality_gate)
     assert callable(_nearest_confirmed_swing_low) and callable(_rsi_divergence_details)
     assert BOTTOM_VOL_MIN == 0.60
-    div_test = pd.DataFrame({"low":[100.0]*50, "rsi":[40.0]*50})
-    div_test.loc[30, "low"] = 90.0; div_test.loc[30, "rsi"] = 30.0
-    div_test.loc[42, "low"] = 89.0; div_test.loc[42, "rsi"] = 35.0
-    div_test.loc[29, "low"] = 94.0; div_test.loc[31, "low"] = 94.0
-    div_test.loc[41, "low"] = 93.0; div_test.loc[43, "low"] = 93.0
+    # RSI divergence regression suite: aligned pivots, threshold boundaries,
+    # spacing limits, and confirmation lag. These tests do not alter runtime rules.
+    def _div_frame(older_idx, newer_idx, older_low=90.0, newer_low=89.0,
+                   older_rsi=30.0, newer_rsi=35.0):
+        frame = pd.DataFrame({"low":[100.0]*50, "rsi":[40.0]*50})
+        for idx, low, rsi_value in (
+            (older_idx, older_low, older_rsi), (newer_idx, newer_low, newer_rsi)
+        ):
+            frame.loc[idx, "low"] = low
+            frame.loc[idx, "rsi"] = rsi_value
+            if idx > 0:
+                frame.loc[idx-1, "low"] = 94.0
+            if idx < len(frame)-1:
+                frame.loc[idx+1, "low"] = 94.0
+        return frame
+
+    # Positive control: price makes a meaningful lower low and RSI is >=4 points higher.
+    div_test = _div_frame(30, 42)
     assert _rsi_divergence_details(div_test)["both"] is True
     assert rsi_bullish_divergence(div_test) is True
+
+    # Price must be at least 0.5% lower; RSI strength alone is insufficient.
+    weak_price = _div_frame(30, 42, older_low=90.0, newer_low=89.7)
+    assert _rsi_divergence_details(weak_price)["price_lower_low"] is False
+    assert _rsi_divergence_details(weak_price)["both"] is False
+
+    # RSI must improve by at least 4 points; price structure alone is insufficient.
+    weak_rsi = _div_frame(30, 42, older_rsi=30.0, newer_rsi=33.9)
+    assert _rsi_divergence_details(weak_rsi)["delta_ge_4"] is False
+    assert _rsi_divergence_details(weak_rsi)["both"] is False
+
+    # Two pivots closer than min_gap must not be paired.
+    too_close = _div_frame(30, 32)
+    assert _rsi_divergence_details(too_close)["both"] is False
+
+    # Two pivots farther apart than max_gap must not be paired.
+    too_far = _div_frame(12, 40)
+    assert _rsi_divergence_details(too_far)["both"] is False
+
+    # A pivot at the newest edge is not confirmed without right-side candles.
+    edge = _div_frame(30, 49)
+    assert _rsi_divergence_details(edge)["two_pivots"] is False
+    assert _rsi_divergence_details(edge)["both"] is False
     import inspect
     gate_src=inspect.getsource(professional_signal_quality_gate)
     assert 'check("Daily context"' not in gate_src and 'check("BTC safety"' not in gate_src and 'check("1H confirmation"' not in gate_src
@@ -1522,12 +1558,12 @@ def self_test():
     audit_keys = bottom_trigger_diagnostics(test_h)
     assert all(k in audit_keys for k in ("location:near 7d low", "location:Fibonacci zone", "structure:retest", "structure:CHOCH", "structure:BOS", "structure:higher low", "trigger:RSI divergence", "trigger:rejection candle", "trigger:MACD turn", "trigger:4H reclaim", "data:insufficient history", "data:diagnostic error"))
     assert BOTTOM_MIN_SCORE == 82 and BOTTOM_LOW_LOOKBACK_H4 == 42 and BOTTOM_LOW_DISTANCE_PCT == 5.0
-    log.info("v3.21.1 BOTTOM NEAR-MISS AUDIT SELF-TEST: PASS")
+    log.info("v3.21.2 RSI PIVOT REGRESSION + BOTTOM AUDIT SELF-TEST: PASS")
 
 
 
 
-DEPLOYMENT_ID = "ApexSignal-v3.21.1-bottom-near-miss-audit-20261011"
+DEPLOYMENT_ID = "ApexSignal-v3.21.2-rsi-pivot-regression-tests-20261011"
 
 if __name__ == "__main__":
     log.info("DEPLOYMENT_ID: %s", DEPLOYMENT_ID)
