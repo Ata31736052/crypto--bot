@@ -1,6 +1,6 @@
 
 # ============================================================
-# ApexSignal v3.20.3 | BOTTOM SUBCONDITION AUDIT | DIAGNOSTICS ONLY
+# ApexSignal v3.21.0 | SWING-LOW DIVERGENCE + BOTTOM VOLUME ALIGNMENT
 # Binance Spot | Daily + 4H primary | 1H confirmation
 # Trend + Bottom Hunter | Telegram signals only | NO AUTO-TRADING
 # ============================================================
@@ -51,7 +51,8 @@ H4_ADX_MIN = 20.0
 H4_ADX_RISING_MIN = 18.0
 H4_VOL_MIN = 0.80
 H4_VOL_STRONG = 1.80
-BOTTOM_VOL_MIN = 0.80
+# Hard veto for Bottom Hunter; 0.60-0.75 remains eligible but receives no volume points.
+BOTTOM_VOL_MIN = 0.60
 ONE_H_VOL_MIN = 0.75
 
 TAKER_BUY_MIN = 0.49
@@ -413,12 +414,39 @@ def market_structure(h, lookback=64, pivot=2):
             "break_volume":vol,"break_body_ratio":body,"state":state,"reason":reason}
 
 
+def _rsi_divergence_details(h, lookback=42, pivot=2, min_gap=3, max_gap=25):
+    """Compare RSI at two confirmed 4H swing lows; avoid arbitrary window minima."""
+    out = {"two_pivots": False, "price_lower_low": False, "delta_ge_4": False, "both": False}
+    if h is None or len(h) < max(35, pivot * 2 + 5):
+        return out
+    try:
+        x = h.tail(lookback).reset_index(drop=True)
+        lows = pd.to_numeric(x["low"], errors="coerce").to_numpy(float)
+        rsis = pd.to_numeric(x["rsi"], errors="coerce").to_numpy(float)
+        if not np.isfinite(lows).all() or not np.isfinite(rsis).all():
+            return out
+        pivots = []
+        for i in range(pivot, len(x) - pivot):
+            if lows[i] <= lows[i-pivot:i].min() and lows[i] < lows[i+1:i+pivot+1].min():
+                pivots.append(i)
+        if len(pivots) < 2:
+            return out
+        newer = pivots[-1]
+        older_candidates = [i for i in pivots[:-1] if min_gap <= newer-i <= max_gap]
+        if not older_candidates:
+            return out
+        older = older_candidates[-1]
+        out["two_pivots"] = True
+        out["price_lower_low"] = bool(lows[newer] < lows[older] * 0.995)
+        out["delta_ge_4"] = bool(rsis[newer] >= rsis[older] + 4.0)
+        out["both"] = bool(out["price_lower_low"] and out["delta_ge_4"])
+        return out
+    except (KeyError, TypeError, ValueError, IndexError):
+        return out
+
+
 def rsi_bullish_divergence(h):
-    if len(h)<35: return False
-    a=h.iloc[-25:-8]; b=h.iloc[-8:]
-    pa=float(a.low.min()); pb=float(b.low.min())
-    ra=float(a.loc[a.low.idxmin(),"rsi"]); rb=float(b.loc[b.low.idxmin(),"rsi"])
-    return bool(pb<pa*0.995 and rb>=ra+4.0)
+    return bool(_rsi_divergence_details(h)["both"])
 
 
 def rejection_candle(h):
@@ -452,17 +480,21 @@ def macd_turn(h):
 
 def bottom_trigger_subconditions(h):
     """Explain why each bottom trigger passes/fails; read-only and score-neutral."""
-    keys = ("rsi:price_lower_low", "rsi:delta_ge_4", "rejection:wick_ge_35pct", "rejection:bullish_close", "rejection:close_top_40pct", "macd:hist_rising", "macd:above_signal", "macd:fresh_cross", "reclaim:close_above_ema9", "reclaim:above_prev_high_or_ema21", "reclaim:ema9_nonfalling", "volume:lt_0.60", "volume:0.60_to_0.75", "volume:0.75_to_1.00", "volume:1.00_to_1.40", "volume:ge_1.40", "data:subcondition_error")
+    keys = ("rsi:two_pivots_found", "rsi:price_lower_low", "rsi:delta_ge_4", "rsi:both_conditions_pass", "rsi:price_only", "rsi:delta_only", "rsi:neither", "rejection:wick_ge_35pct", "rejection:bullish_close", "rejection:close_top_40pct", "macd:hist_rising", "macd:above_signal", "macd:fresh_cross", "reclaim:close_above_ema9", "reclaim:above_prev_high_or_ema21", "reclaim:ema9_nonfalling", "volume:lt_0.60", "volume:0.60_to_0.75", "volume:0.75_to_1.00", "volume:1.00_to_1.40", "volume:ge_1.40", "data:subcondition_error")
     out = {k: False for k in keys}
     if h is None or len(h) < 35:
         out["data:subcondition_error"] = True
         return out
     try:
-        a, b = h.iloc[-25:-8], h.iloc[-8:]
-        pa, pb = float(a.low.min()), float(b.low.min())
-        ra = float(a.loc[a.low.idxmin(), "rsi"]); rb = float(b.loc[b.low.idxmin(), "rsi"])
-        out["rsi:price_lower_low"] = bool(pb < pa * 0.995)
-        out["rsi:delta_ge_4"] = bool(rb >= ra + 4.0)
+        div = _rsi_divergence_details(h)
+        out["rsi:two_pivots_found"] = bool(div["two_pivots"])
+        out["rsi:price_lower_low"] = bool(div["price_lower_low"])
+        out["rsi:delta_ge_4"] = bool(div["delta_ge_4"])
+        out["rsi:both_conditions_pass"] = bool(div["both"])
+        if div["two_pivots"]:
+            out["rsi:price_only"] = bool(div["price_lower_low"] and not div["delta_ge_4"])
+            out["rsi:delta_only"] = bool(div["delta_ge_4"] and not div["price_lower_low"])
+            out["rsi:neither"] = bool(not div["price_lower_low"] and not div["delta_ge_4"])
         r, p = h.iloc[-1], h.iloc[-2]
         rng = max(float(r.high-r.low), 1e-12)
         wick = float(min(r.open,r.close)-r.low)/rng
@@ -635,7 +667,7 @@ def bottom_setup(d, h, h1, btc_d, btc_h):
     near_low,_=near_recent_low(h,BOTTOM_LOW_DISTANCE_PCT); fib_ok,_=fib_zone(h); ms=market_structure(h)
     triggers=(rsi_bullish_divergence(h),rejection_candle(h),macd_turn(h),reclaim_4h(h))
     if not (near_low or fib_ok or sum(triggers)>=3 or ms.get("retest")): return None,["no bottom location/reversal evidence"]
-    if r.vol_ratio<0.60: return None,["4H volume critically weak"]
+    if r.vol_ratio < BOTTOM_VOL_MIN: return None,["4H volume critically weak"]
     audit=unified_bottom_score_audit(d,h,h1,btc_d,btc_h)
     if audit["score"]<BOTTOM_MIN_SCORE: return None,[f"setup score {audit['score']} < {BOTTOM_MIN_SCORE}","SCORE MISSING="+" | ".join(audit["missing"][:8])]
     reasons=[k for k,v in audit["components"].items() if v>=0.75*audit["weights"][k]]
@@ -1185,7 +1217,7 @@ def aggregate(dst, src):
 
 
 def main():
-    log.info("Starting ApexSignal v3.20.3 | BOTTOM SUBCONDITION AUDIT | DAILY+4H SCORE | 1H CONFIRMATION-ONLY | FAIL-CLOSED")
+    log.info("Starting ApexSignal v3.21.0 | SWING-LOW DIVERGENCE + BOTTOM VOLUME ALIGNMENT | DAILY+4H SCORE | 1H CONFIRMATION-ONLY | FAIL-CLOSED")
     log.info("Primary: Daily direction + 4H setup | Entry confirmation: 1H | Trend + Bottom Hunter")
     log.info("No auto-trading.")
 
@@ -1323,7 +1355,7 @@ def main():
         save_signal_state(state)
         log.info("Signal state saved: %d active dedup records", len(state))
     if totals["bottom_subcondition_audit"]:
-        sub_order = ("rsi:price_lower_low", "rsi:delta_ge_4", "rejection:wick_ge_35pct", "rejection:bullish_close", "rejection:close_top_40pct", "macd:hist_rising", "macd:above_signal", "macd:fresh_cross", "reclaim:close_above_ema9", "reclaim:above_prev_high_or_ema21", "reclaim:ema9_nonfalling", "volume:lt_0.60", "volume:0.60_to_0.75", "volume:0.75_to_1.00", "volume:1.00_to_1.40", "volume:ge_1.40", "data:subcondition_error")
+        sub_order = ("rsi:two_pivots_found", "rsi:price_lower_low", "rsi:delta_ge_4", "rsi:both_conditions_pass", "rsi:price_only", "rsi:delta_only", "rsi:neither", "rejection:wick_ge_35pct", "rejection:bullish_close", "rejection:close_top_40pct", "macd:hist_rising", "macd:above_signal", "macd:fresh_cross", "reclaim:close_above_ema9", "reclaim:above_prev_high_or_ema21", "reclaim:ema9_nonfalling", "volume:lt_0.60", "volume:0.60_to_0.75", "volume:0.75_to_1.00", "volume:1.00_to_1.40", "volume:ge_1.40", "data:subcondition_error")
         sub_text = " | ".join("{}={}".format(k, totals["bottom_subcondition_audit"].get(k, 0)) for k in sub_order)
         log.info("BOTTOM SUBCONDITION AUDIT | " + sub_text)
     if totals["bottom_trigger_audit"]:
@@ -1438,7 +1470,15 @@ def self_test():
     assert sum({"Location":15,"Structure reaction":15,"Reversal triggers":24,"MACD":7,"RSI":7,"Bottom volume":7,"Taker buy":5,"Trade activity":4,"ADX":4,"Daily context":4,"BTC context":3,"Volatility health":5}.values())==100
     assert callable(unified_trend_score_audit) and callable(unified_bottom_score_audit)
     assert callable(professional_signal_quality_gate)
-    assert callable(_nearest_confirmed_swing_low)
+    assert callable(_nearest_confirmed_swing_low) and callable(_rsi_divergence_details)
+    assert BOTTOM_VOL_MIN == 0.60
+    div_test = pd.DataFrame({"low":[100.0]*50, "rsi":[40.0]*50})
+    div_test.loc[30, "low"] = 90.0; div_test.loc[30, "rsi"] = 30.0
+    div_test.loc[42, "low"] = 89.0; div_test.loc[42, "rsi"] = 35.0
+    div_test.loc[29, "low"] = 94.0; div_test.loc[31, "low"] = 94.0
+    div_test.loc[41, "low"] = 93.0; div_test.loc[43, "low"] = 93.0
+    assert _rsi_divergence_details(div_test)["both"] is True
+    assert rsi_bullish_divergence(div_test) is True
     import inspect
     gate_src=inspect.getsource(professional_signal_quality_gate)
     assert 'check("Daily context"' not in gate_src and 'check("BTC safety"' not in gate_src and 'check("1H confirmation"' not in gate_src
@@ -1476,16 +1516,16 @@ def self_test():
     trade, err = build_trade(test_h, "CONFIRMED TREND")
     assert (trade is not None and trade["risk_pct"] <= MAX_SL_PCT) or (trade is None and err is not None)
     sub_keys = bottom_trigger_subconditions(test_h)
-    assert all(k in sub_keys for k in ("rsi:price_lower_low", "rsi:delta_ge_4", "rejection:wick_ge_35pct", "rejection:bullish_close", "rejection:close_top_40pct", "macd:hist_rising", "macd:above_signal", "macd:fresh_cross", "reclaim:close_above_ema9", "reclaim:above_prev_high_or_ema21", "reclaim:ema9_nonfalling", "volume:lt_0.60", "volume:0.60_to_0.75", "volume:0.75_to_1.00", "volume:1.00_to_1.40", "volume:ge_1.40", "data:subcondition_error"))
+    assert all(k in sub_keys for k in ("rsi:two_pivots_found", "rsi:price_lower_low", "rsi:delta_ge_4", "rsi:both_conditions_pass", "rsi:price_only", "rsi:delta_only", "rsi:neither", "rejection:wick_ge_35pct", "rejection:bullish_close", "rejection:close_top_40pct", "macd:hist_rising", "macd:above_signal", "macd:fresh_cross", "reclaim:close_above_ema9", "reclaim:above_prev_high_or_ema21", "reclaim:ema9_nonfalling", "volume:lt_0.60", "volume:0.60_to_0.75", "volume:0.75_to_1.00", "volume:1.00_to_1.40", "volume:ge_1.40", "data:subcondition_error"))
     audit_keys = bottom_trigger_diagnostics(test_h)
     assert all(k in audit_keys for k in ("location:near 7d low", "location:Fibonacci zone", "structure:retest", "structure:CHOCH", "structure:BOS", "structure:higher low", "trigger:RSI divergence", "trigger:rejection candle", "trigger:MACD turn", "trigger:4H reclaim", "data:insufficient history", "data:diagnostic error"))
     assert BOTTOM_MIN_SCORE == 82 and BOTTOM_LOW_LOOKBACK_H4 == 42 and BOTTOM_LOW_DISTANCE_PCT == 5.0
-    log.info("v3.20.3 BOTTOM SUBCONDITION AUDIT SELF-TEST: PASS (read-only subconditions; score and thresholds unchanged)")
+    log.info("v3.21.0 SWING-LOW DIVERGENCE + BOTTOM VOLUME ALIGNMENT SELF-TEST: PASS")
 
 
 
 
-DEPLOYMENT_ID = "ApexSignal-v3.20.3-bottom-subcondition-audit-20261011"
+DEPLOYMENT_ID = "ApexSignal-v3.21.0-swing-low-divergence-volume-align-20261011"
 
 if __name__ == "__main__":
     log.info("DEPLOYMENT_ID: %s", DEPLOYMENT_ID)
