@@ -1,6 +1,6 @@
 
 # ============================================================
-# ApexSignal v3.20.1 | FINAL GLOBAL ROOT FIX
+# ApexSignal v3.20.2 | BOTTOM TRIGGER AUDIT | DIAGNOSTICS ONLY
 # Binance Spot | Daily + 4H primary | 1H confirmation
 # Trend + Bottom Hunter | Telegram signals only | NO AUTO-TRADING
 # ============================================================
@@ -448,6 +448,32 @@ def macd_turn(h):
     fresh=bool(p.macd_hist<=0 and r.macd_hist>0 and r.macd>r.macd_signal)
     turn=bool(r.macd_hist>p.macd_hist and r.macd>r.macd_signal and r.macd_hist>=-abs(r.atr)*0.05)
     return fresh or turn
+
+
+def bottom_trigger_diagnostics(h):
+    """Read-only audit of Bottom Hunter evidence; never changes eligibility or score."""
+    keys = ("location:near 7d low", "location:Fibonacci zone", "structure:retest", "structure:CHOCH", "structure:BOS", "structure:higher low", "trigger:RSI divergence", "trigger:rejection candle", "trigger:MACD turn", "trigger:4H reclaim", "data:insufficient history", "data:diagnostic error")
+    out = {k: False for k in keys}
+    if h is None or len(h) < BOTTOM_LOW_LOOKBACK_H4:
+        out["data:insufficient history"] = True
+        return out
+    try:
+        near_low, _ = near_recent_low(h, BOTTOM_LOW_DISTANCE_PCT)
+        fib_ok, _ = fib_zone(h)
+        ms = market_structure(h)
+        out["location:near 7d low"] = bool(near_low)
+        out["location:Fibonacci zone"] = bool(fib_ok)
+        out["structure:retest"] = bool(ms.get("retest", False))
+        out["structure:CHOCH"] = bool(ms.get("choch", False))
+        out["structure:BOS"] = bool(ms.get("bos", False))
+        out["structure:higher low"] = bool(ms.get("higher_low", False))
+        out["trigger:RSI divergence"] = bool(rsi_bullish_divergence(h))
+        out["trigger:rejection candle"] = bool(rejection_candle(h))
+        out["trigger:MACD turn"] = bool(macd_turn(h))
+        out["trigger:4H reclaim"] = bool(reclaim_4h(h))
+    except Exception:
+        out["data:diagnostic error"] = True
+    return out
 
 
 def h4_structure_ok(h):
@@ -960,7 +986,7 @@ def unified_bottom_score_audit(d, h, h1, btc_d, btc_h):
 
 def analyze_symbol(symbol, btc_d, btc_h):
     stats={"scanned":1,"trend_candidate":0,"bottom_candidate":0,"h1_reject":0,"risk_reject":0,"trade_reject_count":0,"final_gate_reject_count":0,"final":0,
-           "diagnostic_reasons":Counter(),"trend_blockers":Counter(),"bottom_blockers":Counter(),"trend_block_single":0,"trend_block_multiple":0,
+           "diagnostic_reasons":Counter(),"trend_blockers":Counter(),"bottom_blockers":Counter(),"bottom_trigger_audit":Counter(),"trend_block_single":0,"trend_block_multiple":0,
            "bottom_block_single":0,"bottom_block_multiple":0,"trend_base_pass":0,"trend_1h_only_fail":0,"bottom_base_pass":0,"bottom_1h_only_fail":0,
            "h1_trend_failures":Counter(),"h1_bottom_failures":Counter(),"trade_rejects":Counter(),"final_gate_rejects":Counter(),"trend_score_rejects":Counter(),"bottom_score_rejects":Counter(),"trend_score_buckets":Counter(),"bottom_score_buckets":Counter(),"trend_score_values":[],"bottom_score_values":[],"trend_potential_scores":[],"bottom_potential_scores":[],"trend_potential_buckets":Counter(),"bottom_potential_buckets":Counter(),"trend_potential_top":[],"bottom_potential_top":[],"trend_audit_scores":[],"bottom_audit_scores":[],"trend_audit_buckets":Counter(),"bottom_audit_buckets":Counter(),"trend_audit_top":[],"bottom_audit_top":[]}
     try:
@@ -970,6 +996,13 @@ def analyze_symbol(symbol, btc_d, btc_h):
         if daily_state not in {"BULLISH", "EARLY_BULLISH", "NEUTRAL", "BEARISH"}:
             raise RuntimeError(f"Daily state invariant failure: {daily_state!r}")
         if min(len(d),len(h),len(h1))<210: return None,stats,"insufficient data"
+        trigger_diag = bottom_trigger_diagnostics(h)
+        stats["bottom_trigger_audit"]["checked:symbols"] += 1
+        for audit_key, audit_pass in trigger_diag.items():
+            if audit_pass: stats["bottom_trigger_audit"][audit_key] += 1
+        audit_evidence = ("location:near 7d low", "location:Fibonacci zone", "structure:retest", "structure:CHOCH", "structure:BOS", "structure:higher low", "trigger:RSI divergence", "trigger:rejection candle", "trigger:MACD turn", "trigger:4H reclaim")
+        if not any(trigger_diag[k] for k in audit_evidence):
+            stats["bottom_trigger_audit"]["none:location+structure+triggers"] += 1
         tblocks=diagnostic_trend_blocks(d,h,h1,btc_d,btc_h,daily_state); bblocks=diagnostic_bottom_blocks(d,h,h1,btc_d,btc_h)
         stats["trend_blockers"].update(tblocks); stats["bottom_blockers"].update(bblocks)
         if len(tblocks) == 1: stats["trend_block_single"] += 1
@@ -1105,7 +1138,7 @@ def analyze_symbol(symbol, btc_d, btc_h):
 
 def aggregate(dst, src):
     for k in dst:
-        if k in ("diagnostic_reasons", "trend_blockers", "bottom_blockers", "h1_trend_failures", "h1_bottom_failures", "trade_rejects", "final_gate_rejects", "trend_score_rejects", "bottom_score_rejects", "trend_score_buckets", "bottom_score_buckets", "trend_potential_buckets", "bottom_potential_buckets", "trend_audit_buckets", "bottom_audit_buckets"):
+        if k in ("diagnostic_reasons", "trend_blockers", "bottom_blockers", "bottom_trigger_audit", "h1_trend_failures", "h1_bottom_failures", "trade_rejects", "final_gate_rejects", "trend_score_rejects", "bottom_score_rejects", "trend_score_buckets", "bottom_score_buckets", "trend_potential_buckets", "bottom_potential_buckets", "trend_audit_buckets", "bottom_audit_buckets"):
             dst[k].update(src.get(k, {}))
         elif k in ("trend_score_values", "bottom_score_values", "trend_potential_scores", "bottom_potential_scores", "trend_potential_top", "bottom_potential_top", "trend_audit_scores", "bottom_audit_scores", "trend_audit_top", "bottom_audit_top"):
             dst[k].extend(src.get(k, []))
@@ -1114,7 +1147,7 @@ def aggregate(dst, src):
 
 
 def main():
-    log.info("Starting ApexSignal v3.20.1 | GLOBAL PIPELINE ROOT FIX | DAILY+4H SCORE | 1H CONFIRMATION-ONLY | FAIL-CLOSED")
+    log.info("Starting ApexSignal v3.20.2 | BOTTOM TRIGGER AUDIT | DAILY+4H SCORE | 1H CONFIRMATION-ONLY | FAIL-CLOSED")
     log.info("Primary: Daily direction + 4H setup | Entry confirmation: 1H | Trend + Bottom Hunter")
     log.info("No auto-trading.")
 
@@ -1133,6 +1166,7 @@ def main():
         "final": 0,
         "diagnostic_reasons": Counter(),
         "trend_blockers": Counter(),
+        "bottom_trigger_audit": Counter(),
         "bottom_blockers": Counter(),
         "trend_block_single": 0,
         "trend_block_multiple": 0,
@@ -1249,6 +1283,10 @@ def main():
     if state_changed:
         save_signal_state(state)
         log.info("Signal state saved: %d active dedup records", len(state))
+    if totals["bottom_trigger_audit"]:
+        audit_order = ("checked:symbols", "location:near 7d low", "location:Fibonacci zone", "structure:retest", "structure:CHOCH", "structure:BOS", "structure:higher low", "trigger:RSI divergence", "trigger:rejection candle", "trigger:MACD turn", "trigger:4H reclaim", "none:location+structure+triggers", "data:insufficient history", "data:diagnostic error")
+        audit_text = " | ".join("{}={}".format(k, totals["bottom_trigger_audit"].get(k, 0)) for k in audit_order)
+        log.info("BOTTOM TRIGGER AUDIT | " + audit_text)
     if totals["diagnostic_reasons"]:
         top = totals["diagnostic_reasons"].most_common(12)
         log.info("DEEP DIAGNOSTIC SUMMARY | " + " | ".join(f"{reason} x{count}" for reason, count in top))
@@ -1394,12 +1432,15 @@ def self_test():
     test_h = add_indicators(test_h)
     trade, err = build_trade(test_h, "CONFIRMED TREND")
     assert (trade is not None and trade["risk_pct"] <= MAX_SL_PCT) or (trade is None and err is not None)
-    log.info("v3.20.1 BOTTOM HISTORY + FAIL-CLOSED CONFIRMATION SELF-TEST: PASS (single-source setup | bounded SL | 1H confirmation-only | aligned diagnostics | logging contract)")
+    audit_keys = bottom_trigger_diagnostics(test_h)
+    assert all(k in audit_keys for k in ("location:near 7d low", "location:Fibonacci zone", "structure:retest", "structure:CHOCH", "structure:BOS", "structure:higher low", "trigger:RSI divergence", "trigger:rejection candle", "trigger:MACD turn", "trigger:4H reclaim", "data:insufficient history", "data:diagnostic error"))
+    assert BOTTOM_MIN_SCORE == 82 and BOTTOM_LOW_LOOKBACK_H4 == 42 and BOTTOM_LOW_DISTANCE_PCT == 5.0
+    log.info("v3.20.2 BOTTOM TRIGGER AUDIT SELF-TEST: PASS (read-only diagnostics; thresholds unchanged)")
 
 
 
 
-DEPLOYMENT_ID = "ApexSignal-v3.20.1-bottom-history-validation-20261011"
+DEPLOYMENT_ID = "ApexSignal-v3.20.2-bottom-trigger-audit-20261011"
 
 if __name__ == "__main__":
     log.info("DEPLOYMENT_ID: %s", DEPLOYMENT_ID)
