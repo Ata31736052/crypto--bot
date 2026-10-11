@@ -959,7 +959,7 @@ def unified_bottom_score_audit(d, h, h1, btc_d, btc_h):
 
 
 def analyze_symbol(symbol, btc_d, btc_h):
-    stats={"scanned":1,"trend_candidate":0,"bottom_candidate":0,"h1_reject":0,"risk_reject":0,"final":0,
+    stats={"scanned":1,"trend_candidate":0,"bottom_candidate":0,"h1_reject":0,"risk_reject":0,"trade_reject_count":0,"final_gate_reject_count":0,"final":0,
            "diagnostic_reasons":Counter(),"trend_blockers":Counter(),"bottom_blockers":Counter(),"trend_block_single":0,"trend_block_multiple":0,
            "bottom_block_single":0,"bottom_block_multiple":0,"trend_base_pass":0,"trend_1h_only_fail":0,"bottom_base_pass":0,"bottom_1h_only_fail":0,
            "h1_trend_failures":Counter(),"h1_bottom_failures":Counter(),"trade_rejects":Counter(),"final_gate_rejects":Counter(),"trend_score_rejects":Counter(),"bottom_score_rejects":Counter(),"trend_score_buckets":Counter(),"bottom_score_buckets":Counter(),"trend_score_values":[],"bottom_score_values":[],"trend_potential_scores":[],"bottom_potential_scores":[],"trend_potential_buckets":Counter(),"bottom_potential_buckets":Counter(),"trend_potential_top":[],"bottom_potential_top":[],"trend_audit_scores":[],"bottom_audit_scores":[],"trend_audit_buckets":Counter(),"bottom_audit_buckets":Counter(),"trend_audit_top":[],"bottom_audit_top":[]}
