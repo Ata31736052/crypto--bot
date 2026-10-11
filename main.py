@@ -1,6 +1,6 @@
 
 # ============================================================
-# ApexSignal v3.20.0 | FINAL GLOBAL ROOT FIX
+# ApexSignal v3.20.1 | FINAL GLOBAL ROOT FIX
 # Binance Spot | Daily + 4H primary | 1H confirmation
 # Trend + Bottom Hunter | Telegram signals only | NO AUTO-TRADING
 # ============================================================
@@ -33,8 +33,7 @@ MAX_SIGNALS = 3  # maximum Telegram messages, NOT a coin/universe limit
 # No artificial coin-count cap. liquid_universe() scans every currently
 # tradable Binance Spot USDT symbol that passes the liquidity floor.
 # The liquidity floor is a quality/data-safety filter, not a coin-count limit.
-# No universe volume floor. Every valid Binance Spot USDT symbol is analyzed.
-# Liquidity remains a quality factor inside the signal gates.
+# Universe is not capped by coin count. Symbols must pass the explicit $10M 24h quote-volume floor.
 MIN_24H_USDT_VOLUME = 10_000_000
 MIN_SCORE = 82
 STRONG_SCORE = 90
@@ -42,6 +41,8 @@ TREND_SCORE_MAX = 100  # exact sum of reachable trend score components
 BOTTOM_SCORE_MAX = 100  # calibrated 100-point bottom score
 BOTTOM_MIN_SCORE = 82
 BOTTOM_STRONG_SCORE = 90
+BOTTOM_LOW_LOOKBACK_H4 = 42  # seven days of confirmed 4H candles
+BOTTOM_LOW_DISTANCE_PCT = 5.0
 
 # Quality gates
 DAILY_ADX_MIN = 16.0
@@ -79,7 +80,7 @@ logging.basicConfig(
 log = logging.getLogger("crypto-bot")
 
 session = requests.Session()
-session.headers.update({"User-Agent": "CryptoSignalBot/ApexSignal-v3.20.0"})
+session.headers.update({"User-Agent": "CryptoSignalBot/ApexSignal-v3.20.1"})
 
 
 # ---------------- HTTP ----------------
@@ -311,9 +312,21 @@ def strong_bullish_candle(r):
     return r.close > r.open and (r.close - r.open) / rng >= 0.55
 
 
-def near_recent_low(h, pct_limit=5.0):
-    low72 = h["low"].tail(18).min()  # 18 x 4h ~= 72h
-    return h.iloc[-1].close <= low72 * (1 + pct_limit / 100), low72
+def near_recent_low(h, pct_limit=BOTTOM_LOW_DISTANCE_PCT):
+    """Check proximity to the lowest low across seven days of closed 4H candles.
+
+    Fail closed when the requested history or required values are unavailable.
+    """
+    if h is None or len(h) < BOTTOM_LOW_LOOKBACK_H4:
+        return False, None
+    lows = pd.to_numeric(h["low"].tail(BOTTOM_LOW_LOOKBACK_H4), errors="coerce")
+    close = pd.to_numeric(pd.Series([h.iloc[-1].get("close")]), errors="coerce").iloc[0]
+    if len(lows) != BOTTOM_LOW_LOOKBACK_H4 or not np.isfinite(lows.to_numpy(dtype=float)).all() or not np.isfinite(close):
+        return False, None
+    recent_low = float(lows.min())
+    if recent_low <= 0 or close <= 0:
+        return False, None
+    return bool(float(close) <= recent_low * (1 + pct_limit / 100)), recent_low
 
 
 def fibonacci_levels(h, lookback=30):
@@ -492,8 +505,15 @@ def one_hour_trend_confirm(h):
 
 
 def h1_bottom_confirmation_details(h):
-    """Entry-only 1H reversal confirmation; no score contribution."""
+    """Entry-only 1H reversal confirmation; invalid data fails closed."""
+    keys=("price_ok","structure_ok","rsi_ok","macd_ok","volume_ok","di_ok")
+    if h is None or len(h) < 2:
+        return {**{k:False for k in keys},"hard_failure":True,"confirmations":0,"confirmed":False}
     r=h.iloc[-1]; p=h.iloc[-2]
+    required=(r.close,r.ema9,r.ema21,r.rsi,r.macd,r.macd_signal,r.macd_hist,r.vol_ratio,r.pdi,r.mdi,
+              p.high,p.rsi,p.macd_hist,p.pdi)
+    if not finite(*required):
+        return {**{k:False for k in keys},"hard_failure":True,"confirmations":0,"confirmed":False}
     price_ok=bool(r.close>r.ema9 or r.close>r.ema21)
     structure_ok=bool(r.close>p.high or r.close>r.ema21 or r.ema9>=r.ema21)
     rsi_ok=bool(38<=r.rsi<=72 and r.rsi>=p.rsi-3.0)
@@ -508,7 +528,7 @@ def h1_bottom_confirmation_details(h):
 
 
 def one_hour_bottom_confirm(h):
-    """Reversal confirmation: 4 of 6 independent 1H clues, no hard failure."""
+    """Reversal confirmation: structure + momentum/DI and at least 3 of 6 clues."""
     return h1_bottom_confirmation_details(h)["confirmed"]
 
 
@@ -550,14 +570,14 @@ def bottom_setup(d, h, h1, btc_d, btc_h):
     r=h.iloc[-1]
     if btc_d=="BEARISH" and btc_h=="BEARISH": return None,["BTC Daily+4H bearish"]
     if d.iloc[-1].close<d.iloc[-1].ema200 and d.iloc[-1].mdi>d.iloc[-1].pdi and r.close<r.ema50: return None,["Daily+4H major trend bearish"]
-    near_low,_=near_recent_low(h,5.0); fib_ok,_=fib_zone(h); ms=market_structure(h)
+    near_low,_=near_recent_low(h,BOTTOM_LOW_DISTANCE_PCT); fib_ok,_=fib_zone(h); ms=market_structure(h)
     triggers=(rsi_bullish_divergence(h),rejection_candle(h),macd_turn(h),reclaim_4h(h))
     if not (near_low or fib_ok or sum(triggers)>=3 or ms.get("retest")): return None,["no bottom location/reversal evidence"]
     if r.vol_ratio<0.60: return None,["4H volume critically weak"]
     audit=unified_bottom_score_audit(d,h,h1,btc_d,btc_h)
     if audit["score"]<BOTTOM_MIN_SCORE: return None,[f"setup score {audit['score']} < {BOTTOM_MIN_SCORE}","SCORE MISSING="+" | ".join(audit["missing"][:8])]
     reasons=[k for k,v in audit["components"].items() if v>=0.75*audit["weights"][k]]
-    return {"strategy":"BOTTOM HUNTER","score":audit["score"],"raw_score":audit["raw"],"score_max":100,"score_components":audit["components"],"reasons":reasons,"low72":near_recent_low(h,5.0)[1]},reasons
+    return {"strategy":"BOTTOM HUNTER","score":audit["score"],"raw_score":audit["raw"],"score_max":100,"score_components":audit["components"],"reasons":reasons,"low7d":near_recent_low(h,BOTTOM_LOW_DISTANCE_PCT)[1]},reasons
 
 
 
@@ -916,7 +936,7 @@ def unified_trend_score_audit(d, h, h1, btc_d, btc_h, daily_state):
 
 def unified_bottom_score_audit(d, h, h1, btc_d, btc_h):
     """Calibrated Daily+4H bottom score. 1H is intentionally excluded."""
-    r=h.iloc[-1]; p=h.iloc[-2]; ms=market_structure(h); near_low,_=near_recent_low(h,5.0); fib_ok,_=fib_zone(h)
+    r=h.iloc[-1]; p=h.iloc[-2]; ms=market_structure(h); near_low,_=near_recent_low(h,BOTTOM_LOW_DISTANCE_PCT); fib_ok,_=fib_zone(h)
     triggers=(rsi_bullish_divergence(h),rejection_candle(h),macd_turn(h),reclaim_4h(h))
     c={}
     c["Location"]=15 if near_low and fib_ok else 12 if (near_low or fib_ok) else 0
@@ -1094,7 +1114,7 @@ def aggregate(dst, src):
 
 
 def main():
-    log.info("Starting ApexSignal v3.20.0 | GLOBAL PIPELINE ROOT FIX | DAILY+4H SCORE | 1H CONFIRMATION-ONLY | FAIL-CLOSED")
+    log.info("Starting ApexSignal v3.20.1 | GLOBAL PIPELINE ROOT FIX | DAILY+4H SCORE | 1H CONFIRMATION-ONLY | FAIL-CLOSED")
     log.info("Primary: Daily direction + 4H setup | Entry confirmation: 1H | Trend + Bottom Hunter")
     log.info("No auto-trading.")
 
@@ -1327,8 +1347,9 @@ def main():
 
 
 def self_test():
-    """v3.19 global-pipeline architecture contract tests."""
+    """v3.20.1 regression tests for bottom-history and fail-closed confirmation."""
     assert MIN_SCORE==82 and BOTTOM_MIN_SCORE==82 and STRONG_SCORE==90 and BOTTOM_STRONG_SCORE==90
+    assert BOTTOM_LOW_LOOKBACK_H4==42 and BOTTOM_LOW_DISTANCE_PCT==5.0
     assert MAX_SL_PCT==13.0 and BOTTOM_MAX_SL_PCT==15.0
     assert HTTP_RETRIES>=2 and RETRY_BACKOFF>0
     assert TREND_SCORE_MAX==100 and BOTTOM_SCORE_MAX==100 and MAX_SIGNALS==3
@@ -1342,6 +1363,13 @@ def self_test():
     assert 'check("Daily context"' not in gate_src and 'check("BTC safety"' not in gate_src and 'check("1H confirmation"' not in gate_src
     h1_src=inspect.getsource(h1_trend_confirmation_details)
     assert "confirmations>=4" in h1_src and "bearish_votes>=3" in h1_src
+    # Seven-day low window must exclude lows older than the rolling 42-candle window.
+    low_test = pd.DataFrame({"low":[80.0]+[100.0]*42,"close":[100.0]*42+[104.0]})
+    near, recent_low = near_recent_low(low_test)
+    assert near is True and recent_low == 100.0
+    assert near_recent_low(low_test.iloc[-20:])[0] is False
+    bottom_h1 = h1_bottom_confirmation_details(pd.DataFrame())
+    assert bottom_h1["confirmed"] is False and bottom_h1["hard_failure"] is True
     # Diagnostics must resolve through the exact production setup functions.
     tb=inspect.getsource(trend_base_quality); bb=inspect.getsource(bottom_base_quality)
     assert "trend_setup" in tb and "bottom_setup" in bb
@@ -1366,12 +1394,12 @@ def self_test():
     test_h = add_indicators(test_h)
     trade, err = build_trade(test_h, "CONFIRMED TREND")
     assert (trade is not None and trade["risk_pct"] <= MAX_SL_PCT) or (trade is None and err is not None)
-    log.info("v3.20.0 FINAL GLOBAL ROOT FIX SELF-TEST: PASS (single-source setup | bounded SL | 1H confirmation-only | aligned diagnostics | logging contract)")
+    log.info("v3.20.1 BOTTOM HISTORY + FAIL-CLOSED CONFIRMATION SELF-TEST: PASS (single-source setup | bounded SL | 1H confirmation-only | aligned diagnostics | logging contract)")
 
 
 
 
-DEPLOYMENT_ID = "ApexSignal-v3.20.0-final-global-root-fix-20261008"
+DEPLOYMENT_ID = "ApexSignal-v3.20.1-bottom-history-validation-20261011"
 
 if __name__ == "__main__":
     log.info("DEPLOYMENT_ID: %s", DEPLOYMENT_ID)
