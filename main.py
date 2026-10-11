@@ -1,6 +1,6 @@
 
 # ============================================================
-# ApexSignal v3.23.0 | SCHEDULED SIGNAL DELIVERY CALIBRATION
+# ApexSignal v3.25.0 | LIVE-QUOTE ENTRY VALIDATION
 # Binance Spot | Daily + 4H primary | 1H confirmation
 # Trend + Bottom Hunter | Telegram signals only | NO AUTO-TRADING
 # ============================================================
@@ -83,7 +83,7 @@ logging.basicConfig(
 log = logging.getLogger("crypto-bot")
 
 session = requests.Session()
-session.headers.update({"User-Agent": "CryptoSignalBot/ApexSignal-v3.24.0"})
+session.headers.update({"User-Agent": "CryptoSignalBot/ApexSignal-v3.25.0"})
 
 
 # ---------------- HTTP ----------------
@@ -105,6 +105,23 @@ def get_json(path, params=None):
             if attempt + 1 < HTTP_RETRIES:
                 time.sleep(RETRY_BACKOFF * (2 ** attempt))
     raise RuntimeError(f"Binance request failed after {HTTP_RETRIES} attempts: {path}: {last_exc}")
+
+
+def live_quote(symbol):
+    """Return a fresh executable Spot quote; fail closed on malformed or crossed books."""
+    book = get_json("/api/v3/ticker/bookTicker", {"symbol": symbol})
+    try:
+        bid = float(book["bidPrice"])
+        ask = float(book["askPrice"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError(f"invalid Binance book quote for {symbol}: {exc}")
+    if not finite(bid, ask) or bid <= 0 or ask <= 0 or ask < bid:
+        raise RuntimeError(f"invalid/crossed Binance book quote for {symbol}")
+    spread_pct = (ask - bid) / ((ask + bid) / 2) * 100
+    if spread_pct > 0.15:
+        raise RuntimeError(f"spread too wide for {symbol}: {spread_pct:.3f}% > 0.150%")
+    return {"bid": bid, "ask": ask, "spread_pct": spread_pct,
+            "received_at": datetime.now(timezone.utc).isoformat()}
 
 
 def klines(symbol, interval, limit=250):
@@ -764,7 +781,7 @@ def _nearest_confirmed_swing_low(h, lookback=24, pivot=2):
     return candidates[-1][1] if candidates else None
 
 
-def build_trade(h, strategy):
+def build_trade(h, strategy, entry_override=None):
     """Build a bounded, risk-valid long setup.
 
     Root rule: an old multi-week low must never create a 20-30% stop for a
@@ -772,7 +789,7 @@ def build_trade(h, strategy):
     reject if even that bounded stop cannot satisfy the configured risk limit.
     """
     r = h.iloc[-1]
-    entry = float(r.close)
+    entry = float(r.close if entry_override is None else entry_override)
     atrv = float(r.atr)
     if not finite(entry, atrv) or entry <= 0 or atrv <= 0:
         return None, "invalid entry/ATR data"
@@ -1472,16 +1489,39 @@ def main():
             dedup_skipped += 1
             log.info("DEDUP SKIP | %s | %s | within %dh", item["symbol"], item["setup"]["strategy"], DEDUP_HOURS)
             continue
-        msg = signal_text(
-            item["symbol"],
-            item["setup"],
-            item["trade"],
-            item["d"],
-            item["h"],
-            item["btc_d"],
-            item["btc_h"],
-        )
+        # Revalidate executable price immediately before sending.
         try:
+            quote = live_quote(item["symbol"])
+            candle_close = float(item["h"].iloc[-1].close)
+            atrv = float(item["h"].iloc[-1].atr)
+            drift_pct = abs(quote["ask"] - candle_close) / candle_close * 100
+            max_drift_pct = max((atrv * 0.75) / candle_close * 100, 0.50)
+            if drift_pct > max_drift_pct:
+                log.warning("LIVE ENTRY REJECT | %s | 4H close=%s ask=%s drift=%.3f%% limit=%.3f%%",
+                            item["symbol"], fmt_price(candle_close), fmt_price(quote["ask"]), drift_pct, max_drift_pct)
+                continue
+            refreshed_trade, trade_err = build_trade(item["h"], item["setup"]["strategy"], entry_override=quote["ask"])
+            if not refreshed_trade:
+                log.warning("LIVE TRADE REJECT | %s | %s", item["symbol"], trade_err)
+                continue
+            passed, reasons, details = professional_signal_quality_gate(item["setup"], refreshed_trade)
+            if not passed:
+                log.warning("LIVE FINAL GATE REJECT | %s | %s", item["symbol"], " | ".join(reasons))
+                continue
+            item["trade"] = refreshed_trade
+            log.info("LIVE ENTRY VALIDATED | %s | bid=%s ask=%s spread=%.3f%% drift=%.3f%% limit=%.3f%% quote_at=%s",
+                     item["symbol"], fmt_price(quote["bid"]), fmt_price(quote["ask"]),
+                     quote["spread_pct"], drift_pct, max_drift_pct, quote["received_at"])
+            msg = signal_text(
+                item["symbol"],
+                item["setup"],
+                item["trade"],
+                item["d"],
+                item["h"],
+                item["btc_d"],
+                item["btc_h"],
+            )
+            msg += "\n🕒 Quote received: <b>" + html.escape(quote["received_at"]) + "</b>"
             if send_telegram(msg):
                 sent += 1
                 mark_signal_sent(state, item)
@@ -1607,11 +1647,12 @@ def main():
 
 
 def self_test():
-    """v3.24.0 regression tests for Bottom Hunter reversal quality gate, calibrated score gates and RSI divergence."""
+    """v3.25.0 regression tests for live quote validation, trade risk and Bottom Hunter quality."""
     assert MIN_SCORE==80 and BOTTOM_MIN_SCORE==66 and STRONG_SCORE==90 and BOTTOM_STRONG_SCORE==90
     assert BOTTOM_LOW_LOOKBACK_H4==42 and BOTTOM_LOW_DISTANCE_PCT==5.0
     assert MAX_SL_PCT==13.0 and BOTTOM_MAX_SL_PCT==15.0
     assert HTTP_RETRIES>=2 and RETRY_BACKOFF>0
+    assert callable(live_quote)
     assert TREND_SCORE_MAX==100 and BOTTOM_SCORE_MAX==100 and MAX_SIGNALS==3
     assert sum({"Daily regime":12,"4H structure":18,"BOS/retest":8,"Fib/location":8,"EMA alignment":10,"MACD":8,"RSI":7,"ADX":7,"4H volume":7,"Taker buy":5,"BTC context":3,"4H location/chase":5,"Volatility health":2}.values())==100
     assert sum({"Location":18,"Structure reaction":18,"Reversal triggers":32,"MACD":6,"RSI":6,"Bottom volume":5,"Taker buy":3,"Trade activity":2,"ADX":2,"Daily context":3,"BTC context":2,"Volatility health":3}.values())==100
@@ -1742,12 +1783,12 @@ def self_test():
     trigger_test = bottom_reversal_trigger_points(test_h)
     assert 0 <= trigger_test["raw"] <= 24
     assert sum(trigger_test["parts"].values()) == trigger_test["raw"]
-    log.info("v3.24.0 BOTTOM REVERSAL QUALITY GATE + CALIBRATED SCORE + ALL-PAIR RSI SELF-TEST: PASS")
+    log.info("v3.25.0 LIVE QUOTE ENTRY VALIDATION + RISK GATES + BOTTOM REVERSAL SELF-TEST: PASS")
 
 
 
 
-DEPLOYMENT_ID = "ApexSignal-v3.24.0-bottom-reversal-quality-gate-20261011"
+DEPLOYMENT_ID = "ApexSignal-v3.25.0-live-quote-entry-validation-20261011"
 
 if __name__ == "__main__":
     log.info("DEPLOYMENT_ID: %s", DEPLOYMENT_ID)
