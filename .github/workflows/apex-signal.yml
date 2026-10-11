@@ -13,6 +13,12 @@ on:
         default: production
   schedule:
     - cron: "10 */4 * * *"
+  push:
+    branches: [main]
+    paths:
+      - "main.py"
+      - "requirements.txt"
+      - ".github/workflows/apex-signal.yml"
   pull_request:
     branches: [main]
     paths:
@@ -26,7 +32,7 @@ concurrency:
 
 jobs:
   regression:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
