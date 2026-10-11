@@ -1514,7 +1514,7 @@ def self_test():
     div_test = _div_frame(30, 42)
     div_result = _rsi_divergence_details(div_test)
     assert div_result["both"] is True
-    assert div_result["older_idx"] == 30 and div_result["newer_idx"] == 42
+    assert div_result["older_idx"] == 22 and div_result["newer_idx"] == 34  # indices are relative to the 42-bar lookback
     assert div_result["gap"] == 12 and div_result["price_change_pct"] < -0.5
     assert div_result["rsi_delta"] == 5.0
     assert rsi_bullish_divergence(div_test) is True
