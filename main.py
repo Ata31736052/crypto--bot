@@ -537,14 +537,15 @@ def bottom_trigger_subconditions(h):
         return out
     try:
         div = _rsi_divergence_details(h)
+        pair_rows = _rsi_divergence_pair_audit(h)
+        # Keep the diagnostic counters aligned with runtime's all-pair decision.
         out["rsi:two_pivots_found"] = bool(div["two_pivots"])
-        out["rsi:price_lower_low"] = bool(div["price_lower_low"])
-        out["rsi:delta_ge_4"] = bool(div["delta_ge_4"])
-        out["rsi:both_conditions_pass"] = bool(div["both"])
-        if div["two_pivots"]:
-            out["rsi:price_only"] = bool(div["price_lower_low"] and not div["delta_ge_4"])
-            out["rsi:delta_only"] = bool(div["delta_ge_4"] and not div["price_lower_low"])
-            out["rsi:neither"] = bool(not div["price_lower_low"] and not div["delta_ge_4"])
+        out["rsi:price_lower_low"] = any(pair["price_lower_low"] for pair in pair_rows)
+        out["rsi:delta_ge_4"] = any(pair["delta_ge_4"] for pair in pair_rows)
+        out["rsi:both_conditions_pass"] = any(pair["both"] for pair in pair_rows)
+        out["rsi:price_only"] = any(pair["price_lower_low"] and not pair["delta_ge_4"] for pair in pair_rows)
+        out["rsi:delta_only"] = any(pair["delta_ge_4"] and not pair["price_lower_low"] for pair in pair_rows)
+        out["rsi:neither"] = any(not pair["price_lower_low"] and not pair["delta_ge_4"] for pair in pair_rows)
         r, p = h.iloc[-1], h.iloc[-2]
         rng = max(float(r.high-r.low), 1e-12)
         wick = float(min(r.open,r.close)-r.low)/rng
@@ -1295,7 +1296,7 @@ def aggregate(dst, src):
 
 
 def main():
-    log.info("Starting ApexSignal v3.21.1 | BOTTOM NEAR-MISS AUDIT | DAILY+4H SCORE | 1H CONFIRMATION-ONLY | FAIL-CLOSED")
+    log.info("Starting %s | BOTTOM NEAR-MISS AUDIT | DAILY+4H SCORE | 1H CONFIRMATION-ONLY | FAIL-CLOSED", DEPLOYMENT_ID)
     log.info("Primary: Daily direction + 4H setup | Entry confirmation: 1H | Trend + Bottom Hunter")
     log.info("No auto-trading.")
 
@@ -1591,6 +1592,11 @@ def self_test():
     assert any(p["older_idx"] == 12 and p["newer_idx"] == 36 and p["both"] for p in all_pairs)
     # Runtime must accept the older qualifying pair even though the selected pair fails.
     assert rsi_bullish_divergence(multi) is True
+    # Audit counters must match runtime all-pair logic, not the legacy selected pair.
+    multi_sub = bottom_trigger_subconditions(multi)
+    assert multi_sub["rsi:both_conditions_pass"] is True
+    assert multi_sub["rsi:price_lower_low"] is True
+    assert multi_sub["rsi:delta_ge_4"] is True
 
     # Price must be at least 0.5% lower; RSI strength alone is insufficient.
     weak_price = _div_frame(30, 42, older_low=90.0, newer_low=89.7)
