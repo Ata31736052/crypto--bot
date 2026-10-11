@@ -1,6 +1,6 @@
 
 # ============================================================
-# ApexSignal v3.20.2 | BOTTOM TRIGGER AUDIT | DIAGNOSTICS ONLY
+# ApexSignal v3.20.3 | BOTTOM SUBCONDITION AUDIT | DIAGNOSTICS ONLY
 # Binance Spot | Daily + 4H primary | 1H confirmation
 # Trend + Bottom Hunter | Telegram signals only | NO AUTO-TRADING
 # ============================================================
@@ -448,6 +448,42 @@ def macd_turn(h):
     fresh=bool(p.macd_hist<=0 and r.macd_hist>0 and r.macd>r.macd_signal)
     turn=bool(r.macd_hist>p.macd_hist and r.macd>r.macd_signal and r.macd_hist>=-abs(r.atr)*0.05)
     return fresh or turn
+
+
+def bottom_trigger_subconditions(h):
+    """Explain why each bottom trigger passes/fails; read-only and score-neutral."""
+    keys = ("rsi:price_lower_low", "rsi:delta_ge_4", "rejection:wick_ge_35pct", "rejection:bullish_close", "rejection:close_top_40pct", "macd:hist_rising", "macd:above_signal", "macd:fresh_cross", "reclaim:close_above_ema9", "reclaim:above_prev_high_or_ema21", "reclaim:ema9_nonfalling", "volume:lt_0.60", "volume:0.60_to_0.75", "volume:0.75_to_1.00", "volume:1.00_to_1.40", "volume:ge_1.40", "data:subcondition_error")
+    out = {k: False for k in keys}
+    if h is None or len(h) < 35:
+        out["data:subcondition_error"] = True
+        return out
+    try:
+        a, b = h.iloc[-25:-8], h.iloc[-8:]
+        pa, pb = float(a.low.min()), float(b.low.min())
+        ra = float(a.loc[a.low.idxmin(), "rsi"]); rb = float(b.loc[b.low.idxmin(), "rsi"])
+        out["rsi:price_lower_low"] = bool(pb < pa * 0.995)
+        out["rsi:delta_ge_4"] = bool(rb >= ra + 4.0)
+        r, p = h.iloc[-1], h.iloc[-2]
+        rng = max(float(r.high-r.low), 1e-12)
+        wick = float(min(r.open,r.close)-r.low)/rng
+        out["rejection:wick_ge_35pct"] = bool(wick >= 0.35)
+        out["rejection:bullish_close"] = bool(r.close > r.open)
+        out["rejection:close_top_40pct"] = bool(r.close >= r.low + rng*0.60)
+        out["macd:hist_rising"] = bool(r.macd_hist > p.macd_hist)
+        out["macd:above_signal"] = bool(r.macd > r.macd_signal)
+        out["macd:fresh_cross"] = bool(p.macd_hist <= 0 and r.macd_hist > 0 and r.macd > r.macd_signal)
+        out["reclaim:close_above_ema9"] = bool(r.close > r.ema9)
+        out["reclaim:above_prev_high_or_ema21"] = bool(r.close > p.high or r.close > r.ema21)
+        out["reclaim:ema9_nonfalling"] = bool(r.ema9 >= p.ema9)
+        v = float(r.vol_ratio)
+        if np.isfinite(v):
+            bucket = "volume:lt_0.60" if v < 0.60 else "volume:0.60_to_0.75" if v < 0.75 else "volume:0.75_to_1.00" if v < 1.0 else "volume:1.00_to_1.40" if v < 1.4 else "volume:ge_1.40"
+            out[bucket] = True
+        else:
+            out["data:subcondition_error"] = True
+    except Exception:
+        out["data:subcondition_error"] = True
+    return out
 
 
 def bottom_trigger_diagnostics(h):
@@ -986,7 +1022,7 @@ def unified_bottom_score_audit(d, h, h1, btc_d, btc_h):
 
 def analyze_symbol(symbol, btc_d, btc_h):
     stats={"scanned":1,"trend_candidate":0,"bottom_candidate":0,"h1_reject":0,"risk_reject":0,"trade_reject_count":0,"final_gate_reject_count":0,"final":0,
-           "diagnostic_reasons":Counter(),"trend_blockers":Counter(),"bottom_blockers":Counter(),"bottom_trigger_audit":Counter(),"trend_block_single":0,"trend_block_multiple":0,
+           "diagnostic_reasons":Counter(),"trend_blockers":Counter(),"bottom_blockers":Counter(),"bottom_trigger_audit":Counter(),"bottom_subcondition_audit":Counter(),"trend_block_single":0,"trend_block_multiple":0,
            "bottom_block_single":0,"bottom_block_multiple":0,"trend_base_pass":0,"trend_1h_only_fail":0,"bottom_base_pass":0,"bottom_1h_only_fail":0,
            "h1_trend_failures":Counter(),"h1_bottom_failures":Counter(),"trade_rejects":Counter(),"final_gate_rejects":Counter(),"trend_score_rejects":Counter(),"bottom_score_rejects":Counter(),"trend_score_buckets":Counter(),"bottom_score_buckets":Counter(),"trend_score_values":[],"bottom_score_values":[],"trend_potential_scores":[],"bottom_potential_scores":[],"trend_potential_buckets":Counter(),"bottom_potential_buckets":Counter(),"trend_potential_top":[],"bottom_potential_top":[],"trend_audit_scores":[],"bottom_audit_scores":[],"trend_audit_buckets":Counter(),"bottom_audit_buckets":Counter(),"trend_audit_top":[],"bottom_audit_top":[]}
     try:
@@ -996,6 +1032,8 @@ def analyze_symbol(symbol, btc_d, btc_h):
         if daily_state not in {"BULLISH", "EARLY_BULLISH", "NEUTRAL", "BEARISH"}:
             raise RuntimeError(f"Daily state invariant failure: {daily_state!r}")
         if min(len(d),len(h),len(h1))<210: return None,stats,"insufficient data"
+        sub_diag = bottom_trigger_subconditions(h)
+        stats["bottom_subcondition_audit"].update(k for k, v in sub_diag.items() if v)
         trigger_diag = bottom_trigger_diagnostics(h)
         stats["bottom_trigger_audit"]["checked:symbols"] += 1
         for audit_key, audit_pass in trigger_diag.items():
@@ -1138,7 +1176,7 @@ def analyze_symbol(symbol, btc_d, btc_h):
 
 def aggregate(dst, src):
     for k in dst:
-        if k in ("diagnostic_reasons", "trend_blockers", "bottom_blockers", "bottom_trigger_audit", "h1_trend_failures", "h1_bottom_failures", "trade_rejects", "final_gate_rejects", "trend_score_rejects", "bottom_score_rejects", "trend_score_buckets", "bottom_score_buckets", "trend_potential_buckets", "bottom_potential_buckets", "trend_audit_buckets", "bottom_audit_buckets"):
+        if k in ("diagnostic_reasons", "trend_blockers", "bottom_blockers", "bottom_trigger_audit", "bottom_subcondition_audit", "h1_trend_failures", "h1_bottom_failures", "trade_rejects", "final_gate_rejects", "trend_score_rejects", "bottom_score_rejects", "trend_score_buckets", "bottom_score_buckets", "trend_potential_buckets", "bottom_potential_buckets", "trend_audit_buckets", "bottom_audit_buckets"):
             dst[k].update(src.get(k, {}))
         elif k in ("trend_score_values", "bottom_score_values", "trend_potential_scores", "bottom_potential_scores", "trend_potential_top", "bottom_potential_top", "trend_audit_scores", "bottom_audit_scores", "trend_audit_top", "bottom_audit_top"):
             dst[k].extend(src.get(k, []))
@@ -1147,7 +1185,7 @@ def aggregate(dst, src):
 
 
 def main():
-    log.info("Starting ApexSignal v3.20.2 | BOTTOM TRIGGER AUDIT | DAILY+4H SCORE | 1H CONFIRMATION-ONLY | FAIL-CLOSED")
+    log.info("Starting ApexSignal v3.20.3 | BOTTOM SUBCONDITION AUDIT | DAILY+4H SCORE | 1H CONFIRMATION-ONLY | FAIL-CLOSED")
     log.info("Primary: Daily direction + 4H setup | Entry confirmation: 1H | Trend + Bottom Hunter")
     log.info("No auto-trading.")
 
@@ -1167,6 +1205,7 @@ def main():
         "diagnostic_reasons": Counter(),
         "trend_blockers": Counter(),
         "bottom_trigger_audit": Counter(),
+        "bottom_subcondition_audit": Counter(),
         "bottom_blockers": Counter(),
         "trend_block_single": 0,
         "trend_block_multiple": 0,
@@ -1283,6 +1322,10 @@ def main():
     if state_changed:
         save_signal_state(state)
         log.info("Signal state saved: %d active dedup records", len(state))
+    if totals["bottom_subcondition_audit"]:
+        sub_order = ("rsi:price_lower_low", "rsi:delta_ge_4", "rejection:wick_ge_35pct", "rejection:bullish_close", "rejection:close_top_40pct", "macd:hist_rising", "macd:above_signal", "macd:fresh_cross", "reclaim:close_above_ema9", "reclaim:above_prev_high_or_ema21", "reclaim:ema9_nonfalling", "volume:lt_0.60", "volume:0.60_to_0.75", "volume:0.75_to_1.00", "volume:1.00_to_1.40", "volume:ge_1.40", "data:subcondition_error")
+        sub_text = " | ".join("{}={}".format(k, totals["bottom_subcondition_audit"].get(k, 0)) for k in sub_order)
+        log.info("BOTTOM SUBCONDITION AUDIT | " + sub_text)
     if totals["bottom_trigger_audit"]:
         audit_order = ("checked:symbols", "location:near 7d low", "location:Fibonacci zone", "structure:retest", "structure:CHOCH", "structure:BOS", "structure:higher low", "trigger:RSI divergence", "trigger:rejection candle", "trigger:MACD turn", "trigger:4H reclaim", "none:location+structure+triggers", "data:insufficient history", "data:diagnostic error")
         audit_text = " | ".join("{}={}".format(k, totals["bottom_trigger_audit"].get(k, 0)) for k in audit_order)
@@ -1432,15 +1475,17 @@ def self_test():
     test_h = add_indicators(test_h)
     trade, err = build_trade(test_h, "CONFIRMED TREND")
     assert (trade is not None and trade["risk_pct"] <= MAX_SL_PCT) or (trade is None and err is not None)
+    sub_keys = bottom_trigger_subconditions(test_h)
+    assert all(k in sub_keys for k in ("rsi:price_lower_low", "rsi:delta_ge_4", "rejection:wick_ge_35pct", "rejection:bullish_close", "rejection:close_top_40pct", "macd:hist_rising", "macd:above_signal", "macd:fresh_cross", "reclaim:close_above_ema9", "reclaim:above_prev_high_or_ema21", "reclaim:ema9_nonfalling", "volume:lt_0.60", "volume:0.60_to_0.75", "volume:0.75_to_1.00", "volume:1.00_to_1.40", "volume:ge_1.40", "data:subcondition_error"))
     audit_keys = bottom_trigger_diagnostics(test_h)
     assert all(k in audit_keys for k in ("location:near 7d low", "location:Fibonacci zone", "structure:retest", "structure:CHOCH", "structure:BOS", "structure:higher low", "trigger:RSI divergence", "trigger:rejection candle", "trigger:MACD turn", "trigger:4H reclaim", "data:insufficient history", "data:diagnostic error"))
     assert BOTTOM_MIN_SCORE == 82 and BOTTOM_LOW_LOOKBACK_H4 == 42 and BOTTOM_LOW_DISTANCE_PCT == 5.0
-    log.info("v3.20.2 BOTTOM TRIGGER AUDIT SELF-TEST: PASS (read-only diagnostics; thresholds unchanged)")
+    log.info("v3.20.3 BOTTOM SUBCONDITION AUDIT SELF-TEST: PASS (read-only subconditions; score and thresholds unchanged)")
 
 
 
 
-DEPLOYMENT_ID = "ApexSignal-v3.20.2-bottom-trigger-audit-20261011"
+DEPLOYMENT_ID = "ApexSignal-v3.20.3-bottom-subcondition-audit-20261011"
 
 if __name__ == "__main__":
     log.info("DEPLOYMENT_ID: %s", DEPLOYMENT_ID)
