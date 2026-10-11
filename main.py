@@ -1,6 +1,6 @@
 
 # ============================================================
-# ApexSignal v3.21.4 | ALL-PAIR RSI DIVERGENCE
+# ApexSignal v3.22.0 | EARLY REVERSAL BOTTOM HUNTER
 # Binance Spot | Daily + 4H primary | 1H confirmation
 # Trend + Bottom Hunter | Telegram signals only | NO AUTO-TRADING
 # ============================================================
@@ -1079,24 +1079,68 @@ def unified_trend_score_audit(d, h, h1, btc_d, btc_h, daily_state):
 
 
 
+def bottom_reversal_trigger_points(h):
+    """Grade early reversal evidence without treating partial clues as full triggers.
+
+    Maximum 24 raw points: RSI divergence 8, rejection candle 5,
+    MACD turn 5, and EMA/price reclaim 6. Partial MACD/reclaim evidence
+    receives proportionate points; missing/invalid evidence receives none.
+    """
+    sub = bottom_trigger_subconditions(h)
+    rsi_points = 8 if sub.get("rsi:both_conditions_pass", False) else 0
+    rejection_points = 5 if rejection_candle(h) else 0
+
+    if sub.get("macd:fresh_cross", False):
+        macd_points = 5
+    elif sub.get("macd:hist_rising", False) and sub.get("macd:above_signal", False):
+        macd_points = 4
+    elif sub.get("macd:hist_rising", False):
+        macd_points = 2
+    elif sub.get("macd:above_signal", False):
+        macd_points = 1
+    else:
+        macd_points = 0
+
+    reclaim_points = 0
+    if sub.get("reclaim:close_above_ema9", False):
+        reclaim_points += 2
+    if sub.get("reclaim:above_prev_high_or_ema21", False):
+        reclaim_points += 2
+    if sub.get("reclaim:ema9_nonfalling", False):
+        reclaim_points += 1
+    if reclaim_points == 5:
+        reclaim_points = 6  # complete reclaim earns the full trigger weight
+
+    parts = {
+        "RSI divergence": rsi_points,
+        "Rejection candle": rejection_points,
+        "MACD turn": macd_points,
+        "4H reclaim": reclaim_points,
+    }
+    return {"raw": sum(parts.values()), "parts": parts}
+
+
 def unified_bottom_score_audit(d, h, h1, btc_d, btc_h):
-    """Calibrated Daily+4H bottom score. 1H is intentionally excluded."""
+    """Early-reversal weighted Daily+4H score. 1H confirms entry only; it is not scored here."""
     r=h.iloc[-1]; p=h.iloc[-2]; ms=market_structure(h); near_low,_=near_recent_low(h,BOTTOM_LOW_DISTANCE_PCT); fib_ok,_=fib_zone(h)
-    triggers=(rsi_bullish_divergence(h),rejection_candle(h),macd_turn(h),reclaim_4h(h))
+    trigger_audit = bottom_reversal_trigger_points(h)
+    trigger_score = int(round(trigger_audit["raw"] * 32 / 24))
     c={}
-    c["Location"]=15 if near_low and fib_ok else 12 if (near_low or fib_ok) else 0
-    c["Structure reaction"]=15 if ms.get("retest") else 12 if (ms.get("choch") or ms.get("bos")) else 6 if ms.get("higher_low") else 0
-    c["Reversal triggers"]=min(24,sum(triggers)*6)
-    c["MACD"]=7 if r.macd>r.macd_signal and r.macd_hist>=0 else 5 if r.macd_hist>p.macd_hist else 2 if r.macd>r.macd_signal else 0
-    c["RSI"]=7 if 38<=r.rsi<=62 else 5 if 35<=r.rsi<70 else 2 if r.rsi<75 else 0
-    c["Bottom volume"]=7 if r.vol_ratio>=1.4 else 5 if r.vol_ratio>=1.0 else 3 if r.vol_ratio>=0.75 else 0
-    c["Taker buy"]=5 if r.taker_buy_ratio>=TAKER_BUY_STRONG else 3 if r.taker_buy_ratio>=0.50 else 1 if r.taker_buy_ratio>=0.48 else 0
-    c["Trade activity"]=4 if r.trade_ratio>=1.0 else 3 if r.trade_ratio>=0.85 else 1 if r.trade_ratio>=0.70 else 0
-    c["ADX"]=4 if r.adx>=20 else 3 if r.adx>=16 and r.adx>p.adx else 1 if r.adx>=14 else 0
-    c["Daily context"]=4 if d.iloc[-1].close>d.iloc[-1].ema50 else 3 if d.iloc[-1].close>d.iloc[-1].ema200 else 1
-    c["BTC context"]=3 if btc_d=="BULLISH" and btc_h=="BULLISH" else 2 if btc_d=="BULLISH" or btc_h=="BULLISH" else 1 if btc_d=="NEUTRAL" or btc_h=="NEUTRAL" else 0
-    c["Volatility health"]=5 if finite(r.atr,r.close) and r.atr>0 and r.atr/r.close<0.08 else 2 if finite(r.atr,r.close) and r.atr>0 else 0
-    weights={"Location":15,"Structure reaction":15,"Reversal triggers":24,"MACD":7,"RSI":7,"Bottom volume":7,"Taker buy":5,"Trade activity":4,"ADX":4,"Daily context":4,"BTC context":3,"Volatility health":5}
+    # Bottom hunting prioritizes location + early reversal + structure (68/100).
+    # Participation and broad-market context remain meaningful quality filters.
+    c["Location"]=18 if near_low and fib_ok else 14 if near_low else 12 if fib_ok else 0
+    c["Structure reaction"]=18 if ms.get("retest") else 15 if (ms.get("choch") or ms.get("bos")) else 9 if ms.get("higher_low") else 0
+    c["Reversal triggers"]=min(32, trigger_score)
+    c["MACD"]=6 if r.macd>r.macd_signal and r.macd_hist>=0 else 4 if r.macd_hist>p.macd_hist else 2 if r.macd>r.macd_signal else 0
+    c["RSI"]=6 if 38<=r.rsi<=62 else 4 if 35<=r.rsi<70 else 2 if r.rsi<75 else 0
+    c["Bottom volume"]=5 if r.vol_ratio>=1.4 else 4 if r.vol_ratio>=1.0 else 2 if r.vol_ratio>=0.75 else 0
+    c["Taker buy"]=3 if r.taker_buy_ratio>=TAKER_BUY_STRONG else 2 if r.taker_buy_ratio>=0.50 else 1 if r.taker_buy_ratio>=0.48 else 0
+    c["Trade activity"]=2 if r.trade_ratio>=1.0 else 1 if r.trade_ratio>=0.70 else 0
+    c["ADX"]=2 if r.adx>=20 else 1 if r.adx>=14 and r.adx>p.adx else 0
+    c["Daily context"]=3 if d.iloc[-1].close>d.iloc[-1].ema50 else 2 if d.iloc[-1].close>d.iloc[-1].ema200 else 1
+    c["BTC context"]=2 if btc_d=="BULLISH" and btc_h=="BULLISH" else 1 if btc_d=="BULLISH" or btc_h=="BULLISH" or btc_d=="NEUTRAL" or btc_h=="NEUTRAL" else 0
+    c["Volatility health"]=3 if finite(r.atr,r.close) and r.atr>0 and r.atr/r.close<0.08 else 1 if finite(r.atr,r.close) and r.atr>0 else 0
+    weights={"Location":18,"Structure reaction":18,"Reversal triggers":32,"MACD":6,"RSI":6,"Bottom volume":5,"Taker buy":3,"Trade activity":2,"ADX":2,"Daily context":3,"BTC context":2,"Volatility health":3}
     raw=sum(c.values()); assert sum(weights.values())==100
     score=int(round(raw/100*100))
     return {"raw":int(raw),"max":100,"score":max(0,min(100,score)),"components":c,"missing":[f"{k} {c[k]}/{w}" for k,w in weights.items() if c[k]<w],"weights":weights,"h1_confirmed":h1_bottom_confirmation_details(h1)["confirmed"]}
@@ -1539,15 +1583,16 @@ def main():
 
 
 def self_test():
-    """v3.21.4 regression tests for all-pair RSI divergence and fail-closed confirmation."""
+    """v3.22.0 regression tests for early-reversal scoring, all-pair RSI divergence and fail-closed confirmation."""
     assert MIN_SCORE==82 and BOTTOM_MIN_SCORE==82 and STRONG_SCORE==90 and BOTTOM_STRONG_SCORE==90
     assert BOTTOM_LOW_LOOKBACK_H4==42 and BOTTOM_LOW_DISTANCE_PCT==5.0
     assert MAX_SL_PCT==13.0 and BOTTOM_MAX_SL_PCT==15.0
     assert HTTP_RETRIES>=2 and RETRY_BACKOFF>0
     assert TREND_SCORE_MAX==100 and BOTTOM_SCORE_MAX==100 and MAX_SIGNALS==3
     assert sum({"Daily regime":12,"4H structure":18,"BOS/retest":8,"Fib/location":8,"EMA alignment":10,"MACD":8,"RSI":7,"ADX":7,"4H volume":7,"Taker buy":5,"BTC context":3,"4H location/chase":5,"Volatility health":2}.values())==100
-    assert sum({"Location":15,"Structure reaction":15,"Reversal triggers":24,"MACD":7,"RSI":7,"Bottom volume":7,"Taker buy":5,"Trade activity":4,"ADX":4,"Daily context":4,"BTC context":3,"Volatility health":5}.values())==100
+    assert sum({"Location":18,"Structure reaction":18,"Reversal triggers":32,"MACD":6,"RSI":6,"Bottom volume":5,"Taker buy":3,"Trade activity":2,"ADX":2,"Daily context":3,"BTC context":2,"Volatility health":3}.values())==100
     assert callable(unified_trend_score_audit) and callable(unified_bottom_score_audit)
+    assert callable(bottom_reversal_trigger_points)
     assert callable(professional_signal_quality_gate)
     assert callable(_nearest_confirmed_swing_low) and callable(_rsi_divergence_details)
     assert BOTTOM_VOL_MIN == 0.60
@@ -1665,12 +1710,15 @@ def self_test():
     audit_keys = bottom_trigger_diagnostics(test_h)
     assert all(k in audit_keys for k in ("location:near 7d low", "location:Fibonacci zone", "structure:retest", "structure:CHOCH", "structure:BOS", "structure:higher low", "trigger:RSI divergence", "trigger:rejection candle", "trigger:MACD turn", "trigger:4H reclaim", "data:insufficient history", "data:diagnostic error"))
     assert BOTTOM_MIN_SCORE == 82 and BOTTOM_LOW_LOOKBACK_H4 == 42 and BOTTOM_LOW_DISTANCE_PCT == 5.0
-    log.info("v3.21.4 ALL-PAIR RSI DIVERGENCE + REGRESSION SELF-TEST: PASS")
+    trigger_test = bottom_reversal_trigger_points(test_h)
+    assert 0 <= trigger_test["raw"] <= 24
+    assert sum(trigger_test["parts"].values()) == trigger_test["raw"]
+    log.info("v3.22.0 EARLY REVERSAL SCORING + ALL-PAIR RSI DIVERGENCE SELF-TEST: PASS")
 
 
 
 
-DEPLOYMENT_ID = "ApexSignal-v3.21.4-all-pair-rsi-divergence-20261011"
+DEPLOYMENT_ID = "ApexSignal-v3.22.0-early-reversal-bottom-hunter-20261011"
 
 if __name__ == "__main__":
     log.info("DEPLOYMENT_ID: %s", DEPLOYMENT_ID)
