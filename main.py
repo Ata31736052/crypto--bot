@@ -1505,9 +1505,13 @@ def self_test():
     assert _rsi_divergence_details(weak_rsi)["delta_ge_4"] is False
     assert _rsi_divergence_details(weak_rsi)["both"] is False
 
-    # Two pivots closer than min_gap must not be paired.
-    too_close = _div_frame(30, 32)
-    assert _rsi_divergence_details(too_close)["both"] is False
+    # At the minimum allowed separation (3 bars), two confirmed pivots can pair.
+    min_gap = _div_frame(30, 33)
+    assert _rsi_divergence_details(min_gap)["both"] is True
+
+    # Overlapping swing windows must not manufacture a divergence from a 2-bar gap.
+    overlapping = _div_frame(30, 32)
+    assert _rsi_divergence_details(overlapping)["both"] is False
 
     # Two pivots farther apart than max_gap must not be paired.
     too_far = _div_frame(12, 40)
