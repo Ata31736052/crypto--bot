@@ -13,6 +13,13 @@
     "strategy": "CONFIRMED TREND",
     "symbol": "ARPAUSDT"
   },
+  "ETHUSDT": {
+    "entry": 2503.94,
+    "score": 69,
+    "sent_at": 1791726395.1903749,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "ETHUSDT"
+  },
   "FILUSDT": {
     "entry": 1.0819,
     "score": 66,
