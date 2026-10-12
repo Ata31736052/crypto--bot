@@ -6,17 +6,10 @@
     "strategy": "CONFIRMED TREND",
     "symbol": "APTUSDT"
   },
-  "ARPAUSDT": {
-    "entry": 0.01179,
-    "score": 83,
-    "sent_at": 1791696987.2572596,
-    "strategy": "CONFIRMED TREND",
-    "symbol": "ARPAUSDT"
-  },
   "BTCUSDT": {
-    "entry": 83701.96,
-    "score": 74,
-    "sent_at": 1791749507.1879325,
+    "entry": 83952.88,
+    "score": 72,
+    "sent_at": 1791783997.9185593,
     "strategy": "BOTTOM HUNTER",
     "symbol": "BTCUSDT"
   },
@@ -28,9 +21,9 @@
     "symbol": "ETHUSDT"
   },
   "FILUSDT": {
-    "entry": 1.0819,
-    "score": 66,
-    "sent_at": 1791704541.642861,
+    "entry": 1.2438,
+    "score": 75,
+    "sent_at": 1791783997.595646,
     "strategy": "BOTTOM HUNTER",
     "symbol": "FILUSDT"
   },
@@ -40,6 +33,13 @@
     "sent_at": 1791749507.50579,
     "strategy": "BOTTOM HUNTER",
     "symbol": "UNIUSDT"
+  },
+  "UUSDT": {
+    "entry": 1.0004,
+    "score": 87,
+    "sent_at": 1791783997.2906637,
+    "strategy": "CONFIRMED TREND",
+    "symbol": "UUSDT"
   },
   "WLDUSDT": {
     "entry": 0.5624,
