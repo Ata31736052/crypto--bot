@@ -7,10 +7,17 @@
     "symbol": "BTCUSDT"
   },
   "STXUSDT": {
-    "entry": 0.417,
-    "score": 88,
-    "sent_at": 1791856728.5191312,
+    "entry": 0.4227,
+    "score": 91,
+    "sent_at": 1791918760.8888419,
     "strategy": "CONFIRMED TREND",
     "symbol": "STXUSDT"
+  },
+  "USD1USDT": {
+    "entry": 1.0003,
+    "score": 71,
+    "sent_at": 1791918761.1895921,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "USD1USDT"
   }
 }
