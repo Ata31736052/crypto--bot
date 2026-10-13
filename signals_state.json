@@ -19,5 +19,12 @@
     "sent_at": 1791918761.1895921,
     "strategy": "BOTTOM HUNTER",
     "symbol": "USD1USDT"
+  },
+  "XRPUSDT": {
+    "entry": 1.3668,
+    "score": 66,
+    "sent_at": 1791934964.765893,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "XRPUSDT"
   }
 }
