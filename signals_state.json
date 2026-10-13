@@ -1,24 +1,10 @@
 {
-  "APTUSDT": {
-    "entry": 0.8502,
-    "score": 80,
-    "sent_at": 1791704541.4509969,
-    "strategy": "CONFIRMED TREND",
-    "symbol": "APTUSDT"
-  },
   "BTCUSDT": {
     "entry": 83952.88,
     "score": 72,
     "sent_at": 1791783997.9185593,
     "strategy": "BOTTOM HUNTER",
     "symbol": "BTCUSDT"
-  },
-  "ETHUSDT": {
-    "entry": 2503.94,
-    "score": 69,
-    "sent_at": 1791726395.1903749,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "ETHUSDT"
   },
   "FILUSDT": {
     "entry": 1.2438,
@@ -27,12 +13,12 @@
     "strategy": "BOTTOM HUNTER",
     "symbol": "FILUSDT"
   },
-  "UNIUSDT": {
-    "entry": 7.731,
-    "score": 73,
-    "sent_at": 1791749507.50579,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "UNIUSDT"
+  "STXUSDT": {
+    "entry": 0.417,
+    "score": 88,
+    "sent_at": 1791856728.5191312,
+    "strategy": "CONFIRMED TREND",
+    "symbol": "STXUSDT"
   },
   "UUSDT": {
     "entry": 1.0004,
@@ -40,12 +26,5 @@
     "sent_at": 1791783997.2906637,
     "strategy": "CONFIRMED TREND",
     "symbol": "UUSDT"
-  },
-  "WLDUSDT": {
-    "entry": 0.5624,
-    "score": 81,
-    "sent_at": 1791749506.8110838,
-    "strategy": "CONFIRMED TREND",
-    "symbol": "WLDUSDT"
   }
 }
