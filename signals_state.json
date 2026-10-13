@@ -1,17 +1,10 @@
 {
   "BTCUSDT": {
-    "entry": 83952.88,
-    "score": 72,
-    "sent_at": 1791783997.9185593,
+    "entry": 83592.01,
+    "score": 79,
+    "sent_at": 1791891649.3993943,
     "strategy": "BOTTOM HUNTER",
     "symbol": "BTCUSDT"
-  },
-  "FILUSDT": {
-    "entry": 1.2438,
-    "score": 75,
-    "sent_at": 1791783997.595646,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "FILUSDT"
   },
   "STXUSDT": {
     "entry": 0.417,
@@ -19,12 +12,5 @@
     "sent_at": 1791856728.5191312,
     "strategy": "CONFIRMED TREND",
     "symbol": "STXUSDT"
-  },
-  "UUSDT": {
-    "entry": 1.0004,
-    "score": 87,
-    "sent_at": 1791783997.2906637,
-    "strategy": "CONFIRMED TREND",
-    "symbol": "UUSDT"
   }
 }
