@@ -14,9 +14,9 @@
     "symbol": "STXUSDT"
   },
   "TRXUSDT": {
-    "entry": 0.3312,
+    "entry": 0.3338,
     "score": 82,
-    "sent_at": 1791953061.2412221,
+    "sent_at": 1791985054.16899,
     "strategy": "BOTTOM HUNTER",
     "symbol": "TRXUSDT"
   },
