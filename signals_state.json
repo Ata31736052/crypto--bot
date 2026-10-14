@@ -1,8 +1,8 @@
 {
   "BTCUSDT": {
-    "entry": 83592.01,
-    "score": 79,
-    "sent_at": 1791891649.3993943,
+    "entry": 83738.13,
+    "score": 74,
+    "sent_at": 1791953061.533543,
     "strategy": "BOTTOM HUNTER",
     "symbol": "BTCUSDT"
   },
@@ -12,6 +12,13 @@
     "sent_at": 1791918760.8888419,
     "strategy": "CONFIRMED TREND",
     "symbol": "STXUSDT"
+  },
+  "TRXUSDT": {
+    "entry": 0.3312,
+    "score": 82,
+    "sent_at": 1791953061.2412221,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "TRXUSDT"
   },
   "USD1USDT": {
     "entry": 1.0003,
@@ -26,5 +33,12 @@
     "sent_at": 1791934964.765893,
     "strategy": "BOTTOM HUNTER",
     "symbol": "XRPUSDT"
+  },
+  "ZECUSDT": {
+    "entry": 1268.21,
+    "score": 69,
+    "sent_at": 1791953061.8322423,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "ZECUSDT"
   }
 }
