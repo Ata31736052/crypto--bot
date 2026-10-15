@@ -27,11 +27,25 @@
     "strategy": "BOTTOM HUNTER",
     "symbol": "TRXUSDT"
   },
+  "UUSDT": {
+    "entry": 1.0005,
+    "score": 70,
+    "sent_at": 1792105239.7558813,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "UUSDT"
+  },
   "XRPUSDT": {
     "entry": 1.3439,
     "score": 72,
     "sent_at": 1792093845.0449963,
     "strategy": "BOTTOM HUNTER",
     "symbol": "XRPUSDT"
+  },
+  "ZECUSDT": {
+    "entry": 1229.82,
+    "score": 70,
+    "sent_at": 1792105240.0533803,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "ZECUSDT"
   }
 }
