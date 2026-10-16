@@ -1,11 +1,4 @@
 {
-  "BNBUSDT": {
-    "entry": 733.35,
-    "score": 72,
-    "sent_at": 1792093844.7486837,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "BNBUSDT"
-  },
   "BTCUSDT": {
     "entry": 82038.02,
     "score": 80,
@@ -34,6 +27,13 @@
     "strategy": "BOTTOM HUNTER",
     "symbol": "SEIUSDT"
   },
+  "TIAUSDT": {
+    "entry": 0.674,
+    "score": 81,
+    "sent_at": 1792190781.0653348,
+    "strategy": "CONFIRMED TREND",
+    "symbol": "TIAUSDT"
+  },
   "TRXUSDT": {
     "entry": 0.3354,
     "score": 80,
@@ -41,19 +41,19 @@
     "strategy": "BOTTOM HUNTER",
     "symbol": "TRXUSDT"
   },
+  "USDCUSDT": {
+    "entry": 1.0012,
+    "score": 76,
+    "sent_at": 1792190781.35884,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "USDCUSDT"
+  },
   "UUSDT": {
-    "entry": 1.0005,
-    "score": 70,
-    "sent_at": 1792105239.7558813,
+    "entry": 1.0006,
+    "score": 73,
+    "sent_at": 1792190781.646033,
     "strategy": "BOTTOM HUNTER",
     "symbol": "UUSDT"
-  },
-  "XRPUSDT": {
-    "entry": 1.3439,
-    "score": 72,
-    "sent_at": 1792093845.0449963,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "XRPUSDT"
   },
   "ZECUSDT": {
     "entry": 1229.82,
