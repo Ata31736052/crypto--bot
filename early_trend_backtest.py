@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 import main
 
 SYMBOLS = ("BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT")
-CANDLES = 1000
+CANDLES = 4320  # approximately 180 days of 1h candles
 HORIZONS = (6, 12, 24)
 # Default round-trip cost: 0.20% fees + 0.10% slippage total.
 ROUND_TRIP_COST_PCT = float(os.getenv("BACKTEST_ROUND_TRIP_COST_PCT", "0.30"))
@@ -29,6 +29,49 @@ def finite_num(value):
         return False
 
 
+def fetch_history(symbol, candles):
+    """Fetch a contiguous closed-candle history in Binance-sized pages."""
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    current_hour_open = (now_ms // 3_600_000) * 3_600_000
+    cursor = current_hour_open - candles * 3_600_000
+    rows = []
+    columns = [
+        "open_time", "open", "high", "low", "close", "volume",
+        "close_time", "quote_volume", "trades", "taker_base",
+        "taker_quote", "ignore",
+    ]
+    while cursor < current_hour_open and len(rows) < candles:
+        payload = main.get_json("/api/v3/klines", {
+            "symbol": symbol,
+            "interval": "1h",
+            "limit": min(1000, candles - len(rows)),
+            "startTime": cursor,
+            "endTime": current_hour_open - 1,
+        })
+        if not isinstance(payload, list) or not payload:
+            break
+        rows.extend(payload)
+        last_open = int(payload[-1][0])
+        next_cursor = last_open + 3_600_000
+        if next_cursor <= cursor:
+            raise RuntimeError(f"pagination did not advance for {symbol}")
+        cursor = next_cursor
+        if len(payload) < 1000:
+            break
+    if not rows:
+        return pd.DataFrame(columns=columns)
+    frame = pd.DataFrame(rows, columns=columns)
+    frame = frame.drop_duplicates(subset=["open_time"]).sort_values("open_time")
+    frame["open_time"] = pd.to_numeric(frame["open_time"], errors="coerce")
+    frame["close_time"] = pd.to_numeric(frame["close_time"], errors="coerce")
+    # The request's endTime excludes the current, still-forming hour.
+    frame = frame[frame["open_time"] < current_hour_open].tail(candles).copy()
+    for col in ("open", "high", "low", "close", "volume", "quote_volume",
+                "trades", "taker_base", "taker_quote"):
+        frame[col] = pd.to_numeric(frame[col], errors="coerce")
+    return frame.reset_index(drop=True)
+
+
 def main_run():
     if not finite_num(ROUND_TRIP_COST_PCT) or ROUND_TRIP_COST_PCT < 0:
         raise ValueError("BACKTEST_ROUND_TRIP_COST_PCT must be finite and >= 0")
@@ -37,7 +80,7 @@ def main_run():
     errors = []
     for symbol in SYMBOLS:
         try:
-            raw = main.klines(symbol, "1h", CANDLES)
+            raw = fetch_history(symbol, CANDLES)
             if raw is None or len(raw) < 260:
                 errors.append({"symbol": symbol, "error": "insufficient closed-candle history"})
                 continue
@@ -118,8 +161,9 @@ def main_run():
             vals = [v for v in vals if math.isfinite(v)]
             by_horizon[str(horizon)] = {
                 "count": len(vals),
+                "mean_gross_return_pct": round(sum(r["outcomes"][str(horizon)]["gross_return_pct"] for r in members) / len(members), 4) if members else None,
                 "mean_net_return_pct": round(sum(vals) / len(vals), 4) if vals else None,
-                "median_net_return_pct": round(sorted(vals)[len(vals) // 2], 4) if vals else None,
+                "median_net_return_pct": round((sorted(vals)[len(vals)//2] if len(vals) % 2 else (sorted(vals)[len(vals)//2-1] + sorted(vals)[len(vals)//2]) / 2), 4) if vals else None,
                 "positive_rate_pct": round(sum(v > 0 for v in vals) / len(vals) * 100, 2) if vals else None,
                 "mean_max_adverse_pct": round(sum(r["outcomes"][str(horizon)]["max_adverse_pct"] for r in members) / len(members), 4) if members else None,
                 "mean_max_favorable_pct": round(sum(r["outcomes"][str(horizon)]["max_favorable_pct"] for r in members) / len(members), 4) if members else None,
@@ -132,12 +176,13 @@ def main_run():
             "symbols": list(SYMBOLS),
             "interval": "1h",
             "requested_candles_per_symbol": CANDLES,
+            "actual_candles_by_symbol": {s: int(sum(1 for r in observations if r["symbol"] == s)) for s in SYMBOLS},
             "entry": "next closed candle open after detector candle",
             "horizons_bars": list(HORIZONS),
             "round_trip_cost_pct": ROUND_TRIP_COST_PCT,
             "cost_assumption": "0.20% fees + 0.10% slippage round trip by default",
             "cooldown_bars": max(HORIZONS),
-            "forming_candle": "excluded by main.klines",
+            "forming_candle": "excluded by requesting data only through the prior completed hour",
             "limitations": [
                 "Descriptive forward-return comparison, not a portfolio or trade-execution simulation",
                 "Overlapping observations reduced with a 24-bar per-symbol cooldown",
