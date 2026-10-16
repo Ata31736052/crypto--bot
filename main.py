@@ -696,6 +696,50 @@ def one_hour_bottom_confirm(h):
     return h1_bottom_confirmation_details(h)["confirmed"]
 
 
+
+# ---------------- EARLY TREND DETECTOR (DIAGNOSTIC ONLY) ----------------
+def early_trend_detector(h):
+    """Classify early bullish trend conditions from closed candles only.
+
+    Diagnostic-only in v1: does not change eligibility, score, risk, or signal
+    thresholds. ADX is treated as strength context, not direction. Callers must
+    pass candles with the still-forming candle already removed.
+    """
+    empty = {"state": "INSUFFICIENT_DATA", "points": 0, "max_points": 5,
+             "late_warning": False, "reasons": ["insufficient closed-candle history"]}
+    if h is None or len(h) < 3:
+        return empty
+    r, p = h.iloc[-1], h.iloc[-2]
+    required = (r.close, r.ema9, r.ema21, r.ema21_slope, r.rsi, r.atr,
+                r.adx, r.pdi, r.mdi, r.macd_hist, p.adx, p.pdi, p.mdi,
+                p.macd_hist, p.close, p.ema9, p.ema21)
+    if not finite(*required) or r.close <= 0 or r.atr <= 0:
+        return {**empty, "state": "INVALID_DATA", "reasons": ["required indicator data invalid"]}
+    checks = {
+        "price/EMA21 recovery": bool(r.close > r.ema21 and (p.close <= p.ema21 or r.close > r.ema9)),
+        "EMA21 slope positive": bool(r.ema21_slope > 0 or r.ema21 > p.ema21),
+        "MACD momentum rising": bool(r.macd_hist > p.macd_hist),
+        "bullish DI direction": bool(r.pdi > r.mdi),
+        "ADX strengthening": bool(r.adx > p.adx),
+    }
+    points = sum(checks.values())
+    extension_atr = float((r.close - r.ema21) / r.atr)
+    late = bool(extension_atr > 1.5 or r.rsi > 75 or (r.adx >= 45 and extension_atr > 1.0))
+    reasons = [name for name, passed in checks.items() if passed]
+    if late:
+        reasons.append("late-entry warning: price extended / RSI or ADX elevated")
+        state = "LATE_ENTRY_WARNING"
+    elif points >= 4 and checks["bullish DI direction"] and r.close > r.ema21:
+        state = "CONFIRMED_TREND"
+    elif points >= 3 and (checks["MACD momentum rising"] or r.pdi > p.pdi):
+        state = "EARLY_SETUP"
+    else:
+        state = "WAIT"
+    return {"state": state, "points": int(points), "max_points": 5,
+            "late_warning": late, "extension_atr": extension_atr,
+            "checks": checks, "reasons": reasons}
+
+
 # ---------------- STRATEGIES ----------------
 def trend_daily_eligible(daily_state):
     """Single source of truth for Trend Daily eligibility."""
@@ -725,7 +769,9 @@ def trend_setup(d, h, h1, btc_d, btc_h, daily_state):
     reasons=[]
     for k,v in audit["components"].items():
         if v>=0.75*audit["weights"][k]: reasons.append(k)
-    return {"strategy":"CONFIRMED TREND","score":audit["score"],"raw_score":audit["raw"],"score_max":100,"score_components":audit["components"],"reasons":reasons},reasons
+    early = early_trend_detector(h)
+    reasons = reasons + ["Early Trend Detector: " + early["state"] + " (" + str(early["points"]) + "/5)"]
+    return {"strategy":"CONFIRMED TREND","score":audit["score"],"raw_score":audit["raw"],"score_max":100,"score_components":audit["components"],"early_trend":early,"reasons":reasons},reasons
 
 
 
@@ -1783,6 +1829,23 @@ def self_test():
     trigger_test = bottom_reversal_trigger_points(test_h)
     assert 0 <= trigger_test["raw"] <= 24
     assert sum(trigger_test["parts"].values()) == trigger_test["raw"]
+    # Early Trend Detector tests: diagnostic output must not mutate score thresholds.
+    et = pd.DataFrame({
+        "close":[100.0, 100.5, 101.0], "ema9":[100.0,100.3,100.8],
+        "ema21":[100.0,100.2,100.6], "ema21_slope":[0.0,0.1,0.2],
+        "rsi":[50.0,52.0,55.0], "atr":[1.0,1.0,1.0],
+        "adx":[15.0,16.0,18.0], "pdi":[18.0,19.0,24.0],
+        "mdi":[20.0,18.0,16.0], "macd_hist":[-0.2,-0.1,0.1]
+    })
+    early_result = early_trend_detector(et)
+    assert early_result["state"] in {"EARLY_SETUP", "CONFIRMED_TREND"}
+    assert early_result["points"] >= 3 and early_result["late_warning"] is False
+    late = et.copy()
+    late.loc[2, ["close", "rsi", "adx"]] = [104.0, 78.0, 48.0]
+    late_result = early_trend_detector(late)
+    assert late_result["state"] == "LATE_ENTRY_WARNING" and late_result["late_warning"] is True
+    assert early_trend_detector(et.iloc[:2])["state"] == "INSUFFICIENT_DATA"
+    assert MIN_SCORE == 80 and DAILY_ADX_MIN == 16.0 and ONE_H_VOL_MIN == 0.75
     log.info("v3.25.0 LIVE QUOTE ENTRY VALIDATION + RISK GATES + BOTTOM REVERSAL SELF-TEST: PASS")
 
 
