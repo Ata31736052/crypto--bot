@@ -27,6 +27,13 @@
     "strategy": "BOTTOM HUNTER",
     "symbol": "NEARUSDT"
   },
+  "SEIUSDT": {
+    "entry": 0.06559,
+    "score": 66,
+    "sent_at": 1792179088.1477516,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "SEIUSDT"
+  },
   "TRXUSDT": {
     "entry": 0.3354,
     "score": 80,
