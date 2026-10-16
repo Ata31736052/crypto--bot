@@ -1,17 +1,24 @@
 {
-  "AVAUSDT": {
-    "entry": 0.2692,
-    "score": 75,
-    "sent_at": 1792038394.4388993,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "AVAUSDT"
-  },
   "BNBUSDT": {
     "entry": 733.35,
     "score": 72,
     "sent_at": 1792093844.7486837,
     "strategy": "BOTTOM HUNTER",
     "symbol": "BNBUSDT"
+  },
+  "BTCUSDT": {
+    "entry": 82038.02,
+    "score": 80,
+    "sent_at": 1792156323.3340034,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "BTCUSDT"
+  },
+  "FETUSDT": {
+    "entry": 0.2048,
+    "score": 74,
+    "sent_at": 1792156323.6554317,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "FETUSDT"
   },
   "NEARUSDT": {
     "entry": 5.243,
@@ -20,17 +27,10 @@
     "strategy": "BOTTOM HUNTER",
     "symbol": "NEARUSDT"
   },
-  "NILUSDT": {
-    "entry": 0.08595,
-    "score": 68,
-    "sent_at": 1792038394.7433667,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "NILUSDT"
-  },
   "TRXUSDT": {
-    "entry": 0.3359,
-    "score": 82,
-    "sent_at": 1792124487.4652596,
+    "entry": 0.3354,
+    "score": 80,
+    "sent_at": 1792156323.0186276,
     "strategy": "BOTTOM HUNTER",
     "symbol": "TRXUSDT"
   },
