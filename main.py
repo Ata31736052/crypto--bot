@@ -1038,11 +1038,20 @@ def signal_text(symbol, setup, trade, d, h, btc_d, btc_h):
                 "✅ QUALITY")
 
     pos = position_size(trade)
+    early = setup.get("early_trend")
+    early_line = (
+        f"🧭 Early Trend: <b>{html.escape(str(early['state']))}</b> "
+        f"({int(early['points'])}/{int(early['max_points'])})"
+        + (" ⚠️" if early.get("late_warning") else "") + "\\n"
+        if early else ""
+    )
 
     return (
-        f"<b>🚨 CRYPTO SIGNAL — {strength}</b>\n"
-        f"<b>{html.escape(symbol)}</b> | {setup['strategy']}\n\n"
-        f"⭐ Score: <b>{score}/100</b>\n"
+        f"<b>🚨 CRYPTO SIGNAL — {strength}</b>\\n"
+        f"<b>{html.escape(symbol)}</b> | {setup['strategy']}\\n\\n"
+        f"⭐ Score: <b>{score}/100</b>\\n"
+        + early_line
+
         f"💰 Entry: <b>{fmt_price(trade['entry'])}</b>\n"
         f"🛑 SL: <b>{fmt_price(trade['sl'])}</b> "
         f"({trade['risk_pct']:.2f}%)\n"
