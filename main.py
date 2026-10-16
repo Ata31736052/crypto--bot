@@ -1051,24 +1051,18 @@ def signal_text(symbol, setup, trade, d, h, btc_d, btc_h):
         f"<b>{html.escape(symbol)}</b> | {setup['strategy']}\\n\\n"
         f"⭐ Score: <b>{score}/100</b>\\n"
         + early_line
-
-        f"💰 Entry: <b>{fmt_price(trade['entry'])}</b>\n"
-        f"🛑 SL: <b>{fmt_price(trade['sl'])}</b> "
-        f"({trade['risk_pct']:.2f}%)\n"
-        f"🎯 TP1: <b>{fmt_price(trade['tp1'])}</b> "
-        f"(RR {trade['rr1']:.2f})\n"
-        f"🎯 TP2: <b>{fmt_price(trade['tp2'])}</b> "
-        f"(RR {trade['rr2']:.2f})\n"
-        f"📐 Targets: {html.escape(str(trade.get('tp1_name','')))} / {html.escape(str(trade.get('tp2_name','')))}\n\n"
-        f"📊 4H ADX: {r.adx:.1f} | Vol: {r.vol_ratio:.2f}x | "
-        f"RSI: {r.rsi:.1f}\n"
-        f"🟢 Taker Buy: {r.taker_buy_ratio:.2%}\n"
-        f"₿ BTC: Daily={btc_d} | 4H={btc_h}\n"
-        f"💵 Suggested max position: ${pos:,.0f}\n\n"
-        f"<b>Why:</b> " + " • ".join(setup["reasons"][:8]) +
-        f"\n\n<i>Binance Spot data | Signal only — no auto-trading</i>"
+        + f"💰 Entry: <b>{fmt_price(trade['entry'])}</b>\\n"
+        + f"🛑 SL: <b>{fmt_price(trade['sl'])}</b> ({trade['risk_pct']:.2f}%)\\n"
+        + f"🎯 TP1: <b>{fmt_price(trade['tp1'])}</b> (RR {trade['rr1']:.2f})\\n"
+        + f"🎯 TP2: <b>{fmt_price(trade['tp2'])}</b> (RR {trade['rr2']:.2f})\\n"
+        + f"📐 Targets: {html.escape(str(trade.get('tp1_name','')))} / {html.escape(str(trade.get('tp2_name','')))}\\n\\n"
+        + f"📊 4H ADX: {r.adx:.1f} | Vol: {r.vol_ratio:.2f}x | RSI: {r.rsi:.1f}\\n"
+        + f"🟢 Taker Buy: {r.taker_buy_ratio:.2%}\\n"
+        + f"₿ BTC: Daily={btc_d} | 4H={btc_h}\\n"
+        + f"💵 Suggested max position: ${pos:,.0f}\\n\\n"
+        + "<b>Why:</b> " + " • ".join(setup["reasons"][:8])
+        + "\\n\\n<i>Binance Spot data | Signal only — no auto-trading</i>"
     )
-
 
 # ---------------- SCAN ----------------
 
