@@ -13,6 +13,7 @@ import os
 from datetime import datetime, timezone
 
 import main
+import pandas as pd
 
 SYMBOLS = ("BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT")
 CANDLES = 4320  # approximately 180 days of 1h candles
@@ -78,9 +79,11 @@ def main_run():
 
     observations = []
     errors = []
+    history_candle_counts = {}
     for symbol in SYMBOLS:
         try:
             raw = fetch_history(symbol, CANDLES)
+            history_candle_counts[symbol] = int(len(raw)) if raw is not None else 0
             if raw is None or len(raw) < 260:
                 errors.append({"symbol": symbol, "error": "insufficient closed-candle history"})
                 continue
@@ -176,7 +179,7 @@ def main_run():
             "symbols": list(SYMBOLS),
             "interval": "1h",
             "requested_candles_per_symbol": CANDLES,
-            "actual_candles_by_symbol": {s: int(sum(1 for r in observations if r["symbol"] == s)) for s in SYMBOLS},
+            "actual_candles_by_symbol": history_candle_counts,
             "entry": "next closed candle open after detector candle",
             "horizons_bars": list(HORIZONS),
             "round_trip_cost_pct": ROUND_TRIP_COST_PCT,
