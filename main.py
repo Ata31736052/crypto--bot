@@ -1042,26 +1042,26 @@ def signal_text(symbol, setup, trade, d, h, btc_d, btc_h):
     early_line = (
         f"🧭 Early Trend: <b>{html.escape(str(early['state']))}</b> "
         f"({int(early['points'])}/{int(early['max_points'])})"
-        + (" ⚠️" if early.get("late_warning") else "") + "\\n"
+        + (" ⚠️" if early.get("late_warning") else "") + "\n"
         if early else ""
     )
 
     return (
-        f"<b>🚨 CRYPTO SIGNAL — {strength}</b>\\n"
-        f"<b>{html.escape(symbol)}</b> | {setup['strategy']}\\n\\n"
-        f"⭐ Score: <b>{score}/100</b>\\n"
+        f"<b>🚨 CRYPTO SIGNAL — {strength}</b>\n"
+        f"<b>{html.escape(symbol)}</b> | {setup['strategy']}\n\n"
+        f"⭐ Score: <b>{score}/100</b>\n"
         + early_line
-        + f"💰 Entry: <b>{fmt_price(trade['entry'])}</b>\\n"
-        + f"🛑 SL: <b>{fmt_price(trade['sl'])}</b> ({trade['risk_pct']:.2f}%)\\n"
-        + f"🎯 TP1: <b>{fmt_price(trade['tp1'])}</b> (RR {trade['rr1']:.2f})\\n"
-        + f"🎯 TP2: <b>{fmt_price(trade['tp2'])}</b> (RR {trade['rr2']:.2f})\\n"
-        + f"📐 Targets: {html.escape(str(trade.get('tp1_name','')))} / {html.escape(str(trade.get('tp2_name','')))}\\n\\n"
-        + f"📊 4H ADX: {r.adx:.1f} | Vol: {r.vol_ratio:.2f}x | RSI: {r.rsi:.1f}\\n"
-        + f"🟢 Taker Buy: {r.taker_buy_ratio:.2%}\\n"
-        + f"₿ BTC: Daily={btc_d} | 4H={btc_h}\\n"
-        + f"💵 Suggested max position: ${pos:,.0f}\\n\\n"
+        + f"💰 Entry: <b>{fmt_price(trade['entry'])}</b>\n"
+        + f"🛑 SL: <b>{fmt_price(trade['sl'])}</b> ({trade['risk_pct']:.2f}%)\n"
+        + f"🎯 TP1: <b>{fmt_price(trade['tp1'])}</b> (RR {trade['rr1']:.2f})\n"
+        + f"🎯 TP2: <b>{fmt_price(trade['tp2'])}</b> (RR {trade['rr2']:.2f})\n"
+        + f"📐 Targets: {html.escape(str(trade.get('tp1_name','')))} / {html.escape(str(trade.get('tp2_name','')))}\n\n"
+        + f"📊 4H ADX: {r.adx:.1f} | Vol: {r.vol_ratio:.2f}x | RSI: {r.rsi:.1f}\n"
+        + f"🟢 Taker Buy: {r.taker_buy_ratio:.2%}\n"
+        + f"₿ BTC: Daily={btc_d} | 4H={btc_h}\n"
+        + f"💵 Suggested max position: ${pos:,.0f}\n\n"
         + "<b>Why:</b> " + " • ".join(setup["reasons"][:8])
-        + "\\n\\n<i>Binance Spot data | Signal only — no auto-trading</i>"
+        + "\n\n<i>Binance Spot data | Signal only — no auto-trading</i>"
     )
 
 # ---------------- SCAN ----------------
