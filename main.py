@@ -955,6 +955,17 @@ def mark_signal_sent(state, item, now_ts=None):
 
 
 # ---------------- TELEGRAM ----------------
+def telegram_delivery_confirmed(payload):
+    """Accept delivery only when Telegram explicitly confirms a message was created."""
+    if not isinstance(payload, dict) or payload.get("ok") is not True:
+        return False
+    result = payload.get("result")
+    if not isinstance(result, dict):
+        return False
+    message_id = result.get("message_id")
+    return isinstance(message_id, int) and not isinstance(message_id, bool)
+
+
 def send_telegram(text):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
         log.warning("Telegram credentials missing; signal not sent.")
@@ -967,8 +978,18 @@ def send_telegram(text):
         "parse_mode": "HTML",
         "disable_web_page_preview": True,
     }
-    r = session.post(url, json=payload, timeout=TIMEOUT)
-    r.raise_for_status()
+    response = session.post(url, json=payload, timeout=TIMEOUT)
+    response.raise_for_status()
+    try:
+        result = response.json()
+    except ValueError as exc:
+        raise RuntimeError("Telegram API returned invalid JSON") from exc
+
+    if not telegram_delivery_confirmed(result):
+        description = result.get("description", "unknown Telegram API rejection") if isinstance(result, dict) else "invalid response payload"
+        raise RuntimeError(f"Telegram API did not confirm delivery: {description}")
+
+    log.info("TELEGRAM DELIVERY CONFIRMED | message_id=%s", result["result"]["message_id"])
     return True
 
 
@@ -1652,6 +1673,10 @@ def self_test():
     assert BOTTOM_LOW_LOOKBACK_H4==42 and BOTTOM_LOW_DISTANCE_PCT==5.0
     assert MAX_SL_PCT==13.0 and BOTTOM_MAX_SL_PCT==15.0
     assert HTTP_RETRIES>=2 and RETRY_BACKOFF>0
+    assert telegram_delivery_confirmed({"ok": True, "result": {"message_id": 123}})
+    assert not telegram_delivery_confirmed({"ok": False, "description": "rejected"})
+    assert not telegram_delivery_confirmed({"ok": True, "result": {}})
+    assert not telegram_delivery_confirmed(None)
     assert callable(live_quote)
     assert TREND_SCORE_MAX==100 and BOTTOM_SCORE_MAX==100 and MAX_SIGNALS==3
     assert sum({"Daily regime":12,"4H structure":18,"BOS/retest":8,"Fib/location":8,"EMA alignment":10,"MACD":8,"RSI":7,"ADX":7,"4H volume":7,"Taker buy":5,"BTC context":3,"4H location/chase":5,"Volatility health":2}.values())==100
