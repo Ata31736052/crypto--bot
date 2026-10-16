@@ -765,12 +765,14 @@ def trend_setup(d, h, h1, btc_d, btc_h, daily_state):
     if r.vol_ratio<0.60: return None,["4H volume critically weak"]
     if r.atr<=0 or r.close<=0: return None,["invalid 4H volatility data"]
     audit=unified_trend_score_audit(d,h,h1,btc_d,btc_h,dr)
-    if audit["score"]<MIN_SCORE: return None,[f"setup score {audit['score']} < {MIN_SCORE}","SCORE MISSING="+" | ".join(audit["missing"][:8])]
+    early = early_trend_detector(h)
+    early_note = "Early Trend Detector: " + early["state"] + " (" + str(early["points"]) + "/5)"
+    if audit["score"]<MIN_SCORE:
+        return None,[f"setup score {audit['score']} < {MIN_SCORE}",early_note,"SCORE MISSING="+" | ".join(audit["missing"][:8])]
     reasons=[]
     for k,v in audit["components"].items():
         if v>=0.75*audit["weights"][k]: reasons.append(k)
-    early = early_trend_detector(h)
-    reasons = reasons + ["Early Trend Detector: " + early["state"] + " (" + str(early["points"]) + "/5)"]
+    reasons = reasons + [early_note]
     return {"strategy":"CONFIRMED TREND","score":audit["score"],"raw_score":audit["raw"],"score_max":100,"score_components":audit["components"],"early_trend":early,"reasons":reasons},reasons
 
 
