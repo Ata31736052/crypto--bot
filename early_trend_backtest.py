@@ -126,10 +126,13 @@ def main_run():
                 entry = float(frame.iloc[entry_idx].open)
                 if not math.isfinite(entry) or entry <= 0:
                     continue
+                signal_time_ms = int(frame.iloc[idx].close_time)
+                period_cutoff_ms = int(frame.iloc[0].open_time) + 120 * 24 * 3_600_000
                 record = {
                     "symbol": symbol,
-                    "signal_close_time_ms": int(frame.iloc[idx].close_time),
+                    "signal_close_time_ms": signal_time_ms,
                     "entry_time_ms": int(frame.iloc[entry_idx].open_time),
+                    "period": "older_120d" if signal_time_ms < period_cutoff_ms else "recent_60d",
                     "state": state,
                     "points": int(result.get("points", 0)),
                     "groups": groups,
@@ -154,24 +157,41 @@ def main_run():
         except Exception as exc:
             errors.append({"symbol": symbol, "error": f"{type(exc).__name__}: {exc}"})
 
-    summary = {}
     group_names = ("EARLY_SETUP", "CONFIRMED_TREND", "LATE_ENTRY_WARNING", "EMA21_BASELINE")
+    cost_scenarios_pct = (0.20, 0.30, 0.50)
+
+    def summarize(members, horizon, cost_pct):
+        gross = [r["outcomes"][str(horizon)]["gross_return_pct"] for r in members]
+        net = [value - cost_pct for value in gross if math.isfinite(value)]
+        net_sorted = sorted(net)
+        return {
+            "count": len(net),
+            "mean_gross_return_pct": round(sum(gross) / len(gross), 4) if gross else None,
+            "mean_net_return_pct": round(sum(net) / len(net), 4) if net else None,
+            "median_net_return_pct": round((net_sorted[len(net_sorted)//2] if len(net_sorted) % 2 else (net_sorted[len(net_sorted)//2-1] + net_sorted[len(net_sorted)//2]) / 2), 4) if net_sorted else None,
+            "positive_rate_pct": round(sum(value > 0 for value in net) / len(net) * 100, 2) if net else None,
+            "mean_max_adverse_pct": round(sum(r["outcomes"][str(horizon)]["max_adverse_pct"] for r in members) / len(members), 4) if members else None,
+            "mean_max_favorable_pct": round(sum(r["outcomes"][str(horizon)]["max_favorable_pct"] for r in members) / len(members), 4) if members else None,
+        }
+
+    summary = {}
+    period_summary = {}
     for group in group_names:
         members = [r for r in observations if group in r["groups"]]
-        by_horizon = {}
-        for horizon in HORIZONS:
-            vals = [r["outcomes"][str(horizon)]["net_return_pct"] for r in members]
-            vals = [v for v in vals if math.isfinite(v)]
-            by_horizon[str(horizon)] = {
-                "count": len(vals),
-                "mean_gross_return_pct": round(sum(r["outcomes"][str(horizon)]["gross_return_pct"] for r in members) / len(members), 4) if members else None,
-                "mean_net_return_pct": round(sum(vals) / len(vals), 4) if vals else None,
-                "median_net_return_pct": round((sorted(vals)[len(vals)//2] if len(vals) % 2 else (sorted(vals)[len(vals)//2-1] + sorted(vals)[len(vals)//2]) / 2), 4) if vals else None,
-                "positive_rate_pct": round(sum(v > 0 for v in vals) / len(vals) * 100, 2) if vals else None,
-                "mean_max_adverse_pct": round(sum(r["outcomes"][str(horizon)]["max_adverse_pct"] for r in members) / len(members), 4) if members else None,
-                "mean_max_favorable_pct": round(sum(r["outcomes"][str(horizon)]["max_favorable_pct"] for r in members) / len(members), 4) if members else None,
+        summary[group] = {
+            str(horizon): summarize(members, horizon, ROUND_TRIP_COST_PCT)
+            for horizon in HORIZONS
+        }
+        period_summary[group] = {}
+        for period in ("older_120d", "recent_60d"):
+            period_members = [r for r in members if r["period"] == period]
+            period_summary[group][period] = {
+                str(horizon): {
+                    f"cost_{cost_pct:.2f}_pct": summarize(period_members, horizon, cost_pct)
+                    for cost_pct in cost_scenarios_pct
+                }
+                for horizon in HORIZONS
             }
-        summary[group] = by_horizon
 
     report = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -194,6 +214,8 @@ def main_run():
             ],
         },
         "summary": summary,
+        "period_and_cost_sensitivity": period_summary,
+        "cost_scenarios_pct": list(cost_scenarios_pct),
         "observation_count": len(observations),
         "errors": errors,
         "observations": observations,
@@ -205,6 +227,7 @@ def main_run():
         "observation_count": len(observations),
         "errors": errors,
         "summary": summary,
+        "period_and_cost_sensitivity": period_summary,
         "round_trip_cost_pct": ROUND_TRIP_COST_PCT,
     }, indent=2))
     if not observations:
