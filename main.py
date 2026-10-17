@@ -765,7 +765,8 @@ def trend_setup(d, h, h1, btc_d, btc_h, daily_state):
     if r.vol_ratio<0.60: return None,["4H volume critically weak"]
     if r.atr<=0 or r.close<=0: return None,["invalid 4H volatility data"]
     audit=unified_trend_score_audit(d,h,h1,btc_d,btc_h,dr)
-    early = early_trend_detector(h)
+    # The early detector is evaluated on 1H entry-confirmation candles, matching its historical evaluation.
+    early = early_trend_detector(h1)
     early_note = "Early Trend Detector: " + early["state"] + " (" + str(early["points"]) + "/5)"
     if audit["score"]<MIN_SCORE:
         return None,[f"setup score {audit['score']} < {MIN_SCORE}",early_note,"SCORE MISSING="+" | ".join(audit["missing"][:8])]
