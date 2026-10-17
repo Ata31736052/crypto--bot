@@ -25,6 +25,7 @@ on:
     paths:
       - "main.py"
       - "requirements.txt"
+      - "trend_buy_regime_backtest.py"
       - ".github/workflows/apex-signal.yml"
 
 concurrency:
