@@ -56,7 +56,7 @@ def resample_indicators(raw, rule, interval_ms):
     x.index = pd.to_datetime(x.open_time, unit="ms", utc=True)
     agg = {"open":"first","high":"max","low":"min","close":"last","volume":"sum",
            "quote_volume":"sum","trades":"sum","taker_base":"sum","taker_quote":"sum"}
-    y = x[NUM_COLS].resample(rule, origin="epoch", label="left", closed="left").agg(agg).dropna(subset=["open","high","low","close"])
+    y = x[NUM_COLS].resample(rule, label="left", closed="left").agg(agg).dropna(subset=["open","high","low","close"])
     y["open_time"] = y.index.astype("int64") // 1_000_000
     y["close_time"] = y["open_time"] + interval_ms - 1
     y = y.reset_index(drop=True)
@@ -99,25 +99,41 @@ def main_run():
     btcd_times = btcd.close_time.astype("int64").tolist()
     eval_start = int(hourly["BTCUSDT"].iloc[-EVALUATE_DAYS*24].open_time)
     observations = []
-    diagnostics = {"evaluated_regime_bars":0,"trend_setup_calls":0,"trend_setup_accepted":0,"setup_rejections":{}}
+    diagnostics = {"loop_candidates":0,"skip_before_eval":0,"skip_warmup":0,"skip_recent":0,"skip_cooldown":0,"skip_context":0,"evaluated_regime_bars":0,"trend_setup_calls":0,"trend_setup_accepted":0,"regime_bars":{"BULLISH":0,"NEUTRAL":0,"EXCLUDED_BEARISH":0},"setup_rejections":{},"timestamps":{}}
     for symbol in tradable_symbols:
         one, four, day = hourly[symbol], h4[symbol], daily[symbol]
         one_times = one.open_time.astype("int64").tolist()
         four_times = four.close_time.astype("int64").tolist()
         day_times = day.close_time.astype("int64").tolist()
         last_signal_time = -10**30
+        if symbol == tradable_symbols[0]:
+            diagnostics["timestamps"] = {"eval_start_ms":eval_start,"hourly_first_ms":int(one.iloc[0].open_time),
+                "hourly_last_ms":int(one.iloc[-1].open_time),"h4_first_close_ms":int(four_times[0]),
+                "h4_last_close_ms":int(four_times[-1]),"hourly_rows":len(one),"h4_rows":len(four)}
         for i, signal_time in enumerate(four_times):
-            if signal_time < eval_start or i < 50 or signal_time >= int(one.iloc[-25].open_time):
+            diagnostics["loop_candidates"] += 1
+            if signal_time < eval_start:
+                diagnostics["skip_before_eval"] += 1
                 continue
-            # Respect the actual 8-hour signal de-duplication cooldown.
-            if signal_time - last_signal_time < 8 * HOUR_MS: continue
+            if i < 50:
+                diagnostics["skip_warmup"] += 1
+                continue
+            if signal_time >= int(one.iloc[-25].open_time):
+                diagnostics["skip_recent"] += 1
+                continue
+            if signal_time - last_signal_time < 8 * HOUR_MS:
+                diagnostics["skip_cooldown"] += 1
+                continue
             bi4, bid = latest_idx(btc4_times, signal_time), latest_idx(btcd_times, signal_time)
             si4, sid = latest_idx(four_times, signal_time), latest_idx(day_times, signal_time)
             h1i = latest_idx(one_times, signal_time)
-            if min(bi4,bid,si4,sid,h1i) < 1: continue
+            if min(bi4,bid,si4,sid,h1i) < 1:
+                diagnostics["skip_context"] += 1
+                continue
             btc_h_state = main.daily_regime(btc4.iloc[:bi4+1])
             btc_d_state = main.daily_regime(btcd.iloc[:bid+1])
             regime = regime_bucket(btc_d_state, btc_h_state)
+            diagnostics["regime_bars"][regime] += 1
             if regime == "EXCLUDED_BEARISH": continue
             diagnostics["evaluated_regime_bars"] += 1
             d = day.iloc[:sid+1].tail(250)
@@ -159,7 +175,7 @@ def main_run():
         "entry":"first 1h open after the closed 4h signal candle",
         "horizons_hours":list(HORIZONS),"cooldown_hours":8,
         "round_trip_cost_scenarios_pct":list(COSTS),
-        "limitations":["Five liquid benchmark symbols only; not a full-universe shared-account simulation",
+        "limitations":["Fifteen tradable symbols sampled; not a full-universe shared-account simulation",
           "Fixed-horizon mark-to-close outcomes, not stop/target trade simulation",
           "Historical regimes are descriptive and do not establish future performance"]},
       "observation_count":len(observations),"errors":errors,"diagnostics":diagnostics,
