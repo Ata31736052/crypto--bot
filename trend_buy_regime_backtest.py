@@ -60,7 +60,10 @@ def resample_indicators(raw, rule, interval_ms):
     y["open_time"] = y.index.astype("int64") // 1_000_000
     y["close_time"] = y["open_time"] + interval_ms - 1
     y = y.reset_index(drop=True)
-    return main.add_indicators(y)
+    y = main.add_indicators(y)
+    # Rebuild close_time after indicator calculation to guarantee millisecond epoch units.
+    y["close_time"] = pd.to_numeric(y["open_time"], errors="raise") + interval_ms - 1
+    return y
 
 def latest_idx(times, stamp):
     import bisect
