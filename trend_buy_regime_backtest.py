@@ -57,12 +57,16 @@ def resample_indicators(raw, rule, interval_ms):
     agg = {"open":"first","high":"max","low":"min","close":"last","volume":"sum",
            "quote_volume":"sum","trades":"sum","taker_base":"sum","taker_quote":"sum"}
     y = x[NUM_COLS].resample(rule, label="left", closed="left").agg(agg).dropna(subset=["open","high","low","close"])
-    y["open_time"] = y.index.astype("int64") // 1_000_000
+    # Pandas may store DatetimeIndex internally in ns, us, or s depending on version.
+    # timestamp() normalizes every resampled candle to epoch milliseconds.
+    y["open_time"] = [int(ts.timestamp() * 1000) for ts in y.index]
     y["close_time"] = y["open_time"] + interval_ms - 1
     y = y.reset_index(drop=True)
     y = main.add_indicators(y)
     # Rebuild close_time after indicator calculation to guarantee millisecond epoch units.
     y["close_time"] = pd.to_numeric(y["open_time"], errors="raise") + interval_ms - 1
+    if len(y) and (int(y["open_time"].iloc[-1]) < 1_000_000_000_000 or int(y["close_time"].iloc[-1]) < 1_000_000_000_000):
+        raise RuntimeError(f"resampled timestamps are not epoch milliseconds: {rule}")
     return y
 
 def latest_idx(times, stamp):
