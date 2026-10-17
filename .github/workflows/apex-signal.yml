@@ -27,6 +27,7 @@ on:
       - "main.py"
       - "requirements.txt"
       - "early_trend_backtest.py"
+      - "trend_buy_regime_backtest.py"
       - ".github/workflows/apex-signal.yml"
 
 concurrency:
