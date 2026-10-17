@@ -13,12 +13,12 @@
     "strategy": "BOTTOM HUNTER",
     "symbol": "FETUSDT"
   },
-  "NEARUSDT": {
-    "entry": 5.243,
-    "score": 79,
-    "sent_at": 1792124487.7526305,
+  "PROMUSDT": {
+    "entry": 4.918,
+    "score": 68,
+    "sent_at": 1792238898.058719,
     "strategy": "BOTTOM HUNTER",
-    "symbol": "NEARUSDT"
+    "symbol": "PROMUSDT"
   },
   "SEIUSDT": {
     "entry": 0.06559,
@@ -35,9 +35,9 @@
     "symbol": "TIAUSDT"
   },
   "TRXUSDT": {
-    "entry": 0.3354,
-    "score": 80,
-    "sent_at": 1792156323.0186276,
+    "entry": 0.3371,
+    "score": 69,
+    "sent_at": 1792238897.7317913,
     "strategy": "BOTTOM HUNTER",
     "symbol": "TRXUSDT"
   },
@@ -61,12 +61,5 @@
     "sent_at": 1792210437.3219926,
     "strategy": "BOTTOM HUNTER",
     "symbol": "WLDUSDT"
-  },
-  "ZROUSDT": {
-    "entry": 2.168,
-    "score": 72,
-    "sent_at": 1792124488.0343199,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "ZROUSDT"
   }
 }
