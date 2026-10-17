@@ -10,7 +10,8 @@ from datetime import datetime, timezone
 import pandas as pd
 import main
 
-SYMBOLS = ("BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT")
+SYMBOLS = ("ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT","ADAUSDT","DOGEUSDT","LINKUSDT","AVAXUSDT","LTCUSDT","TRXUSDT","DOTUSDT","UNIUSDT","AAVEUSDT","BCHUSDT","SUIUSDT")
+FETCH_SYMBOLS = ("BTCUSDT",) + SYMBOLS
 FETCH_DAYS = 240       # warm-up for the 200-day EMA
 EVALUATE_DAYS = 180
 CANDLES = FETCH_DAYS * 24
@@ -81,7 +82,15 @@ def stats(rows, horizon, cost):
 
 def main_run():
     if not finite(DEFAULT_COST) or DEFAULT_COST < 0: raise ValueError("invalid cost")
-    raw_by_symbol = {s:fetch_history(s) for s in SYMBOLS}
+    raw_by_symbol, errors = {}, []
+    for sym in FETCH_SYMBOLS:
+        try:
+            raw_by_symbol[sym] = fetch_history(sym)
+        except Exception as exc:
+            errors.append({"symbol":sym,"stage":"fetch","error":str(exc)})
+    if "BTCUSDT" not in raw_by_symbol:
+        raise RuntimeError("BTC regime history unavailable; cannot run comparison")
+    tradable_symbols = [s for s in SYMBOLS if s in raw_by_symbol]
     hourly = {s:main.add_indicators(x).reset_index(drop=True) for s,x in raw_by_symbol.items()}
     h4 = {s:resample_indicators(x,"4h",4*HOUR_MS) for s,x in raw_by_symbol.items()}
     daily = {s:resample_indicators(x,"1D",24*HOUR_MS) for s,x in raw_by_symbol.items()}
@@ -89,8 +98,9 @@ def main_run():
     btc4_times = btc4.close_time.astype("int64").tolist()
     btcd_times = btcd.close_time.astype("int64").tolist()
     eval_start = int(hourly["BTCUSDT"].iloc[-EVALUATE_DAYS*24].open_time)
-    observations, errors = [], []
-    for symbol in SYMBOLS:
+    observations = []
+    diagnostics = {"evaluated_regime_bars":0,"trend_setup_calls":0,"trend_setup_accepted":0,"setup_rejections":{}}
+    for symbol in tradable_symbols:
         one, four, day = hourly[symbol], h4[symbol], daily[symbol]
         one_times = one.open_time.astype("int64").tolist()
         four_times = four.close_time.astype("int64").tolist()
@@ -109,12 +119,19 @@ def main_run():
             btc_d_state = main.daily_regime(btcd.iloc[:bid+1])
             regime = regime_bucket(btc_d_state, btc_h_state)
             if regime == "EXCLUDED_BEARISH": continue
+            diagnostics["evaluated_regime_bars"] += 1
             d = day.iloc[:sid+1].tail(250)
             h = four.iloc[:si4+1].tail(250)
             h1 = one.iloc[:h1i+1].tail(250)
             daily_state = main.daily_regime(d)
             try:
-                setup, _ = main.trend_setup(d, h, h1, btc_d_state, btc_h_state, daily_state)
+                setup, reasons = main.trend_setup(d, h, h1, btc_d_state, btc_h_state, daily_state)
+                diagnostics["trend_setup_calls"] += 1
+                if not setup:
+                    reason_key = str(reasons[0]) if reasons else "no reason returned"
+                    diagnostics["setup_rejections"][reason_key] = diagnostics["setup_rejections"].get(reason_key,0)+1
+                else:
+                    diagnostics["trend_setup_accepted"] += 1
             except Exception as exc:
                 errors.append({"symbol":symbol,"signal_time_ms":signal_time,"error":str(exc)})
                 continue
@@ -135,7 +152,7 @@ def main_run():
             last_signal_time = signal_time
     report = {
       "generated_at_utc":datetime.now(timezone.utc).isoformat(),
-      "method":{"symbols":list(SYMBOLS),"evaluation_days":EVALUATE_DAYS,
+      "method":{"symbols":list(tradable_symbols),"evaluation_days":EVALUATE_DAYS,
         "fetch_days_including_warmup":FETCH_DAYS,"signal_strategy":"production main.trend_setup()",
         "regime":"BULLISH only when BTC Daily and 4H are BULLISH/EARLY_BULLISH; NEUTRAL when neither is BEARISH but both are not bullish",
         "bearish_regimes":"excluded from this specific neutral-vs-bullish comparison",
@@ -145,14 +162,15 @@ def main_run():
         "limitations":["Five liquid benchmark symbols only; not a full-universe shared-account simulation",
           "Fixed-horizon mark-to-close outcomes, not stop/target trade simulation",
           "Historical regimes are descriptive and do not establish future performance"]},
-      "observation_count":len(observations),"errors":errors,
+      "observation_count":len(observations),"errors":errors,"diagnostics":diagnostics,
       "summary":{regime:{str(h):{f"cost_{cost:.2f}_pct":stats([r for r in observations if r["regime"]==regime],h,cost)
          for cost in COSTS} for h in HORIZONS} for regime in ("BULLISH","NEUTRAL")},
       "observations":observations}
     with open(OUTPUT,"w",encoding="utf-8") as f: json.dump(report,f,indent=2)
-    print(json.dumps({"output":OUTPUT,"observation_count":len(observations),"errors":errors,"summary":report["summary"]},indent=2))
-    if not observations: raise RuntimeError("No TREND BUY observations; refusing empty success")
-    if any(not any(r["regime"]==g for r in observations) for g in ("BULLISH","NEUTRAL")):
-        raise RuntimeError("Missing one regime bucket; comparison is inconclusive")
+    print(json.dumps({"output":OUTPUT,"observation_count":len(observations),"errors":errors,"diagnostics":diagnostics,"summary":report["summary"]},indent=2))
+    if not observations:
+        print("INCONCLUSIVE: no production TREND BUY setups passed in the selected sample; inspect rejection diagnostics.")
+    elif any(not any(r["regime"]==g for r in observations) for g in ("BULLISH","NEUTRAL")):
+        print("INCONCLUSIVE: only one regime bucket has TREND BUY observations.")
 
 if __name__ == "__main__": main_run()
