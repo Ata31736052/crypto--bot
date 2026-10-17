@@ -18,6 +18,7 @@ on:
     paths:
       - "main.py"
       - "requirements.txt"
+      - "trend_buy_regime_backtest.py"
       - ".github/workflows/apex-signal.yml"
   pull_request:
     branches: [main]
@@ -52,8 +53,45 @@ jobs:
           pip install -r requirements.txt
       - name: Compile and run regression self-tests
         run: |
-          python -m py_compile main.py
+          python -m py_compile main.py trend_buy_regime_backtest.py
           python -c "import main; main.self_test()"
+
+  trend-buy-regime-validation:
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    env:
+      TELEGRAM_TOKEN: ""
+      TELEGRAM_CHAT_ID: ""
+      BACKTEST_ROUND_TRIP_COST_PCT: "0.30"
+      TREND_REGIME_OUTPUT: trend-buy-regime-report.json
+    steps:
+      - name: Checkout research branch
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Compile and run 180-day TREND BUY regime comparison
+        run: |
+          python -m py_compile main.py trend_buy_regime_backtest.py
+          python trend_buy_regime_backtest.py
+      - name: Upload regime comparison report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trend-buy-regime-report
+          path: trend-buy-regime-report.json
+          if-no-files-found: warn
+          retention-days: 14
 
   production-scan:
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'production')
