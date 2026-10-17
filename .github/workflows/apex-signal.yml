@@ -19,6 +19,7 @@ on:
       - "main.py"
       - "requirements.txt"
       - "early_trend_backtest.py"
+      - "trend_buy_regime_backtest.py"
       - ".github/workflows/apex-signal.yml"
   pull_request:
     branches: [main]
@@ -54,7 +55,7 @@ jobs:
           pip install -r requirements.txt
       - name: Compile and run regression self-tests
         run: |
-          python -m py_compile main.py early_trend_backtest.py
+          python -m py_compile main.py early_trend_backtest.py trend_buy_regime_backtest.py
           python -c "import main; main.self_test()"
 
   early-trend-historical-validation:
@@ -83,14 +84,17 @@ jobs:
           pip install -r requirements.txt
       - name: Compile and run read-only historical evaluation
         run: |
-          python -m py_compile main.py early_trend_backtest.py
+          python -m py_compile main.py early_trend_backtest.py trend_buy_regime_backtest.py
           python early_trend_backtest.py
+          python trend_buy_regime_backtest.py
       - name: Upload historical evaluation report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: early-trend-historical-validation
-          path: early-trend-historical-report.json
+          path: |
+            early-trend-historical-report.json
+            trend-buy-regime-report.json
           if-no-files-found: warn
           retention-days: 14
 
