@@ -1,17 +1,24 @@
 {
+  "AAVEUSDT": {
+    "entry": 153.59,
+    "score": 70,
+    "sent_at": 1792297205.700789,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "AAVEUSDT"
+  },
   "BTCUSDT": {
-    "entry": 82038.02,
-    "score": 80,
-    "sent_at": 1792156323.3340034,
+    "entry": 81914.87,
+    "score": 66,
+    "sent_at": 1792297206.3566043,
     "strategy": "BOTTOM HUNTER",
     "symbol": "BTCUSDT"
   },
-  "FETUSDT": {
-    "entry": 0.2048,
-    "score": 74,
-    "sent_at": 1792156323.6554317,
+  "HBARUSDT": {
+    "entry": 0.0866,
+    "score": 67,
+    "sent_at": 1792297205.988031,
     "strategy": "BOTTOM HUNTER",
-    "symbol": "FETUSDT"
+    "symbol": "HBARUSDT"
   },
   "PROMUSDT": {
     "entry": 4.918,
@@ -20,46 +27,11 @@
     "strategy": "BOTTOM HUNTER",
     "symbol": "PROMUSDT"
   },
-  "SEIUSDT": {
-    "entry": 0.06559,
-    "score": 66,
-    "sent_at": 1792179088.1477516,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "SEIUSDT"
-  },
-  "TIAUSDT": {
-    "entry": 0.674,
-    "score": 81,
-    "sent_at": 1792190781.0653348,
-    "strategy": "CONFIRMED TREND",
-    "symbol": "TIAUSDT"
-  },
   "TRXUSDT": {
     "entry": 0.3371,
     "score": 69,
     "sent_at": 1792238897.7317913,
     "strategy": "BOTTOM HUNTER",
     "symbol": "TRXUSDT"
-  },
-  "USDCUSDT": {
-    "entry": 1.0012,
-    "score": 76,
-    "sent_at": 1792190781.35884,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "USDCUSDT"
-  },
-  "UUSDT": {
-    "entry": 1.0006,
-    "score": 73,
-    "sent_at": 1792190781.646033,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "UUSDT"
-  },
-  "WLDUSDT": {
-    "entry": 0.5318,
-    "score": 66,
-    "sent_at": 1792210437.3219926,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "WLDUSDT"
   }
 }
