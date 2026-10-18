@@ -7,9 +7,9 @@
     "symbol": "AAVEUSDT"
   },
   "BTCUSDT": {
-    "entry": 81914.87,
-    "score": 66,
-    "sent_at": 1792297206.3566043,
+    "entry": 81988.01,
+    "score": 70,
+    "sent_at": 1792326883.0646772,
     "strategy": "BOTTOM HUNTER",
     "symbol": "BTCUSDT"
   },
@@ -20,18 +20,11 @@
     "strategy": "BOTTOM HUNTER",
     "symbol": "HBARUSDT"
   },
-  "PROMUSDT": {
-    "entry": 4.918,
-    "score": 68,
-    "sent_at": 1792238898.058719,
+  "LTCUSDT": {
+    "entry": 59.41,
+    "score": 67,
+    "sent_at": 1792326883.4195185,
     "strategy": "BOTTOM HUNTER",
-    "symbol": "PROMUSDT"
-  },
-  "TRXUSDT": {
-    "entry": 0.3371,
-    "score": 69,
-    "sent_at": 1792238897.7317913,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "TRXUSDT"
+    "symbol": "LTCUSDT"
   }
 }
