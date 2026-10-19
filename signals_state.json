@@ -13,6 +13,13 @@
     "strategy": "BOTTOM HUNTER",
     "symbol": "BTCUSDT"
   },
+  "DOTUSDT": {
+    "entry": 1.136,
+    "score": 79,
+    "sent_at": 1792443598.2743258,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "DOTUSDT"
+  },
   "SOLUSDT": {
     "entry": 105.18,
     "score": 66,
