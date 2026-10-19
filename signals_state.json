@@ -1,24 +1,10 @@
 {
-  "AAVEUSDT": {
-    "entry": 153.59,
-    "score": 70,
-    "sent_at": 1792297205.700789,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "AAVEUSDT"
-  },
   "BTCUSDT": {
-    "entry": 81988.01,
-    "score": 70,
-    "sent_at": 1792326883.0646772,
+    "entry": 82496.01,
+    "score": 84,
+    "sent_at": 1792384189.9157946,
     "strategy": "BOTTOM HUNTER",
     "symbol": "BTCUSDT"
-  },
-  "HBARUSDT": {
-    "entry": 0.0866,
-    "score": 67,
-    "sent_at": 1792297205.988031,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "HBARUSDT"
   },
   "LTCUSDT": {
     "entry": 59.41,
@@ -26,5 +12,12 @@
     "sent_at": 1792326883.4195185,
     "strategy": "BOTTOM HUNTER",
     "symbol": "LTCUSDT"
+  },
+  "SOLUSDT": {
+    "entry": 105.18,
+    "score": 66,
+    "sent_at": 1792384190.2093854,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "SOLUSDT"
   }
 }
