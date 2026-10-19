@@ -1,17 +1,17 @@
 {
+  "BNBUSDT": {
+    "entry": 726.87,
+    "score": 68,
+    "sent_at": 1792423902.2573316,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "BNBUSDT"
+  },
   "BTCUSDT": {
     "entry": 82496.01,
     "score": 84,
     "sent_at": 1792384189.9157946,
     "strategy": "BOTTOM HUNTER",
     "symbol": "BTCUSDT"
-  },
-  "LTCUSDT": {
-    "entry": 59.41,
-    "score": 67,
-    "sent_at": 1792326883.4195185,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "LTCUSDT"
   },
   "SOLUSDT": {
     "entry": 105.18,
