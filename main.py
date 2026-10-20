@@ -1790,6 +1790,9 @@ def self_test():
     # swing high leaves less room than the required TP1; permit clear/no overhead space.
     assert _has_tp1_room_below_resistance(100.0, 2.5, 103.0) is False
     assert _has_tp1_room_below_resistance(100.0, 2.5, 106.0) is True
+    # CRV-like case from the supplied signal: entry 0.3732, stop 0.3644,
+    # nearby resistance around 0.38; the required 1.8R TP1 cannot fit below it.
+    assert _has_tp1_room_below_resistance(0.3732, 0.3732-0.3644, 0.38) is False
     assert _has_tp1_room_below_resistance(100.0, 2.5, 99.0) is True
     assert _has_tp1_room_below_resistance(100.0, 2.5, None) is True
 
