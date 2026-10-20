@@ -6,6 +6,20 @@
     "strategy": "BOTTOM HUNTER",
     "symbol": "AAVEUSDT"
   },
+  "AVAXUSDT": {
+    "entry": 9.741,
+    "score": 75,
+    "sent_at": 1792537726.1874468,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "AVAXUSDT"
+  },
+  "BNBUSDT": {
+    "entry": 741.46,
+    "score": 77,
+    "sent_at": 1792537725.8940377,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "BNBUSDT"
+  },
   "BTCUSDT": {
     "entry": 82628.01,
     "score": 84,
@@ -19,6 +33,13 @@
     "sent_at": 1792503097.7592027,
     "strategy": "BOTTOM HUNTER",
     "symbol": "DOTUSDT"
+  },
+  "FETUSDT": {
+    "entry": 0.1959,
+    "score": 80,
+    "sent_at": 1792537725.5500727,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "FETUSDT"
   },
   "LINKUSDT": {
     "entry": 12.213,
