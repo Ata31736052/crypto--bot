@@ -1,4 +1,11 @@
 {
+  "AAVEUSDT": {
+    "entry": 151.93,
+    "score": 82,
+    "sent_at": 1792471162.4767854,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "AAVEUSDT"
+  },
   "BNBUSDT": {
     "entry": 726.87,
     "score": 68,
@@ -7,9 +14,9 @@
     "symbol": "BNBUSDT"
   },
   "BTCUSDT": {
-    "entry": 82496.01,
-    "score": 84,
-    "sent_at": 1792384189.9157946,
+    "entry": 82152.34,
+    "score": 85,
+    "sent_at": 1792471162.187493,
     "strategy": "BOTTOM HUNTER",
     "symbol": "BTCUSDT"
   },
@@ -21,9 +28,9 @@
     "symbol": "DOTUSDT"
   },
   "SOLUSDT": {
-    "entry": 105.18,
-    "score": 66,
-    "sent_at": 1792384190.2093854,
+    "entry": 105.3,
+    "score": 81,
+    "sent_at": 1792471162.7684777,
     "strategy": "BOTTOM HUNTER",
     "symbol": "SOLUSDT"
   }
