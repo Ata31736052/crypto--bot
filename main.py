@@ -781,6 +781,15 @@ def _nearest_confirmed_swing_low(h, lookback=24, pivot=2):
     return candidates[-1][1] if candidates else None
 
 
+def _has_tp1_room_below_resistance(entry, risk, resistance):
+    """Require TP1 headroom below the nearest confirmed overhead 4H swing high."""
+    if not finite(entry, risk) or entry <= 0 or risk <= 0:
+        return False
+    if not finite(resistance) or resistance <= entry:
+        return True  # no confirmed overhead obstacle above the entry
+    return resistance * 0.995 >= entry + risk * MIN_RR_TP1
+
+
 def build_trade(h, strategy, entry_override=None):
     """Build a bounded, risk-valid long setup.
 
@@ -829,6 +838,22 @@ def build_trade(h, strategy, entry_override=None):
     resistance = float(h.tail(30)["high"].iloc[:-1].max())
     required_tp1 = entry + risk * MIN_RR_TP1
     required_tp2 = entry + risk * MIN_RR_TP2
+
+    # Experimental entry-location correction: do not buy below a confirmed
+    # overhead 4H swing high when the required TP1 cannot fit beneath it.
+    # This avoids scoring a high-quality setup as an executable entry after
+    # the available upside is already blocked by nearby resistance.
+    confirmed_resistance = ms.get("swing_high")
+    if not _has_tp1_room_below_resistance(entry, risk, confirmed_resistance):
+        resistance_value = float(confirmed_resistance)
+        room_pct = (resistance_value * 0.995 / entry - 1.0) * 100.0
+        required_pct = (required_tp1 / entry - 1.0) * 100.0
+        return None, (
+            f"insufficient room below confirmed 4H resistance | "
+            f"entry={entry:.8g} | resistance={resistance_value:.8g} | "
+            f"room={room_pct:.2f}% | required_TP1={required_pct:.2f}%"
+        )
+
     candidates = [
         ("fixed_2.5pct", entry * (1 + TP1_PCT)),
         ("resistance", resistance * 0.995),
@@ -1761,6 +1786,13 @@ def self_test():
     # Logging contract: every formatted line must have matching arguments.
     profile_args = (1, 1, 0, 1, 1, 0)
     assert len(profile_args) == 6
+    # Entry-location regression: reject a BUY when the nearest confirmed overhead
+    # swing high leaves less room than the required TP1; permit clear/no overhead space.
+    assert _has_tp1_room_below_resistance(100.0, 2.5, 103.0) is False
+    assert _has_tp1_room_below_resistance(100.0, 2.5, 106.0) is True
+    assert _has_tp1_room_below_resistance(100.0, 2.5, 99.0) is True
+    assert _has_tp1_room_below_resistance(100.0, 2.5, None) is True
+
     # Stop-risk contract: bounded ATR stop can never exceed configured risk by itself.
     test_h = pd.DataFrame({
         "open": [100.0]*30, "high": [101.0]*30, "low": [99.0]*30, "close": [100.0]*30,
