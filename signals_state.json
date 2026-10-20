@@ -21,9 +21,9 @@
     "symbol": "BTCUSDT"
   },
   "DOTUSDT": {
-    "entry": 1.136,
-    "score": 79,
-    "sent_at": 1792443598.2743258,
+    "entry": 1.137,
+    "score": 75,
+    "sent_at": 1792503097.7592027,
     "strategy": "BOTTOM HUNTER",
     "symbol": "DOTUSDT"
   },
