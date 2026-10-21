@@ -811,7 +811,7 @@ def _has_tp1_room_below_resistance(entry, risk, resistance):
     return resistance * 0.995 >= entry + risk * MIN_RR_TP1
 
 
-def build_trade(h, strategy, entry_override=None):
+def build_trade(h, strategy, entry_override=None, enable_resistance_gate=True):
     """Build a bounded, risk-valid long setup.
 
     Root rule: an old multi-week low must never create a 20-30% stop for a
@@ -865,7 +865,7 @@ def build_trade(h, strategy, entry_override=None):
     # This avoids scoring a high-quality setup as an executable entry after
     # the available upside is already blocked by nearby resistance.
     confirmed_resistance = _nearest_confirmed_swing_high_above(h, entry)
-    if not _has_tp1_room_below_resistance(entry, risk, confirmed_resistance):
+    if enable_resistance_gate and not _has_tp1_room_below_resistance(entry, risk, confirmed_resistance):
         resistance_value = float(confirmed_resistance)
         room_pct = (resistance_value * 0.995 / entry - 1.0) * 100.0
         required_pct = (required_tp1 / entry - 1.0) * 100.0
@@ -1234,7 +1234,7 @@ def unified_bottom_score_audit(d, h, h1, btc_d, btc_h):
 
 
 
-def analyze_symbol(symbol, btc_d, btc_h, historical_frames=None):
+def analyze_symbol(symbol, btc_d, btc_h, historical_frames=None, entry_override=None, enable_resistance_gate=True):
     """Analyze one symbol. Optional historical_frames enables offline replay.
 
     historical_frames must contain raw, time-cropped, CLOSED candles under
@@ -1398,7 +1398,7 @@ def analyze_symbol(symbol, btc_d, btc_h, historical_frames=None):
                      symbol,strategy,setup["score"],setup.get("raw_score","n/a"),h1d.get("confirmations","n/a"),
                      ", ".join(f"{k}={'PASS' if v else 'FAIL'}" for k,v in h1d.items() if k not in {"confirmed","confirmations"}))
 
-            trade,err=build_trade(h,strategy)
+            trade,err=build_trade(h,strategy,entry_override=entry_override,enable_resistance_gate=enable_resistance_gate)
             if not trade:
                 stats["risk_reject"] += 1
                 stats["trade_reject_count"] += 1
