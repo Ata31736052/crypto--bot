@@ -21,18 +21,11 @@
     "symbol": "BNBUSDT"
   },
   "BTCUSDT": {
-    "entry": 82855.12,
-    "score": 72,
-    "sent_at": 1792557178.243622,
+    "entry": 83519.69,
+    "score": 80,
+    "sent_at": 1792590151.2781837,
     "strategy": "BOTTOM HUNTER",
     "symbol": "BTCUSDT"
-  },
-  "DOTUSDT": {
-    "entry": 1.137,
-    "score": 75,
-    "sent_at": 1792503097.7592027,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "DOTUSDT"
   },
   "FETUSDT": {
     "entry": 0.1959,
@@ -47,13 +40,6 @@
     "sent_at": 1792526308.6716197,
     "strategy": "BOTTOM HUNTER",
     "symbol": "LINKUSDT"
-  },
-  "SOLUSDT": {
-    "entry": 105.3,
-    "score": 81,
-    "sent_at": 1792471162.7684777,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "SOLUSDT"
   },
   "TAOUSDT": {
     "entry": 271.8,
