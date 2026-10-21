@@ -62,6 +62,10 @@ def universe():
                and x.get("isSpotTradingAllowed") is not False
                and not any(z in x.get("symbol", "") for z in ("UPUSDT", "DOWNUSDT", "BULLUSDT", "BEARUSDT"))}
     ticks = get_json("/api/v3/ticker/24hr")
+    # BTC is context only, never a directional BUY candidate. Exclude obvious
+    # stablecoin-to-USDT pairs from the directional universe; keep BTC history
+    # available separately for regime context.
+    non_directional = {"BTCUSDT", "USDCUSDT", "USD1USDT", "RLUSDUSDT", "USDTUSDT"}
     ranked = []
     for t in ticks if isinstance(ticks, list) else []:
         s = t.get("symbol", "")
@@ -69,12 +73,10 @@ def universe():
             qv = float(t.get("quoteVolume", 0) or 0)
         except (TypeError, ValueError):
             continue
-        if s in allowed and qv >= main.MIN_24H_USDT_VOLUME:
+        if s in allowed and s not in non_directional and qv >= main.MIN_24H_USDT_VOLUME:
             ranked.append((s, qv))
     ranked.sort(key=lambda x: x[1], reverse=True)
     chosen = [s for s, _ in ranked[:MAX_SYMBOLS]]
-    if "BTCUSDT" not in chosen and "BTCUSDT" in allowed:
-        chosen = ([ "BTCUSDT" ] + chosen[:max(0, MAX_SYMBOLS - 1)])
     if len(chosen) < 5:
         raise RuntimeError(f"Too few current liquid pairs for replay: {len(chosen)}")
     return chosen, [{"symbol": s, "current_24h_quote_volume": q} for s, q in ranked if s in chosen]
@@ -169,7 +171,8 @@ def trade_signal_key(result):
 def make_portfolio(name):
     return {"name": name, "cash": INITIAL_CASH, "positions": [], "closed": [],
             "last_signal_ms": {}, "equity_curve": [], "signals": 0, "rejected_cash": 0,
-            "fees_paid": 0.0}
+            "fees_paid": 0.0, "qualified_candidates": 0, "selected_before_cash": 0,
+            "resistance_gate_rejections": 0}
 
 def equity(port, market, idx_by_symbol):
     total = port["cash"]
@@ -303,6 +306,9 @@ def summarize(port, market, idx_by_symbol, period_start, period_end):
         "net_return_pct_mark_to_market": round((eq / INITIAL_CASH - 1) * 100, 4),
         "net_pnl_usdt_mark_to_market": round(eq - INITIAL_CASH, 4),
         "max_drawdown_pct_sampled_equity": round(max_dd, 4),
+        "qualified_candidates_before_portfolio_limits": port["qualified_candidates"],
+        "selected_before_cash_check": port["selected_before_cash"],
+        "resistance_gate_rejections": port["resistance_gate_rejections"],
         "signals_entered": port["signals"], "closed_trades": len(closed),
         "open_positions_at_end": len(port["positions"]), "cash_rejected_entries": port["rejected_cash"],
         "win_rate_closed_pct": round(wins / len(closed) * 100, 2) if closed else None,
@@ -343,6 +349,7 @@ def main_run():
         btc_d = main.daily_regime(main.add_indicators(btc_d_df))
         btc_h = main.daily_regime(main.add_indicators(btc_h_df))
         baseline_candidates, exp_candidates = [], []
+        gate_rejections_this_scan = 0
         idx_by_symbol = {}
         for sym in symbols:
             h1raw = market[sym]["1h"]
@@ -363,11 +370,17 @@ def main_run():
             if main._has_tp1_room_below_resistance(float(tr["entry"]), risk, resistance):
                 exp_candidates.append(base)
             else:
+                gate_rejections_this_scan += 1
                 gated = candidate_at(sym, market[sym], decision_ms, btc_d, btc_h, True)
                 if gated:
                     exp_candidates.append(gated)
+        baseline["qualified_candidates"] += len(baseline_candidates)
+        experimental["qualified_candidates"] += len(exp_candidates)
+        experimental["resistance_gate_rejections"] += gate_rejections_this_scan
         for port, candidates in ((baseline, baseline_candidates), (experimental, exp_candidates)):
-            for r in pick_scan_results(candidates, port, decision_ms):
+            picked = pick_scan_results(candidates, port, decision_ms)
+            port["selected_before_cash"] += len(picked)
+            for r in picked:
                 enter(port, r, market, decision_ms)
             eq = equity(port, market, idx_by_symbol)
             port["equity_curve"].append({"time": decision_ms, "equity": eq})
@@ -386,7 +399,7 @@ def main_run():
             "data_source": BASE, "evaluation_start_utc": datetime.fromtimestamp(start_ms/1000, timezone.utc).isoformat(),
             "evaluation_end_utc": datetime.fromtimestamp(end_ms/1000, timezone.utc).isoformat(),
             "scan_schedule": "every 4 hours at minute 10 UTC",
-            "symbols": symbols, "universe_definition": "top current 24h quote-volume symbols with current quoteVolume >= production floor; max 30",
+            "symbols": symbols, "universe_definition": "top current 24h quote-volume directional Spot USDT pairs above production floor; excludes BTCUSDT (context only) and obvious stablecoin-to-USDT pairs; max 30",
             "important_limitations": [
                 "Current-universe selection creates survivorship and lookback-selection bias.",
                 "This is a bounded diagnostic sample, not full-universe production-equivalent performance.",
