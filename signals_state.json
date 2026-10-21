@@ -27,6 +27,13 @@
     "strategy": "BOTTOM HUNTER",
     "symbol": "BTCUSDT"
   },
+  "ETHUSDT": {
+    "entry": 2495.17,
+    "score": 67,
+    "sent_at": 1792613078.4726067,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "ETHUSDT"
+  },
   "FETUSDT": {
     "entry": 0.1959,
     "score": 80,
@@ -34,12 +41,12 @@
     "strategy": "BOTTOM HUNTER",
     "symbol": "FETUSDT"
   },
-  "LINKUSDT": {
-    "entry": 12.213,
-    "score": 80,
-    "sent_at": 1792526308.6716197,
+  "FILUSDT": {
+    "entry": 1.0708,
+    "score": 71,
+    "sent_at": 1792613078.166623,
     "strategy": "BOTTOM HUNTER",
-    "symbol": "LINKUSDT"
+    "symbol": "FILUSDT"
   },
   "TAOUSDT": {
     "entry": 271.8,
