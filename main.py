@@ -1837,6 +1837,12 @@ def self_test():
     assert _has_tp1_room_below_resistance(0.3732, 0.3732-0.3644, 0.38) is False
     assert _has_tp1_room_below_resistance(100.0, 2.5, 99.0) is True
     assert _has_tp1_room_below_resistance(100.0, 2.5, None) is True
+    # Nearest confirmed overhead pivot must be selected, not the highest/latest.
+    pivot_test = pd.DataFrame({"high":[100.0,100.0,106.0,100.0,100.0,100.0,110.0,100.0,100.0]})
+    assert _nearest_confirmed_swing_high_above(pivot_test, 102.0, lookback=20, pivot=1) == 106.0
+    # A spike on the newest candle is not a confirmed pivot (no right-side candle).
+    edge_pivot = pd.DataFrame({"high":[100.0,100.0,105.0,100.0,100.0,120.0]})
+    assert _nearest_confirmed_swing_high_above(edge_pivot, 110.0, lookback=20, pivot=1) is None
     # The latest pivot can sit below entry while an older confirmed overhead
     # pivot still blocks TP1. Select the nearest overhead pivot in that case.
     test_highs = [90, 91, 92, 93, 110, 93, 92, 91, 92, 93, 105, 93, 92, 91, 92, 93, 95, 93, 92, 91]
