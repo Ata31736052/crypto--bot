@@ -381,7 +381,6 @@ def main_run():
             exp_candidates.append(base)
         baseline["qualified_candidates"] += len(baseline_candidates)
         experimental["qualified_candidates"] += len(exp_candidates)
-        experimental["resistance_gate_rejections"] += gate_rejections_this_scan
         for port, candidates in ((baseline, baseline_candidates), (experimental, exp_candidates)):
             picked = pick_scan_results(candidates, port, decision_ms)
             port["selected_before_cash"] += len(picked)
