@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: historical-ab-replay-\${{ github.ref }}
+  group: historical-ab-replay-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
