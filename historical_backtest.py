@@ -152,10 +152,12 @@ def candidate_at(symbol, raw_frames, decision_ms, btc_d, btc_h, gate):
     entry_open = float(raw_frames["1h"].iloc[entry_idx]["open"])
     if not np.isfinite(entry_open) or entry_open <= 0:
         return None
+    # Signal qualification is identical in both variants and uses only closed candles.
+    # The experimental resistance gate is evaluated later at the actual next-open entry.
     result, _, err = main.analyze_symbol(
         symbol, btc_d, btc_h,
         historical_frames={"1d": d, "4h": h, "1h": h1},
-        enable_resistance_gate=gate
+        enable_resistance_gate=False
     )
     if err or not result:
         return None
@@ -237,11 +239,23 @@ def advance_positions(port, market, decision_ms):
 
 def enter(port, result, market, decision_ms):
     symbol = result["symbol"]
-    trade = result["trade"]
     entry_idx = result["entry_index"]
     raw_entry = result["entry_open_raw"]
-    # Entry slippage is adverse; SL/TP levels are the signal's executable levels
-    # derived from the known next-open price.
+    strategy = result["setup"]["strategy"]
+    # Recalculate stop/targets at the actual next-open price. The future open is
+    # used only for execution feasibility, never to qualify or score the signal.
+    use_gate = port["name"] == "experimental_resistance_gate"
+    trade, trade_error = main.build_trade(
+        result["h"], strategy, entry_override=raw_entry,
+        enable_resistance_gate=use_gate
+    )
+    if trade is None:
+        if use_gate and trade_error and "insufficient room below confirmed 4H resistance" in trade_error:
+            port["resistance_gate_rejections"] += 1
+        else:
+            port.setdefault("execution_rejections", 0)
+            port["execution_rejections"] += 1
+        return
     entry = raw_entry * (1 + SLIPPAGE)
     stop_distance = max(entry - float(trade["sl"]), 1e-12)
     eq = max(0.0, port["cash"] + sum(p["qty"] * p["entry_price"] for p in port["positions"]))
@@ -352,7 +366,6 @@ def main_run():
         btc_d = main.daily_regime(main.add_indicators(btc_d_df))
         btc_h = main.daily_regime(main.add_indicators(btc_h_df))
         baseline_candidates, exp_candidates = [], []
-        gate_rejections_this_scan = 0
         idx_by_symbol = {}
         for sym in symbols:
             h1raw = market[sym]["1h"]
@@ -362,21 +375,10 @@ def main_run():
             base = candidate_at(sym, market[sym], decision_ms, btc_d, btc_h, False)
             if not base:
                 continue
+            # Both variants receive exactly the same closed-candle signal candidates.
+            # Only execution-time levels/gate differ at the next 1H open.
             baseline_candidates.append(base)
-            # Since the gate only rejects candidates, most scans need one analysis
-            # per symbol. Re-run the gated pipeline only if the baseline winner
-            # actually fails the resistance headroom check.
-            tr = base["trade"]
-            h4 = base["h"]
-            resistance = main._nearest_confirmed_swing_high_above(h4, float(tr["entry"]))
-            risk = float(tr["entry"]) - float(tr["sl"])
-            if main._has_tp1_room_below_resistance(float(tr["entry"]), risk, resistance):
-                exp_candidates.append(base)
-            else:
-                gate_rejections_this_scan += 1
-                gated = candidate_at(sym, market[sym], decision_ms, btc_d, btc_h, True)
-                if gated:
-                    exp_candidates.append(gated)
+            exp_candidates.append(base)
         baseline["qualified_candidates"] += len(baseline_candidates)
         experimental["qualified_candidates"] += len(exp_candidates)
         experimental["resistance_gate_rejections"] += gate_rejections_this_scan
