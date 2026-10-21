@@ -155,7 +155,7 @@ def candidate_at(symbol, raw_frames, decision_ms, btc_d, btc_h, gate):
     result, _, err = main.analyze_symbol(
         symbol, btc_d, btc_h,
         historical_frames={"1d": d, "4h": h, "1h": h1},
-        entry_override=entry_open, enable_resistance_gate=gate
+        enable_resistance_gate=gate
     )
     if err or not result:
         return None
