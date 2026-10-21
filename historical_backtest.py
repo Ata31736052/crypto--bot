@@ -328,7 +328,10 @@ def main_run():
     end_ms = now_ms
     start_ms = end_ms - DAYS * 86400 * 1000
     symbols, universe_rows = universe()
-    market = load_market(symbols, start_ms, end_ms)
+    data_symbols = list(symbols)
+    if "BTCUSDT" not in data_symbols:
+        data_symbols.append("BTCUSDT")
+    market = load_market(data_symbols, start_ms, end_ms)
     btc = market.get("BTCUSDT")
     if not btc:
         raise RuntimeError("BTCUSDT history is required for point-in-time regime context")
@@ -389,7 +392,7 @@ def main_run():
                   f"experimental signals={experimental['signals']}", flush=True)
     # Mark remaining positions to market using each symbol's latest completed candle.
     idx_by_symbol = {}
-    for sym in symbols:
+    for sym in data_symbols:
         h1 = market[sym]["1h"]
         idx = np.flatnonzero(h1["close_time"].to_numpy(dtype=np.int64) < end_ms)
         if len(idx):
