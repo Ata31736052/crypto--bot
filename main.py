@@ -766,6 +766,27 @@ def bottom_setup(d, h, h1, btc_d, btc_h):
 
 
 # ---------------- RISK / TARGETS ----------------
+def _nearest_confirmed_swing_high_above(h, entry, lookback=64, pivot=2):
+    """Return the nearest overhead confirmed pivot high, not merely the latest pivot."""
+    if h is None or len(h) < pivot * 2 + 3 or not finite(entry) or entry <= 0:
+        return None
+    x = h.tail(lookback).reset_index(drop=True)
+    highs = pd.to_numeric(x["high"], errors="coerce").to_numpy(float)
+    candidates = []
+    for i in range(pivot, len(highs) - pivot):
+        value = highs[i]
+        if not np.isfinite(value):
+            continue
+        left = highs[i-pivot:i]
+        right = highs[i+1:i+pivot+1]
+        if (not np.isfinite(left).all()) or (not np.isfinite(right).all()):
+            continue
+        # Match market_structure's confirmed-pivot convention.
+        if value > left.max() and value >= right.max() and value > entry:
+            candidates.append(float(value))
+    return min(candidates) if candidates else None
+
+
 def _nearest_confirmed_swing_low(h, lookback=24, pivot=2):
     """Return the most recent meaningful 4H pivot low, not an old absolute low."""
     x = h.tail(lookback).copy().reset_index(drop=True)
@@ -843,7 +864,7 @@ def build_trade(h, strategy, entry_override=None):
     # overhead 4H swing high when the required TP1 cannot fit beneath it.
     # This avoids scoring a high-quality setup as an executable entry after
     # the available upside is already blocked by nearby resistance.
-    confirmed_resistance = ms.get("swing_high")
+    confirmed_resistance = _nearest_confirmed_swing_high_above(h, entry)
     if not _has_tp1_room_below_resistance(entry, risk, confirmed_resistance):
         resistance_value = float(confirmed_resistance)
         room_pct = (resistance_value * 0.995 / entry - 1.0) * 100.0
@@ -1795,6 +1816,16 @@ def self_test():
     assert _has_tp1_room_below_resistance(0.3732, 0.3732-0.3644, 0.38) is False
     assert _has_tp1_room_below_resistance(100.0, 2.5, 99.0) is True
     assert _has_tp1_room_below_resistance(100.0, 2.5, None) is True
+    # The latest pivot can sit below entry while an older confirmed overhead
+    # pivot still blocks TP1. Select the nearest overhead pivot in that case.
+    test_highs = [90, 91, 92, 93, 110, 93, 92, 91, 92, 93, 105, 93, 92, 91, 92, 93, 95, 93, 92, 91]
+    test_resistance = _nearest_confirmed_swing_high_above(
+        pd.DataFrame({"high": test_highs}), 100.0
+    )
+    assert test_resistance == 105.0, test_resistance
+    assert _nearest_confirmed_swing_high_above(
+        pd.DataFrame({"high": test_highs}), 111.0
+    ) is None
 
     # Stop-risk contract: bounded ATR stop can never exceed configured risk by itself.
     test_h = pd.DataFrame({
