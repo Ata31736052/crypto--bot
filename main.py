@@ -1234,13 +1234,30 @@ def unified_bottom_score_audit(d, h, h1, btc_d, btc_h):
 
 
 
-def analyze_symbol(symbol, btc_d, btc_h):
+def analyze_symbol(symbol, btc_d, btc_h, historical_frames=None):
+    """Analyze one symbol. Optional historical_frames enables offline replay.
+
+    historical_frames must contain raw, time-cropped, CLOSED candles under
+    keys "1d", "4h", and "1h". The caller owns timestamp cutoffs; the normal
+    live path remains unchanged when historical_frames is omitted.
+    """
     stats={"scanned":1,"trend_candidate":0,"bottom_candidate":0,"h1_reject":0,"risk_reject":0,"trade_reject_count":0,"final_gate_reject_count":0,"final":0,
            "diagnostic_reasons":Counter(),"trend_blockers":Counter(),"bottom_blockers":Counter(),"bottom_trigger_audit":Counter(),"bottom_subcondition_audit":Counter(),"trend_block_single":0,"trend_block_multiple":0,
            "bottom_block_single":0,"bottom_block_multiple":0,"trend_base_pass":0,"trend_1h_only_fail":0,"bottom_base_pass":0,"bottom_1h_only_fail":0,
            "h1_trend_failures":Counter(),"h1_bottom_failures":Counter(),"trade_rejects":Counter(),"final_gate_rejects":Counter(),"trend_score_rejects":Counter(),"bottom_score_rejects":Counter(),"trend_score_buckets":Counter(),"bottom_score_buckets":Counter(),"trend_score_values":[],"bottom_score_values":[],"trend_potential_scores":[],"bottom_potential_scores":[],"trend_potential_buckets":Counter(),"bottom_potential_buckets":Counter(),"trend_potential_top":[],"bottom_potential_top":[],"trend_audit_scores":[],"bottom_audit_scores":[],"trend_audit_buckets":Counter(),"bottom_audit_buckets":Counter(),"trend_audit_top":[],"bottom_audit_top":[]}
     try:
-        d=add_indicators(klines(symbol,"1d",250)); h=add_indicators(klines(symbol,"4h",250)); h1=add_indicators(klines(symbol,"1h",250))
+        if historical_frames is None:
+            d=add_indicators(klines(symbol,"1d",250)); h=add_indicators(klines(symbol,"4h",250)); h1=add_indicators(klines(symbol,"1h",250))
+        else:
+            required_frames = {"1d", "4h", "1h"}
+            if not isinstance(historical_frames, dict) or not required_frames.issubset(historical_frames):
+                raise ValueError("historical_frames must provide closed-candle DataFrames for 1d, 4h, and 1h")
+            if any(not isinstance(historical_frames[tf], pd.DataFrame) for tf in required_frames):
+                raise TypeError("historical_frames values must be pandas DataFrames")
+            # Copy before indicator calculation so replay cannot mutate cached history.
+            d=add_indicators(historical_frames["1d"].copy())
+            h=add_indicators(historical_frames["4h"].copy())
+            h1=add_indicators(historical_frames["1h"].copy())
         daily_state = validate_daily_state(daily_regime(d))
         # ROOT DAILY LOCK: the same validated state is passed through every Trend stage.
         if daily_state not in {"BULLISH", "EARLY_BULLISH", "NEUTRAL", "BEARISH"}:
