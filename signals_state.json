@@ -1,8 +1,8 @@
 {
   "AAVEUSDT": {
-    "entry": 151.67,
-    "score": 80,
-    "sent_at": 1792526308.9700866,
+    "entry": 155.86,
+    "score": 69,
+    "sent_at": 1792557178.9180646,
     "strategy": "BOTTOM HUNTER",
     "symbol": "AAVEUSDT"
   },
@@ -21,10 +21,10 @@
     "symbol": "BNBUSDT"
   },
   "BTCUSDT": {
-    "entry": 82628.01,
-    "score": 84,
-    "sent_at": 1792526308.358452,
-    "strategy": "CONFIRMED TREND",
+    "entry": 82855.12,
+    "score": 72,
+    "sent_at": 1792557178.243622,
+    "strategy": "BOTTOM HUNTER",
     "symbol": "BTCUSDT"
   },
   "DOTUSDT": {
@@ -54,5 +54,12 @@
     "sent_at": 1792471162.7684777,
     "strategy": "BOTTOM HUNTER",
     "symbol": "SOLUSDT"
+  },
+  "TAOUSDT": {
+    "entry": 271.8,
+    "score": 71,
+    "sent_at": 1792557178.5344138,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "TAOUSDT"
   }
 }
