@@ -1723,6 +1723,10 @@ def self_test():
     assert callable(bottom_reversal_trigger_points)
     assert callable(professional_signal_quality_gate)
     assert callable(_nearest_confirmed_swing_low) and callable(_rsi_divergence_details)
+    # Offline replay adapter must reject incomplete frame sets without falling
+    # back to live Binance requests.
+    _, _, replay_error = analyze_symbol("TESTUSDT", "NEUTRAL", "NEUTRAL", historical_frames={})
+    assert replay_error and "historical_frames must provide" in replay_error
     assert BOTTOM_VOL_MIN == 0.60
     # RSI divergence regression suite: aligned pivots, threshold boundaries,
     # spacing limits, and confirmation lag. These tests do not alter runtime rules.
