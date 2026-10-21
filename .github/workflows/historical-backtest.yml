@@ -41,7 +41,9 @@ jobs:
           python -m py_compile main.py historical_backtest.py
           python -c "import main; main.self_test()"
       - name: Run 180-day A/B replay (no Telegram or live orders)
-        run: python historical_backtest.py 2>&1 | tee historical-backtest.log
+        run: |
+          set -o pipefail
+          python historical_backtest.py 2>&1 | tee historical-backtest.log
       - name: Upload replay results
         if: always()
         uses: actions/upload-artifact@v4
