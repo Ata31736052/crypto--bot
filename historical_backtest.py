@@ -199,6 +199,9 @@ def close_piece(port, p, qty, raw_price, reason, timestamp):
     p["qty"] -= qty
     if reason == "TP1":
         p["tp1_done"] = True
+        p["tp1_hit"] = True
+    if reason == "TP2":
+        p["tp2_hit"] = True
     if p["qty"] <= p["initial_qty"] * 1e-8:
         p["qty"] = 0.0
         p["exit_time"] = timestamp
@@ -405,7 +408,8 @@ def pick_scan_results(candidates, port, decision_ms, shadow_ledger=None):
                             "entry_fee_usdt": 0.0, "fees_usdt": 0.0,
                             "realized_pnl_usdt": 0.0, "net_pnl_usdt": None,
                             "net_pnl_pct_notional": None, "net_pnl_r": None,
-                            "tp1_done": False, "mfe_pct": 0.0, "mae_pct": 0.0,
+                            "tp1_done": False, "tp1_hit": False, "tp2_hit": False,
+                            "mfe_pct": 0.0, "mae_pct": 0.0,
                             "mfe_r": 0.0, "mae_r": 0.0
                         })
                         p = shadow_ledger[-1]
@@ -550,7 +554,12 @@ def main_run():
     mark_shadow_open_at_end(shadow_ledger, market, end_ms)
     shadow_summary = {
         "rejected_candidates_tracked": len(shadow_ledger),
-        "outcomes": {status: sum(p["status"] == status for p in shadow_ledger) for status in sorted({p["status"] for p in shadow_ledger})},
+        "final_status_counts": {status: sum(p["status"] == status for p in shadow_ledger) for status in sorted({p["status"] for p in shadow_ledger})},
+        "hit_sl_count": sum(p["status"] == "SL" for p in shadow_ledger),
+        "hit_tp1_event_count": sum(bool(p.get("tp1_hit")) for p in shadow_ledger),
+        "hit_tp2_event_count": sum(bool(p.get("tp2_hit")) for p in shadow_ledger),
+        "time_exit_count": sum(p["status"] == "TIME" for p in shadow_ledger),
+        "open_at_end_count": sum(p["status"] == "OPEN_AT_END_MARKED_TO_MARKET" for p in shadow_ledger),
         "net_pnl_usdt_sum_including_end_marks": round(sum(float(p["net_pnl_usdt"] or 0) for p in shadow_ledger), 4),
         "net_pnl_usdt_mean": round(float(np.mean([p["net_pnl_usdt"] for p in shadow_ledger if p["net_pnl_usdt"] is not None])), 4) if any(p["net_pnl_usdt"] is not None for p in shadow_ledger) else None,
         "avg_mfe_pct": round(float(np.mean([p["mfe_pct"] for p in shadow_ledger])), 4) if shadow_ledger else None,
@@ -559,11 +568,16 @@ def main_run():
         "avg_mae_r": round(float(np.mean([p["mae_r"] for p in shadow_ledger])), 4) if shadow_ledger else None,
         "note": "Independent fixed-risk hypothetical trades; no shadow position affects real portfolio cash, ranking, selection or equity."
     }
-    with (OUT / "resistance_rejected_shadow_ledger.csv").open("w", newline="", encoding="utf-8") as fh:
-        if shadow_ledger:
-            w = csv.DictWriter(fh, fieldnames=list(shadow_ledger[0].keys()))
-            w.writeheader()
-            w.writerows(shadow_ledger)
+    with (OUT / "resistance_rejected_shadow_ledger.csv").open("w", newline="", encoding="utf-8-sig") as fh:
+        fields = list(shadow_ledger[0].keys()) if shadow_ledger else [
+            "symbol", "strategy", "score", "decision_time", "entry_time", "entry_index",
+            "entry_raw", "entry_price", "sl", "tp1", "tp2", "rejection_reason",
+            "status", "tp1_hit", "tp2_hit", "mfe_pct", "mae_pct",
+            "net_pnl_usdt", "net_pnl_pct_notional", "net_pnl_r"
+        ]
+        w = csv.DictWriter(fh, fieldnames=fields, extrasaction="ignore")
+        w.writeheader()
+        w.writerows(shadow_ledger)
     report = {
         "shadow_ledger": shadow_summary,
         "metadata": {
