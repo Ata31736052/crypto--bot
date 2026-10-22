@@ -242,19 +242,12 @@ def enter(port, result, market, decision_ms):
     entry_idx = result["entry_index"]
     raw_entry = result["entry_open_raw"]
     strategy = result["setup"]["strategy"]
-    # Recalculate stop/targets at the actual next-open price. The future open is
-    # used only for execution feasibility, never to qualify or score the signal.
-    use_gate = port["name"] == "experimental_resistance_gate"
-    trade, trade_error = main.build_trade(
-        result["h"], strategy, entry_override=raw_entry,
-        enable_resistance_gate=use_gate
-    )
+    # Trade levels are precomputed at the actual next-open price before ranking
+    # and portfolio limits. The same candidate data is copied per variant.
+    trade = result.get("_execution_trade")
     if trade is None:
-        if use_gate and trade_error and "insufficient room below confirmed 4H resistance" in trade_error:
-            port["resistance_gate_rejections"] += 1
-        else:
-            port.setdefault("execution_rejections", 0)
-            port["execution_rejections"] += 1
+        port.setdefault("execution_rejections", 0)
+        port["execution_rejections"] += 1
         return
     entry = raw_entry * (1 + SLIPPAGE)
     stop_distance = max(entry - float(trade["sl"]), 1e-12)
@@ -284,12 +277,37 @@ def enter(port, result, market, decision_ms):
     port["last_signal_ms"][symbol] = decision_ms
 
 def pick_scan_results(candidates, port, decision_ms):
-    candidates = sorted(candidates, key=lambda x: (
-        int(x["setup"]["score"]), float(x["trade"]["rr2"]), -float(x["trade"]["risk_pct"])
+    # Evaluate executable levels/gate before ranking and before the per-scan cap.
+    # Otherwise rejected candidates consume signal slots and are repeatedly counted,
+    # while sorting still uses close-price trade levels instead of next-open levels.
+    use_gate = port["name"] == "experimental_resistance_gate"
+    executable = []
+    for candidate in candidates:
+        raw_entry = float(candidate["entry_open_raw"])
+        strategy = candidate["setup"]["strategy"]
+        trade, trade_error = main.build_trade(
+            candidate["h"], strategy, entry_override=raw_entry,
+            enable_resistance_gate=use_gate
+        )
+        if trade is None:
+            if use_gate and trade_error and "insufficient room below confirmed 4H resistance" in trade_error:
+                port["resistance_gate_rejections"] += 1
+            else:
+                port.setdefault("execution_rejections", 0)
+                port["execution_rejections"] += 1
+            continue
+        row = dict(candidate)
+        row["_execution_trade"] = trade
+        executable.append(row)
+
+    executable.sort(key=lambda x: (
+        int(x["setup"]["score"]),
+        float(x["_execution_trade"]["rr2"]),
+        -float(x["_execution_trade"]["risk_pct"])
     ), reverse=True)
     selected = []
     used = set()
-    for r in candidates:
+    for r in executable:
         sym = r["symbol"]
         if sym in used:
             continue
