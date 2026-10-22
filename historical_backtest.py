@@ -170,11 +170,13 @@ def candidate_at(symbol, raw_frames, decision_ms, btc_d, btc_h, gate):
 def trade_signal_key(result):
     return (result["symbol"], result["setup"]["strategy"])
 
-def make_portfolio(name):
+def make_portfolio(name, apply_resistance_gate=False, exclude_confirmed_trend=False):
     return {"name": name, "cash": INITIAL_CASH, "positions": [], "closed": [],
             "last_signal_ms": {}, "equity_curve": [], "signals": 0, "rejected_cash": 0,
             "fees_paid": 0.0, "qualified_candidates": 0, "selected_before_cash": 0,
-            "resistance_gate_rejections": 0}
+            "resistance_gate_rejections": 0, "apply_resistance_gate": apply_resistance_gate,
+            "exclude_confirmed_trend": exclude_confirmed_trend,
+            "excluded_trend_candidates": 0}
 
 def equity(port, market, idx_by_symbol):
     total = port["cash"]
@@ -280,9 +282,12 @@ def pick_scan_results(candidates, port, decision_ms):
     # Evaluate executable levels/gate before ranking and before the per-scan cap.
     # Otherwise rejected candidates consume signal slots and are repeatedly counted,
     # while sorting still uses close-price trade levels instead of next-open levels.
-    use_gate = port["name"] == "experimental_resistance_gate"
+    use_gate = port["apply_resistance_gate"]
     executable = []
     for candidate in candidates:
+        if port["exclude_confirmed_trend"] and candidate["setup"]["strategy"] == "CONFIRMED TREND":
+            port["excluded_trend_candidates"] += 1
+            continue
         raw_entry = float(candidate["entry_open_raw"])
         strategy = candidate["setup"]["strategy"]
         trade, trade_error = main.build_trade(
@@ -341,6 +346,7 @@ def summarize(port, market, idx_by_symbol, period_start, period_end):
         "qualified_candidates_before_portfolio_limits": port["qualified_candidates"],
         "selected_before_cash_check": port["selected_before_cash"],
         "resistance_gate_rejections": port["resistance_gate_rejections"],
+        "excluded_confirmed_trend_candidates": port["excluded_trend_candidates"],
         "signals_entered": port["signals"], "closed_trades": len(closed),
         "open_positions_at_end": len(port["positions"]), "cash_rejected_entries": port["rejected_cash"],
         "win_rate_closed_pct": round(wins / len(closed) * 100, 2) if closed else None,
@@ -368,7 +374,9 @@ def main_run():
     if not btc:
         raise RuntimeError("BTCUSDT history is required for point-in-time regime context")
     baseline = make_portfolio("baseline_no_resistance_gate")
-    experimental = make_portfolio("experimental_resistance_gate")
+    experimental = make_portfolio("experimental_resistance_gate", apply_resistance_gate=True)
+    trend_free = make_portfolio("experimental_gate_no_confirmed_trend",
+                                apply_resistance_gate=True, exclude_confirmed_trend=True)
     scans = list(scan_times(start_ms, end_ms))
     print(f"Replay start={datetime.fromtimestamp(start_ms/1000, timezone.utc).isoformat()} "
           f"end={datetime.fromtimestamp(end_ms/1000, timezone.utc).isoformat()} "
@@ -397,9 +405,10 @@ def main_run():
             # Only execution-time levels/gate differ at the next 1H open.
             baseline_candidates.append(base)
             exp_candidates.append(base)
-        baseline["qualified_candidates"] += len(baseline_candidates)
-        experimental["qualified_candidates"] += len(exp_candidates)
-        for port, candidates in ((baseline, baseline_candidates), (experimental, exp_candidates)):
+        for port in (baseline, experimental, trend_free):
+            port["qualified_candidates"] += len(baseline_candidates)
+        for port, candidates in ((baseline, baseline_candidates),
+                                 (experimental, exp_candidates), (trend_free, exp_candidates)):
             picked = pick_scan_results(candidates, port, decision_ms)
             port["selected_before_cash"] += len(picked)
             for r in picked:
@@ -408,7 +417,8 @@ def main_run():
             port["equity_curve"].append({"time": decision_ms, "equity": eq})
         if n % 30 == 0 or n == len(scans):
             print(f"scan {n}/{len(scans)} | baseline signals={baseline['signals']} "
-                  f"experimental signals={experimental['signals']}", flush=True)
+                  f"experimental signals={experimental['signals']} "
+                  f"gate-no-trend signals={trend_free['signals']}", flush=True)
     # Mark remaining positions to market using each symbol's latest completed candle.
     idx_by_symbol = {}
     for sym in data_symbols:
@@ -431,11 +441,12 @@ def main_run():
         },
         "results": [
             summarize(baseline, market, idx_by_symbol, start_ms, end_ms),
-            summarize(experimental, market, idx_by_symbol, start_ms, end_ms)
+            summarize(experimental, market, idx_by_symbol, start_ms, end_ms),
+            summarize(trend_free, market, idx_by_symbol, start_ms, end_ms)
         ]
     }
     (OUT / "summary.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
-    for port in (baseline, experimental):
+    for port in (baseline, experimental, trend_free):
         with (OUT / f"{port['name']}_closed_trades.csv").open("w", newline="", encoding="utf-8") as fh:
             rows = [{k: v for k, v in t.items() if k not in ("qty",)} for t in port["closed"]]
             if rows:
