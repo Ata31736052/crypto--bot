@@ -199,12 +199,6 @@ def close_piece(port, p, qty, raw_price, reason, timestamp):
     p["qty"] -= qty
     if reason == "TP1":
         p["tp1_done"] = True
-        p["tp1_hit"] = True
-    if reason == "TP2":
-        p["tp2_hit"] = True
-        p["tp1_hit"] = True
-    if reason == "TP2":
-        p["tp2_hit"] = True
     if p["qty"] <= p["initial_qty"] * 1e-8:
         p["qty"] = 0.0
         p["exit_time"] = timestamp
@@ -335,6 +329,9 @@ def shadow_close_piece(p, qty, raw_price, reason, timestamp):
     p["qty"] -= qty
     if reason == "TP1":
         p["tp1_done"] = True
+        p["tp1_hit"] = True
+    if reason == "TP2":
+        p["tp2_hit"] = True
     if p["qty"] <= p["initial_qty"] * 1e-8:
         p["qty"] = 0.0
         p["status"] = reason
