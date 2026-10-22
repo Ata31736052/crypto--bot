@@ -54,3 +54,5 @@ jobs:
             historical-backtest.log
           if-no-files-found: warn
           retention-days: 30
+
+# Re-run after fixing advancement of the third diagnostic portfolio ledger.
