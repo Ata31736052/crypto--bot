@@ -495,12 +495,14 @@ def main_run():
     experimental = make_portfolio("experimental_resistance_gate", apply_resistance_gate=True)
     trend_free = make_portfolio("experimental_gate_no_confirmed_trend",
                                 apply_resistance_gate=True, exclude_confirmed_trend=True)
+    shadow_ledger = []
     scans = list(scan_times(start_ms, end_ms))
     print(f"Replay start={datetime.fromtimestamp(start_ms/1000, timezone.utc).isoformat()} "
           f"end={datetime.fromtimestamp(end_ms/1000, timezone.utc).isoformat()} "
           f"symbols={len(symbols)} scans={len(scans)}", flush=True)
     for n, decision_ms in enumerate(scans, 1):
-        # Advance both ledgers using only candles that closed by this scan time.
+        # Advance isolated shadow outcomes and real portfolios using closed candles only.
+        advance_shadow_ledger(shadow_ledger, market, decision_ms)
         advance_positions(baseline, market, decision_ms)
         advance_positions(experimental, market, decision_ms)
         advance_positions(trend_free, market, decision_ms)
@@ -545,7 +547,25 @@ def main_run():
         idx = np.flatnonzero(h1["close_time"].to_numpy(dtype=np.int64) < end_ms)
         if len(idx):
             idx_by_symbol[sym] = int(idx[-1])
+    mark_shadow_open_at_end(shadow_ledger, market, end_ms)
+    shadow_summary = {
+        "rejected_candidates_tracked": len(shadow_ledger),
+        "outcomes": {status: sum(p["status"] == status for p in shadow_ledger) for status in sorted({p["status"] for p in shadow_ledger})},
+        "net_pnl_usdt_sum_including_end_marks": round(sum(float(p["net_pnl_usdt"] or 0) for p in shadow_ledger), 4),
+        "net_pnl_usdt_mean": round(float(np.mean([p["net_pnl_usdt"] for p in shadow_ledger if p["net_pnl_usdt"] is not None])), 4) if any(p["net_pnl_usdt"] is not None for p in shadow_ledger) else None,
+        "avg_mfe_pct": round(float(np.mean([p["mfe_pct"] for p in shadow_ledger])), 4) if shadow_ledger else None,
+        "avg_mae_pct": round(float(np.mean([p["mae_pct"] for p in shadow_ledger])), 4) if shadow_ledger else None,
+        "avg_mfe_r": round(float(np.mean([p["mfe_r"] for p in shadow_ledger])), 4) if shadow_ledger else None,
+        "avg_mae_r": round(float(np.mean([p["mae_r"] for p in shadow_ledger])), 4) if shadow_ledger else None,
+        "note": "Independent fixed-risk hypothetical trades; no shadow position affects real portfolio cash, ranking, selection or equity."
+    }
+    with (OUT / "resistance_rejected_shadow_ledger.csv").open("w", newline="", encoding="utf-8") as fh:
+        if shadow_ledger:
+            w = csv.DictWriter(fh, fieldnames=list(shadow_ledger[0].keys()))
+            w.writeheader()
+            w.writerows(shadow_ledger)
     report = {
+        "shadow_ledger": shadow_summary,
         "metadata": {
             "data_source": BASE, "evaluation_start_utc": datetime.fromtimestamp(start_ms/1000, timezone.utc).isoformat(),
             "evaluation_end_utc": datetime.fromtimestamp(end_ms/1000, timezone.utc).isoformat(),
