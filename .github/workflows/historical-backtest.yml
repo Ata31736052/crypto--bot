@@ -38,8 +38,9 @@ jobs:
           pip install -r requirements.txt
       - name: Compile and run offline regression tests
         run: |
-          python -m py_compile main.py historical_backtest.py
+          python -m py_compile main.py historical_backtest.py tests/test_shadow_ledger.py
           python -c "import main; main.self_test()"
+          python -m unittest discover -s tests -v
       - name: Run 180-day A/B replay (no Telegram or live orders)
         run: |
           set -o pipefail
