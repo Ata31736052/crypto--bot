@@ -58,4 +58,4 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-# Re-run after fixing advancement of the third diagnostic portfolio ledger.
+# Shadow Ledger validation: rejected resistance-gate candidates are evaluated separately from live portfolio accounting.
