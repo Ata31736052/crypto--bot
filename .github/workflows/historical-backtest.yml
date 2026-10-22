@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - experiment/resistance-headroom-gate-20261021-sync
+      - experiment/shadow-ledger-20261022
     paths:
       - "main.py"
       - "historical_backtest.py"
