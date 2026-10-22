@@ -1,31 +1,10 @@
 {
-  "AAVEUSDT": {
-    "entry": 155.86,
-    "score": 69,
-    "sent_at": 1792557178.9180646,
+  "ENAUSDT": {
+    "entry": 0.2017,
+    "score": 68,
+    "sent_at": 1792676619.2646368,
     "strategy": "BOTTOM HUNTER",
-    "symbol": "AAVEUSDT"
-  },
-  "AVAXUSDT": {
-    "entry": 9.741,
-    "score": 75,
-    "sent_at": 1792537726.1874468,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "AVAXUSDT"
-  },
-  "BNBUSDT": {
-    "entry": 741.46,
-    "score": 77,
-    "sent_at": 1792537725.8940377,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "BNBUSDT"
-  },
-  "BTCUSDT": {
-    "entry": 83519.69,
-    "score": 80,
-    "sent_at": 1792590151.2781837,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "BTCUSDT"
+    "symbol": "ENAUSDT"
   },
   "ETHUSDT": {
     "entry": 2495.17,
@@ -34,25 +13,11 @@
     "strategy": "BOTTOM HUNTER",
     "symbol": "ETHUSDT"
   },
-  "FETUSDT": {
-    "entry": 0.1959,
-    "score": 80,
-    "sent_at": 1792537725.5500727,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "FETUSDT"
-  },
   "FILUSDT": {
     "entry": 1.0708,
     "score": 71,
     "sent_at": 1792613078.166623,
     "strategy": "BOTTOM HUNTER",
     "symbol": "FILUSDT"
-  },
-  "TAOUSDT": {
-    "entry": 271.8,
-    "score": 71,
-    "sent_at": 1792557178.5344138,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "TAOUSDT"
   }
 }
