@@ -278,7 +278,88 @@ def enter(port, result, market, decision_ms):
     port["signals"] += 1
     port["last_signal_ms"][symbol] = decision_ms
 
-def pick_scan_results(candidates, port, decision_ms):
+
+def advance_shadow_ledger(ledger, market, decision_ms):
+    """Advance rejected candidates independently; never touches portfolio cash/ranking."""
+    for p in ledger:
+        if p["status"] != "PENDING":
+            continue
+        h1 = market[p["symbol"]]["1h"]
+        eligible = np.flatnonzero(
+            (h1["close_time"].to_numpy(dtype=np.int64) < decision_ms) &
+            (np.arange(len(h1)) >= p["entry_index"]) &
+            (np.arange(len(h1)) > p["last_checked_index"])
+        )
+        for ix in eligible:
+            bar = h1.iloc[int(ix)]
+            hi, lo, close = float(bar["high"]), float(bar["low"]), float(bar["close"])
+            p["mfe_pct"] = max(p["mfe_pct"], (hi / p["entry_price"] - 1) * 100)
+            p["mae_pct"] = min(p["mae_pct"], (lo / p["entry_price"] - 1) * 100)
+            risk_per_unit = max(p["entry_price"] - p["sl"], 1e-12)
+            p["mfe_r"] = max(p["mfe_r"], (hi - p["entry_price"]) / risk_per_unit)
+            p["mae_r"] = min(p["mae_r"], (lo - p["entry_price"]) / risk_per_unit)
+            ts = int(bar["close_time"])
+            if lo <= p["sl"]:
+                shadow_close_piece(p, p["qty"], p["sl"], "SL", ts)
+            else:
+                if not p["tp1_done"] and hi >= p["tp1"]:
+                    shadow_close_piece(p, p["qty"] * 0.5, p["tp1"], "TP1", ts)
+                    if p["qty"] > 0 and hi >= p["tp2"]:
+                        shadow_close_piece(p, p["qty"], p["tp2"], "TP2", ts)
+                elif p["tp1_done"] and hi >= p["tp2"]:
+                    shadow_close_piece(p, p["qty"], p["tp2"], "TP2", ts)
+            if p["status"] != "PENDING":
+                break
+            p["last_checked_index"] = int(ix)
+            if int(ix) - p["entry_index"] >= MAX_HOLD_HOURS:
+                shadow_close_piece(p, p["qty"], close, "TIME", ts)
+                break
+        if p["status"] == "PENDING" and len(eligible):
+            p["last_checked_index"] = int(eligible[-1])
+
+
+def shadow_close_piece(p, qty, raw_price, reason, timestamp):
+    if qty <= 0:
+        return
+    fill = raw_price * (1 - SLIPPAGE)
+    proceeds = qty * fill
+    fee = proceeds * FEE_RATE
+    p["fees_usdt"] += fee
+    p["realized_pnl_usdt"] += qty * (fill - p["entry_price"]) - fee
+    p["qty"] -= qty
+    if reason == "TP1":
+        p["tp1_done"] = True
+    if p["qty"] <= p["initial_qty"] * 1e-8:
+        p["qty"] = 0.0
+        p["status"] = reason
+        p["exit_time"] = timestamp
+        p["net_pnl_usdt"] = p["realized_pnl_usdt"] - p["entry_fee_usdt"]
+        p["net_pnl_pct_notional"] = 100 * p["net_pnl_usdt"] / max(p["notional_usdt"], 1e-12)
+        p["net_pnl_r"] = p["net_pnl_usdt"] / max(p["risk_budget_usdt"], 1e-12)
+
+
+def mark_shadow_open_at_end(ledger, market, end_ms):
+    for p in ledger:
+        if p["status"] != "PENDING":
+            continue
+        h1 = market[p["symbol"]]["1h"]
+        eligible = np.flatnonzero(h1["close_time"].to_numpy(dtype=np.int64) < end_ms)
+        if not len(eligible):
+            continue
+        bar = h1.iloc[int(eligible[-1])]
+        # Mark remaining quantity to market using the same conservative exit costs.
+        fill = float(bar["close"]) * (1 - SLIPPAGE)
+        proceeds = p["qty"] * fill
+        fee = proceeds * FEE_RATE
+        p["fees_usdt"] += fee
+        p["net_pnl_usdt"] = p["realized_pnl_usdt"] + p["qty"] * (fill - p["entry_price"]) - fee - p["entry_fee_usdt"]
+        p["net_pnl_pct_notional"] = 100 * p["net_pnl_usdt"] / max(p["notional_usdt"], 1e-12)
+        p["net_pnl_r"] = p["net_pnl_usdt"] / max(p["risk_budget_usdt"], 1e-12)
+        p["status"] = "OPEN_AT_END_MARKED_TO_MARKET"
+        p["exit_time"] = int(bar["close_time"])
+
+
+def pick_scan_results(candidates, port, decision_ms, shadow_ledger=None):
     # Evaluate executable levels/gate before ranking and before the per-scan cap.
     # Otherwise rejected candidates consume signal slots and are repeatedly counted,
     # while sorting still uses close-price trade levels instead of next-open levels.
@@ -297,6 +378,43 @@ def pick_scan_results(candidates, port, decision_ms):
         if trade is None:
             if use_gate and trade_error and "insufficient room below confirmed 4H resistance" in trade_error:
                 port["resistance_gate_rejections"] += 1
+                # Only the experimental gate arm records shadows; shadow trades never
+                # enter the real portfolio, consume slots, or alter cash/equity.
+                if shadow_ledger is not None:
+                    shadow_trade, shadow_error = main.build_trade(
+                        candidate["h"], strategy, entry_override=raw_entry,
+                        enable_resistance_gate=False
+                    )
+                    if shadow_trade is not None:
+                        entry_idx = int(candidate["entry_index"])
+                        shadow_ledger.append({
+                            "symbol": candidate["symbol"], "strategy": strategy,
+                            "score": int(candidate["setup"]["score"]),
+                            "decision_time": int(decision_ms),
+                            "entry_time": int(candidate["entry_time"]),
+                            "entry_index": entry_idx, "last_checked_index": entry_idx - 1,
+                            "entry_raw": raw_entry,
+                            "entry_price": raw_entry * (1 + SLIPPAGE),
+                            "sl": float(shadow_trade["sl"]), "tp1": float(shadow_trade["tp1"]),
+                            "tp2": float(shadow_trade["tp2"]),
+                            "resistance": shadow_trade.get("resistance"),
+                            "rejection_reason": trade_error,
+                            "status": "PENDING", "exit_time": None,
+                            "initial_qty": 0.0, "qty": 0.0, "notional_usdt": 0.0,
+                            "risk_budget_usdt": INITIAL_CASH * RISK_FRACTION,
+                            "entry_fee_usdt": 0.0, "fees_usdt": 0.0,
+                            "realized_pnl_usdt": 0.0, "net_pnl_usdt": None,
+                            "net_pnl_pct_notional": None, "net_pnl_r": None,
+                            "tp1_done": False, "mfe_pct": 0.0, "mae_pct": 0.0,
+                            "mfe_r": 0.0, "mae_r": 0.0
+                        })
+                        p = shadow_ledger[-1]
+                        risk_distance = max(p["entry_price"] - p["sl"], 1e-12)
+                        p["notional_usdt"] = min(MAX_POSITION, p["risk_budget_usdt"] * p["entry_price"] / risk_distance)
+                        p["initial_qty"] = p["notional_usdt"] / p["entry_price"]
+                        p["qty"] = p["initial_qty"]
+                        p["entry_fee_usdt"] = p["notional_usdt"] * FEE_RATE
+                        p["fees_usdt"] = p["entry_fee_usdt"]
             else:
                 port.setdefault("execution_rejections", 0)
                 port["execution_rejections"] += 1
@@ -410,7 +528,7 @@ def main_run():
             port["qualified_candidates"] += len(baseline_candidates)
         for port, candidates in ((baseline, baseline_candidates),
                                  (experimental, exp_candidates), (trend_free, exp_candidates)):
-            picked = pick_scan_results(candidates, port, decision_ms)
+            picked = pick_scan_results(candidates, port, decision_ms, shadow_ledger if port is experimental else None)
             port["selected_before_cash"] += len(picked)
             for r in picked:
                 enter(port, r, market, decision_ms)
