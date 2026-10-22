@@ -1,6 +1,7 @@
 name: Experimental 180-day historical A/B replay
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - experiment/resistance-headroom-gate-20261021-sync
