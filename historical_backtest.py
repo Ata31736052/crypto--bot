@@ -385,6 +385,7 @@ def main_run():
         # Advance both ledgers using only candles that closed by this scan time.
         advance_positions(baseline, market, decision_ms)
         advance_positions(experimental, market, decision_ms)
+        advance_positions(trend_free, market, decision_ms)
         btc_d_df = frame_at(btc["1d"], decision_ms)
         btc_h_df = frame_at(btc["4h"], decision_ms)
         if len(btc_d_df) < 210 or len(btc_h_df) < 210:
