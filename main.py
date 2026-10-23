@@ -766,6 +766,27 @@ def bottom_setup(d, h, h1, btc_d, btc_h):
 
 
 # ---------------- RISK / TARGETS ----------------
+def _nearest_confirmed_swing_high_above(h, entry, lookback=64, pivot=2):
+    """Return the nearest overhead confirmed pivot high, not merely the latest pivot."""
+    if h is None or len(h) < pivot * 2 + 3 or not finite(entry) or entry <= 0:
+        return None
+    x = h.tail(lookback).reset_index(drop=True)
+    highs = pd.to_numeric(x["high"], errors="coerce").to_numpy(float)
+    candidates = []
+    for i in range(pivot, len(highs) - pivot):
+        value = highs[i]
+        if not np.isfinite(value):
+            continue
+        left = highs[i-pivot:i]
+        right = highs[i+1:i+pivot+1]
+        if (not np.isfinite(left).all()) or (not np.isfinite(right).all()):
+            continue
+        # Match market_structure's confirmed-pivot convention.
+        if value > left.max() and value >= right.max() and value > entry:
+            candidates.append(float(value))
+    return min(candidates) if candidates else None
+
+
 def _nearest_confirmed_swing_low(h, lookback=24, pivot=2):
     """Return the most recent meaningful 4H pivot low, not an old absolute low."""
     x = h.tail(lookback).copy().reset_index(drop=True)
@@ -781,7 +802,16 @@ def _nearest_confirmed_swing_low(h, lookback=24, pivot=2):
     return candidates[-1][1] if candidates else None
 
 
-def build_trade(h, strategy, entry_override=None):
+def _has_tp1_room_below_resistance(entry, risk, resistance):
+    """Require TP1 headroom below the nearest confirmed overhead 4H swing high."""
+    if not finite(entry, risk) or entry <= 0 or risk <= 0:
+        return False
+    if not finite(resistance) or resistance <= entry:
+        return True  # no confirmed overhead obstacle above the entry
+    return resistance * 0.995 >= entry + risk * MIN_RR_TP1
+
+
+def build_trade(h, strategy, entry_override=None, enable_resistance_gate=True):
     """Build a bounded, risk-valid long setup.
 
     Root rule: an old multi-week low must never create a 20-30% stop for a
@@ -829,6 +859,22 @@ def build_trade(h, strategy, entry_override=None):
     resistance = float(h.tail(30)["high"].iloc[:-1].max())
     required_tp1 = entry + risk * MIN_RR_TP1
     required_tp2 = entry + risk * MIN_RR_TP2
+
+    # Experimental entry-location correction: do not buy below a confirmed
+    # overhead 4H swing high when the required TP1 cannot fit beneath it.
+    # This avoids scoring a high-quality setup as an executable entry after
+    # the available upside is already blocked by nearby resistance.
+    confirmed_resistance = _nearest_confirmed_swing_high_above(h, entry)
+    if enable_resistance_gate and not _has_tp1_room_below_resistance(entry, risk, confirmed_resistance):
+        resistance_value = float(confirmed_resistance)
+        room_pct = (resistance_value * 0.995 / entry - 1.0) * 100.0
+        required_pct = (required_tp1 / entry - 1.0) * 100.0
+        return None, (
+            f"insufficient room below confirmed 4H resistance | "
+            f"entry={entry:.8g} | resistance={resistance_value:.8g} | "
+            f"room={room_pct:.2f}% | required_TP1={required_pct:.2f}%"
+        )
+
     candidates = [
         ("fixed_2.5pct", entry * (1 + TP1_PCT)),
         ("resistance", resistance * 0.995),
@@ -1188,13 +1234,30 @@ def unified_bottom_score_audit(d, h, h1, btc_d, btc_h):
 
 
 
-def analyze_symbol(symbol, btc_d, btc_h):
+def analyze_symbol(symbol, btc_d, btc_h, historical_frames=None, entry_override=None, enable_resistance_gate=True):
+    """Analyze one symbol. Optional historical_frames enables offline replay.
+
+    historical_frames must contain raw, time-cropped, CLOSED candles under
+    keys "1d", "4h", and "1h". The caller owns timestamp cutoffs; the normal
+    live path remains unchanged when historical_frames is omitted.
+    """
     stats={"scanned":1,"trend_candidate":0,"bottom_candidate":0,"h1_reject":0,"risk_reject":0,"trade_reject_count":0,"final_gate_reject_count":0,"final":0,
            "diagnostic_reasons":Counter(),"trend_blockers":Counter(),"bottom_blockers":Counter(),"bottom_trigger_audit":Counter(),"bottom_subcondition_audit":Counter(),"trend_block_single":0,"trend_block_multiple":0,
            "bottom_block_single":0,"bottom_block_multiple":0,"trend_base_pass":0,"trend_1h_only_fail":0,"bottom_base_pass":0,"bottom_1h_only_fail":0,
            "h1_trend_failures":Counter(),"h1_bottom_failures":Counter(),"trade_rejects":Counter(),"final_gate_rejects":Counter(),"trend_score_rejects":Counter(),"bottom_score_rejects":Counter(),"trend_score_buckets":Counter(),"bottom_score_buckets":Counter(),"trend_score_values":[],"bottom_score_values":[],"trend_potential_scores":[],"bottom_potential_scores":[],"trend_potential_buckets":Counter(),"bottom_potential_buckets":Counter(),"trend_potential_top":[],"bottom_potential_top":[],"trend_audit_scores":[],"bottom_audit_scores":[],"trend_audit_buckets":Counter(),"bottom_audit_buckets":Counter(),"trend_audit_top":[],"bottom_audit_top":[]}
     try:
-        d=add_indicators(klines(symbol,"1d",250)); h=add_indicators(klines(symbol,"4h",250)); h1=add_indicators(klines(symbol,"1h",250))
+        if historical_frames is None:
+            d=add_indicators(klines(symbol,"1d",250)); h=add_indicators(klines(symbol,"4h",250)); h1=add_indicators(klines(symbol,"1h",250))
+        else:
+            required_frames = {"1d", "4h", "1h"}
+            if not isinstance(historical_frames, dict) or not required_frames.issubset(historical_frames):
+                raise ValueError("historical_frames must provide closed-candle DataFrames for 1d, 4h, and 1h")
+            if any(not isinstance(historical_frames[tf], pd.DataFrame) for tf in required_frames):
+                raise TypeError("historical_frames values must be pandas DataFrames")
+            # Copy before indicator calculation so replay cannot mutate cached history.
+            d=add_indicators(historical_frames["1d"].copy())
+            h=add_indicators(historical_frames["4h"].copy())
+            h1=add_indicators(historical_frames["1h"].copy())
         daily_state = validate_daily_state(daily_regime(d))
         # ROOT DAILY LOCK: the same validated state is passed through every Trend stage.
         if daily_state not in {"BULLISH", "EARLY_BULLISH", "NEUTRAL", "BEARISH"}:
@@ -1335,7 +1398,7 @@ def analyze_symbol(symbol, btc_d, btc_h):
                      symbol,strategy,setup["score"],setup.get("raw_score","n/a"),h1d.get("confirmations","n/a"),
                      ", ".join(f"{k}={'PASS' if v else 'FAIL'}" for k,v in h1d.items() if k not in {"confirmed","confirmations"}))
 
-            trade,err=build_trade(h,strategy)
+            trade,err=build_trade(h,strategy,entry_override=entry_override,enable_resistance_gate=enable_resistance_gate)
             if not trade:
                 stats["risk_reject"] += 1
                 stats["trade_reject_count"] += 1
@@ -1660,6 +1723,10 @@ def self_test():
     assert callable(bottom_reversal_trigger_points)
     assert callable(professional_signal_quality_gate)
     assert callable(_nearest_confirmed_swing_low) and callable(_rsi_divergence_details)
+    # Offline replay adapter must reject incomplete frame sets without falling
+    # back to live Binance requests.
+    _, _, replay_error = analyze_symbol("TESTUSDT", "NEUTRAL", "NEUTRAL", historical_frames={})
+    assert replay_error and "historical_frames must provide" in replay_error
     assert BOTTOM_VOL_MIN == 0.60
     # RSI divergence regression suite: aligned pivots, threshold boundaries,
     # spacing limits, and confirmation lag. These tests do not alter runtime rules.
@@ -1761,6 +1828,35 @@ def self_test():
     # Logging contract: every formatted line must have matching arguments.
     profile_args = (1, 1, 0, 1, 1, 0)
     assert len(profile_args) == 6
+    # Entry-location regression: reject a BUY when the nearest confirmed overhead
+    # swing high leaves less room than the required TP1; permit clear/no overhead space.
+    assert _has_tp1_room_below_resistance(100.0, 2.5, 103.0) is False
+    assert _has_tp1_room_below_resistance(100.0, 2.5, 106.0) is True
+    boundary_resistance = (100.0 + 2.5 * MIN_RR_TP1) / 0.995
+    assert _has_tp1_room_below_resistance(100.0, 2.5, boundary_resistance) is True
+    assert _has_tp1_room_below_resistance(100.0, 2.5, boundary_resistance - 1e-6) is False
+    # CRV-like case from the supplied signal: entry 0.3732, stop 0.3644,
+    # nearby resistance around 0.38; the required 1.8R TP1 cannot fit below it.
+    assert _has_tp1_room_below_resistance(0.3732, 0.3732-0.3644, 0.38) is False
+    assert _has_tp1_room_below_resistance(100.0, 2.5, 99.0) is True
+    assert _has_tp1_room_below_resistance(100.0, 2.5, None) is True
+    # Nearest confirmed overhead pivot must be selected, not the highest/latest.
+    pivot_test = pd.DataFrame({"high":[100.0,100.0,106.0,100.0,100.0,100.0,110.0,100.0,100.0]})
+    assert _nearest_confirmed_swing_high_above(pivot_test, 102.0, lookback=20, pivot=1) == 106.0
+    # A spike on the newest candle is not a confirmed pivot (no right-side candle).
+    edge_pivot = pd.DataFrame({"high":[100.0,100.0,105.0,100.0,100.0,120.0]})
+    assert _nearest_confirmed_swing_high_above(edge_pivot, 110.0, lookback=20, pivot=1) is None
+    # The latest pivot can sit below entry while an older confirmed overhead
+    # pivot still blocks TP1. Select the nearest overhead pivot in that case.
+    test_highs = [90, 91, 92, 93, 110, 93, 92, 91, 92, 93, 105, 93, 92, 91, 92, 93, 95, 93, 92, 91]
+    test_resistance = _nearest_confirmed_swing_high_above(
+        pd.DataFrame({"high": test_highs}), 100.0
+    )
+    assert test_resistance == 105.0, test_resistance
+    assert _nearest_confirmed_swing_high_above(
+        pd.DataFrame({"high": test_highs}), 111.0
+    ) is None
+
     # Stop-risk contract: bounded ATR stop can never exceed configured risk by itself.
     test_h = pd.DataFrame({
         "open": [100.0]*30, "high": [101.0]*30, "low": [99.0]*30, "close": [100.0]*30,
