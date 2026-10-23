@@ -4,7 +4,7 @@
 Scope is deliberately explicit: top 30 currently liquid Binance Spot USDT pairs,
 selected by present-day 24h quote volume. This is a bounded diagnostic sample,
 not a survivorship-bias-free full-universe performance claim.
-Signals are evaluated on the production 4-hour schedule (:10 UTC); frames are
+This experimental replay evaluates signals hourly at :10 UTC (not the production schedule); frames are
 cut at the decision timestamp and entries occur at the first 1h open strictly
 after that timestamp. The replay uses no Telegram or order placement.
 """
@@ -609,7 +609,7 @@ def main_run():
         "metadata": {
             "data_source": BASE, "evaluation_start_utc": datetime.fromtimestamp(start_ms/1000, timezone.utc).isoformat(),
             "evaluation_end_utc": datetime.fromtimestamp(end_ms/1000, timezone.utc).isoformat(),
-            "scan_schedule": "every 4 hours at minute 10 UTC",
+            "scan_schedule": "hourly at minute 10 UTC (experimental replay; not production schedule)",
             "symbols": symbols,
             "symbol_selection_mode": "fixed BACKTEST_SYMBOLS benchmark cohort" if fixed_symbols_env else "current 24h quote-volume selection",
             "evaluation_end_mode": "fixed BACKTEST_END_UTC" if end_utc else "wall-clock current UTC",
