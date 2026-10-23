@@ -484,10 +484,26 @@ def summarize(port, market, idx_by_symbol, period_start, period_end):
 
 def main_run():
     OUT.mkdir(parents=True, exist_ok=True)
-    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-    end_ms = now_ms
+    end_utc = os.getenv("BACKTEST_END_UTC", "").strip()
+    if end_utc:
+        parsed_end = datetime.fromisoformat(end_utc.replace("Z", "+00:00"))
+        if parsed_end.tzinfo is None:
+            raise ValueError("BACKTEST_END_UTC must include a timezone, preferably UTC")
+        end_ms = int(parsed_end.astimezone(timezone.utc).timestamp() * 1000)
+    else:
+        end_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     start_ms = end_ms - DAYS * 86400 * 1000
-    symbols, universe_rows = universe()
+
+    fixed_symbols_env = os.getenv("BACKTEST_SYMBOLS", "").strip()
+    if fixed_symbols_env:
+        symbols = list(dict.fromkeys(
+            item.strip().upper() for item in fixed_symbols_env.split(",") if item.strip()
+        ))
+        if not symbols:
+            raise ValueError("BACKTEST_SYMBOLS was set but contained no symbols")
+        universe_rows = [{"symbol": symbol, "selection": "fixed BACKTEST_SYMBOLS"} for symbol in symbols]
+    else:
+        symbols, universe_rows = universe()
     data_symbols = list(symbols)
     if "BTCUSDT" not in data_symbols:
         data_symbols.append("BTCUSDT")
@@ -551,10 +567,7 @@ def main_run():
         idx = np.flatnonzero(h1["close_time"].to_numpy(dtype=np.int64) < end_ms)
         if len(idx):
             idx_by_symbol[sym] = int(idx[-1])
-    # Process every completed candle through the replay boundary before end-marking.
-    # This prevents post-last-scan SL/TP events and MFE/MAE from being omitted.
-    advance_shadow_ledger(shadow_ledger, market, end_ms)
-    # Process every completed candle after the final scheduled scan before end marking.
+    # Process every completed candle after the final scheduled scan before end-marking.
     # This keeps TP/SL outcomes and MFE/MAE complete through the replay boundary.
     advance_shadow_ledger(shadow_ledger, market, end_ms)
     mark_shadow_open_at_end(shadow_ledger, market, end_ms)
@@ -590,7 +603,14 @@ def main_run():
             "data_source": BASE, "evaluation_start_utc": datetime.fromtimestamp(start_ms/1000, timezone.utc).isoformat(),
             "evaluation_end_utc": datetime.fromtimestamp(end_ms/1000, timezone.utc).isoformat(),
             "scan_schedule": "every 4 hours at minute 10 UTC",
-            "symbols": symbols, "universe_definition": "top current 24h quote-volume directional Spot USDT pairs above production floor; excludes BTCUSDT (context only) and obvious stablecoin-to-USDT pairs; max 30",
+            "symbols": symbols,
+            "symbol_selection_mode": "fixed BACKTEST_SYMBOLS benchmark cohort" if fixed_symbols_env else "current 24h quote-volume selection",
+            "evaluation_end_mode": "fixed BACKTEST_END_UTC" if end_utc else "wall-clock current UTC",
+            "universe_definition": (
+                "fixed BACKTEST_SYMBOLS benchmark cohort"
+                if fixed_symbols_env else
+                "top current 24h quote-volume directional Spot USDT pairs above production floor; excludes BTCUSDT (context only) and obvious stablecoin-to-USDT pairs; max 30"
+            ),
             "important_limitations": [
                 "Current-universe selection creates survivorship and lookback-selection bias.",
                 "This is a bounded diagnostic sample, not full-universe production-equivalent performance.",
