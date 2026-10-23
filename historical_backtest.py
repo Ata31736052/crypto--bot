@@ -126,14 +126,21 @@ def frame_at(df, decision_ms, n=250):
     return out
 
 def scan_times(start_ms, end_ms):
-    start = datetime.fromtimestamp(start_ms / 1000, timezone.utc).replace(minute=10, second=0, microsecond=0)
-    while start.hour % 4 != 0:
-        start += timedelta(hours=1)
+    """Replay the scanner hourly at :10 UTC, matching 1H signal timing.
+
+    A four-hour scan cadence can only evaluate four-hourly decision points and
+    therefore cannot fairly measure a strategy whose entry confirmation is 1H.
+    Each decision still uses candles with close_time < decision_ms and enters
+    only at the next 1H open strictly after the decision timestamp.
+    """
+    start = datetime.fromtimestamp(start_ms / 1000, timezone.utc).replace(
+        minute=10, second=0, microsecond=0
+    )
     if start.timestamp() * 1000 < start_ms:
-        start += timedelta(hours=4)
+        start += timedelta(hours=1)
     while start.timestamp() * 1000 < end_ms:
         yield int(start.timestamp() * 1000)
-        start += timedelta(hours=4)
+        start += timedelta(hours=1)
 
 def next_entry_index(h1, decision_ms):
     # The entry open must be strictly after the scan/decision timestamp.
