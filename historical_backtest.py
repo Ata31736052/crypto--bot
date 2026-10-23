@@ -554,6 +554,9 @@ def main_run():
     # Process every completed candle through the replay boundary before end-marking.
     # This prevents post-last-scan SL/TP events and MFE/MAE from being omitted.
     advance_shadow_ledger(shadow_ledger, market, end_ms)
+    # Process every completed candle after the final scheduled scan before end marking.
+    # This keeps TP/SL outcomes and MFE/MAE complete through the replay boundary.
+    advance_shadow_ledger(shadow_ledger, market, end_ms)
     mark_shadow_open_at_end(shadow_ledger, market, end_ms)
     shadow_summary = {
         "rejected_candidates_tracked": len(shadow_ledger),
@@ -606,7 +609,10 @@ def main_run():
         with (OUT / f"{port['name']}_closed_trades.csv").open("w", newline="", encoding="utf-8") as fh:
             rows = [{k: v for k, v in t.items() if k not in ("qty",)} for t in port["closed"]]
             if rows:
-                w = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
+                # Trade dictionaries can gain diagnostic keys during partial exits;
+                # include the union so later rows cannot break the artifact export.
+                fieldnames = list(dict.fromkeys(key for row in rows for key in row.keys()))
+                w = csv.DictWriter(fh, fieldnames=fieldnames)
                 w.writeheader()
                 w.writerows(rows)
     print(json.dumps(report, indent=2), flush=True)
