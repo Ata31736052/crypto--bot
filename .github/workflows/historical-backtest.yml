@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - experiment/resistance-headroom-gate-20261021-sync
+      - experiment/hourly-scan-parity-20261023
     paths:
       - "main.py"
       - "historical_backtest.py"
