@@ -49,5 +49,23 @@ class HistoricalCutoffTests(unittest.TestCase):
         self.assertTrue(all(stamp.minute == 10 for stamp in stamps))
 
 
+    def test_entry_open_must_be_strictly_after_decision(self):
+        decision_ms = 2_000
+        h1 = pd.DataFrame({
+            "open_time": [1_000, 2_000, 3_000],
+            "close_time": [1_999, 2_999, 3_999],
+            "open": [10.0, 20.0, 30.0],
+        })
+        self.assertEqual(hb.next_entry_index(h1, decision_ms), 2)
+
+    def test_no_entry_when_only_open_is_at_or_before_decision(self):
+        h1 = pd.DataFrame({
+            "open_time": [1_000, 2_000],
+            "close_time": [1_999, 2_999],
+            "open": [10.0, 20.0],
+        })
+        self.assertIsNone(hb.next_entry_index(h1, 2_000))
+
+
 if __name__ == "__main__":
     unittest.main()
