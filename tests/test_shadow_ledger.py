@@ -61,7 +61,19 @@ class ShadowLedgerTests(unittest.TestCase):
                          [(120, 80, 100), (103, 99, 101)], entry_index=1)
         self.assertEqual(p["status"], "PENDING")
         self.assertEqual(p["last_checked_index"], 1)
-        self.assertEqual(p["mfe_pct"], 3.0)
+        self.assertAlmostEqual(p["mfe_pct"], 3.0, places=7)
+
+    def test_end_of_replay_processes_last_completed_candle_before_mark(self):
+        p = shadow_trade()
+        market = market_with([(103, 94, 96)])
+        # The normal scan loop has not yet processed this candle.
+        hb.advance_shadow_ledger([p], market, decision_ms=0)
+        self.assertEqual(p["status"], "PENDING")
+        hb.advance_shadow_ledger([p], market, decision_ms=2000)
+        hb.mark_shadow_open_at_end([p], market, end_ms=2000)
+        self.assertEqual(p["status"], "SL")
+        self.assertAlmostEqual(p["mfe_pct"], 3.0, places=7)
+        self.assertIsNotNone(p["net_pnl_usdt"])
 
     def test_shadow_ledger_does_not_mutate_main_portfolio(self):
         port = {"cash": 1000.0, "positions": [], "closed": [], "signals": 7}
