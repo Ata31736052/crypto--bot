@@ -551,6 +551,9 @@ def main_run():
         idx = np.flatnonzero(h1["close_time"].to_numpy(dtype=np.int64) < end_ms)
         if len(idx):
             idx_by_symbol[sym] = int(idx[-1])
+    # Process every completed candle through the replay boundary before end-marking.
+    # This prevents post-last-scan SL/TP events and MFE/MAE from being omitted.
+    advance_shadow_ledger(shadow_ledger, market, end_ms)
     mark_shadow_open_at_end(shadow_ledger, market, end_ms)
     shadow_summary = {
         "rejected_candidates_tracked": len(shadow_ledger),
