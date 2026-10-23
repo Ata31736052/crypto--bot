@@ -1,4 +1,11 @@
 {
+  "BNBUSDT": {
+    "entry": 740.13,
+    "score": 74,
+    "sent_at": 1792730208.1720207,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "BNBUSDT"
+  },
   "ENAUSDT": {
     "entry": 0.2017,
     "score": 68,
@@ -7,17 +14,17 @@
     "symbol": "ENAUSDT"
   },
   "ETHUSDT": {
-    "entry": 2495.17,
-    "score": 67,
-    "sent_at": 1792613078.4726067,
+    "entry": 2401.67,
+    "score": 69,
+    "sent_at": 1792730208.7990136,
     "strategy": "BOTTOM HUNTER",
     "symbol": "ETHUSDT"
   },
-  "FILUSDT": {
-    "entry": 1.0708,
+  "LINKUSDT": {
+    "entry": 12.147,
     "score": 71,
-    "sent_at": 1792613078.166623,
+    "sent_at": 1792730208.483642,
     "strategy": "BOTTOM HUNTER",
-    "symbol": "FILUSDT"
+    "symbol": "LINKUSDT"
   }
 }
