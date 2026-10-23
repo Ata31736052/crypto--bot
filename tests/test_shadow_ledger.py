@@ -75,6 +75,15 @@ class ShadowLedgerTests(unittest.TestCase):
         self.assertAlmostEqual(p["mfe_pct"], 3.0, places=7)
         self.assertIsNotNone(p["net_pnl_usdt"])
 
+    def test_final_completed_candles_are_processed_before_end_mark(self):
+        p = shadow_trade()
+        market = market_with([(104, 98, 101)])
+        hb.advance_shadow_ledger([p], market, 10**9)
+        hb.mark_shadow_open_at_end([p], market, 10**9)
+        self.assertEqual(p["status"], "OPEN_AT_END_MARKED_TO_MARKET")
+        self.assertAlmostEqual(p["mfe_pct"], 4.0, places=8)
+        self.assertAlmostEqual(p["mae_pct"], -2.0, places=8)
+
     def test_shadow_ledger_does_not_mutate_main_portfolio(self):
         port = {"cash": 1000.0, "positions": [], "closed": [], "signals": 7}
         before = copy.deepcopy(port)
