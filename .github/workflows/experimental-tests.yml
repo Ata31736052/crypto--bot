@@ -1,0 +1,39 @@
+name: Experimental offline regression tests
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "main.py"
+      - "requirements.txt"
+      - ".github/workflows/experimental-tests.yml"
+  push:
+    branches:
+      - "experiment/resistance-headroom-gate-20261020"
+    paths:
+      - "main.py"
+      - "requirements.txt"
+      - ".github/workflows/experimental-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  offline-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Compile source
+        run: python -m py_compile main.py
+      - name: Run regression suite (no Telegram/live scan)
+        run: python -c "import main; main.self_test()"
