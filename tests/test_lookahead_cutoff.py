@@ -45,7 +45,7 @@ class HistoricalCutoffTests(unittest.TestCase):
         end = int(datetime(2026, 10, 1, 4, 0, tzinfo=timezone.utc).timestamp() * 1000)
         scans = list(hb.scan_times(start, end))
         stamps = [datetime.fromtimestamp(ms / 1000, timezone.utc) for ms in scans]
-        self.assertEqual([stamp.hour for stamp in stamps], [1, 2, 3])
+        self.assertEqual([stamp.hour for stamp in stamps], [0, 1, 2, 3])
         self.assertTrue(all(stamp.minute == 10 for stamp in stamps))
 
 
