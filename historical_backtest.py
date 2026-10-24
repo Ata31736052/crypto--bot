@@ -422,9 +422,12 @@ def pick_scan_results(candidates, port, decision_ms, shadow_ledger=None):
     executable = []
     for candidate in selected_at_decision:
         raw_entry = float(candidate["entry_open_raw"])
+        # Build SL/TP and evaluate resistance against the modeled buy fill,
+        # not the unadjusted candle open. enter() uses this same fill price.
+        entry_fill = raw_entry * (1 + SLIPPAGE)
         strategy = candidate["setup"]["strategy"]
         trade, trade_error = main.build_trade(
-            candidate["h"], strategy, entry_override=raw_entry,
+            candidate["h"], strategy, entry_override=entry_fill,
             enable_resistance_gate=use_gate
         )
         if trade is None:
@@ -435,7 +438,7 @@ def pick_scan_results(candidates, port, decision_ms, shadow_ledger=None):
                 # or change decision-time ranking.
                 if shadow_ledger is not None:
                     shadow_trade, shadow_error = main.build_trade(
-                        candidate["h"], strategy, entry_override=raw_entry,
+                        candidate["h"], strategy, entry_override=entry_fill,
                         enable_resistance_gate=False
                     )
                     entry_idx = int(candidate["entry_index"])
