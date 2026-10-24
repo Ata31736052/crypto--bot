@@ -434,12 +434,12 @@ def pick_scan_results(candidates, port, decision_ms, shadow_ledger=None):
                 # rejected at execution time. They never consume portfolio cash
                 # or change decision-time ranking.
                 if shadow_ledger is not None:
-                    shadow_trade, _ = main.build_trade(
+                    shadow_trade, shadow_error = main.build_trade(
                         candidate["h"], strategy, entry_override=raw_entry,
                         enable_resistance_gate=False
                     )
+                    entry_idx = int(candidate["entry_index"])
                     if shadow_trade is not None:
-                        entry_idx = int(candidate["entry_index"])
                         shadow_ledger.append({
                             "symbol": candidate["symbol"], "strategy": strategy,
                             "score": int(candidate["setup"]["score"]),
@@ -469,6 +469,30 @@ def pick_scan_results(candidates, port, decision_ms, shadow_ledger=None):
                         p["qty"] = p["initial_qty"]
                         p["entry_fee_usdt"] = p["notional_usdt"] * FEE_RATE
                         p["fees_usdt"] = p["entry_fee_usdt"]
+                    else:
+                        # Preserve denominator coverage: every resistance-gate rejection
+                        # gets a ledger row, even if no valid ungated trade can be built.
+                        # Such rows are diagnostic only and must never be advanced as trades.
+                        shadow_ledger.append({
+                            "symbol": candidate["symbol"], "strategy": strategy,
+                            "score": int(candidate["setup"]["score"]),
+                            "decision_time": int(decision_ms),
+                            "entry_time": int(candidate["entry_time"]),
+                            "entry_index": entry_idx, "last_checked_index": entry_idx - 1,
+                            "entry_raw": raw_entry,
+                            "entry_price": raw_entry * (1 + SLIPPAGE),
+                            "sl": None, "tp1": None, "tp2": None, "resistance": None,
+                            "rejection_reason": f"{trade_error}; ungated trade unavailable: {shadow_error}",
+                            "status": "NOT_BUILDABLE_WITHOUT_GATE", "exit_time": None,
+                            "initial_qty": 0.0, "qty": 0.0, "notional_usdt": 0.0,
+                            "risk_budget_usdt": INITIAL_CASH * RISK_FRACTION,
+                            "entry_fee_usdt": 0.0, "fees_usdt": 0.0,
+                            "realized_pnl_usdt": 0.0, "net_pnl_usdt": None,
+                            "net_pnl_pct_notional": None, "net_pnl_r": None,
+                            "tp1_done": False, "tp1_hit": False, "tp2_hit": False,
+                            "mfe_pct": 0.0, "mae_pct": 0.0,
+                            "mfe_r": 0.0, "mae_r": 0.0
+                        })
             else:
                 port.setdefault("execution_rejections", 0)
                 port["execution_rejections"] += 1
