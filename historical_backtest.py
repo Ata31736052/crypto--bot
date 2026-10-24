@@ -4,7 +4,7 @@
 Scope is deliberately explicit: top 30 currently liquid Binance Spot USDT pairs,
 selected by present-day 24h quote volume. This is a bounded diagnostic sample,
 not a survivorship-bias-free full-universe performance claim.
-Signals are evaluated on the production 4-hour schedule (:10 UTC); frames are
+This experimental replay evaluates signals hourly at :10 UTC (not the production schedule); frames are
 cut at the decision timestamp and entries occur at the first 1h open strictly
 after that timestamp. The replay uses no Telegram or order placement.
 """
@@ -126,14 +126,21 @@ def frame_at(df, decision_ms, n=250):
     return out
 
 def scan_times(start_ms, end_ms):
-    start = datetime.fromtimestamp(start_ms / 1000, timezone.utc).replace(minute=10, second=0, microsecond=0)
-    while start.hour % 4 != 0:
-        start += timedelta(hours=1)
+    """Replay the scanner hourly at :10 UTC, matching 1H signal timing.
+
+    A four-hour scan cadence can only evaluate four-hourly decision points and
+    therefore cannot fairly measure a strategy whose entry confirmation is 1H.
+    Each decision still uses candles with close_time < decision_ms and enters
+    only at the next 1H open strictly after the decision timestamp.
+    """
+    start = datetime.fromtimestamp(start_ms / 1000, timezone.utc).replace(
+        minute=10, second=0, microsecond=0
+    )
     if start.timestamp() * 1000 < start_ms:
-        start += timedelta(hours=4)
+        start += timedelta(hours=1)
     while start.timestamp() * 1000 < end_ms:
         yield int(start.timestamp() * 1000)
-        start += timedelta(hours=4)
+        start += timedelta(hours=1)
 
 def next_entry_index(h1, decision_ms):
     # The entry open must be strictly after the scan/decision timestamp.
@@ -362,34 +369,80 @@ def mark_shadow_open_at_end(ledger, market, end_ms):
         p["exit_time"] = int(bar["close_time"])
 
 
-def pick_scan_results(candidates, port, decision_ms, shadow_ledger=None):
-    # Evaluate executable levels/gate before ranking and before the per-scan cap.
-    # Otherwise rejected candidates consume signal slots and are repeatedly counted,
-    # while sorting still uses close-price trade levels instead of next-open levels.
-    use_gate = port["apply_resistance_gate"]
-    executable = []
+def rank_scan_candidates(candidates, port, decision_ms):
+    """Rank/cap candidates using only decision-time candle data.
+
+    This stage must not read entry_open_raw or any future candle/open. Actual
+    next-open execution and the optional resistance gate happen only after
+    candidate ranking and slot selection.
+    """
+    ranked = []
     for candidate in candidates:
         if port["exclude_confirmed_trend"] and candidate["setup"]["strategy"] == "CONFIRMED TREND":
             port["excluded_trend_candidates"] += 1
             continue
+        strategy = candidate["setup"]["strategy"]
+        decision_trade, error = main.build_trade(
+            candidate["h"], strategy, enable_resistance_gate=False
+        )
+        if decision_trade is None:
+            port.setdefault("decision_time_rejections", 0)
+            port["decision_time_rejections"] += 1
+            continue
+        row = dict(candidate)
+        row["_decision_trade"] = decision_trade
+        ranked.append(row)
+
+    ranked.sort(key=lambda x: (
+        int(x["setup"]["score"]),
+        float(x["_decision_trade"]["rr2"]),
+        -float(x["_decision_trade"]["risk_pct"])
+    ), reverse=True)
+    selected = []
+    used = set()
+    for row in ranked:
+        symbol = row["symbol"]
+        if symbol in used:
+            continue
+        last = port["last_signal_ms"].get(symbol)
+        if last is not None and decision_ms - last < main.DEDUP_HOURS * 3600 * 1000:
+            continue
+        selected.append(row)
+        used.add(symbol)
+        if len(selected) >= main.MAX_SIGNALS:
+            break
+    return selected
+
+
+def pick_scan_results(candidates, port, decision_ms, shadow_ledger=None):
+    # First select/rank using decision-time data only. A future next-open price
+    # must not affect which symbol wins a slot or its ranking.
+    selected_at_decision = rank_scan_candidates(candidates, port, decision_ms)
+    use_gate = port["apply_resistance_gate"]
+    executable = []
+    for candidate in selected_at_decision:
         raw_entry = float(candidate["entry_open_raw"])
+        # Build SL/TP and evaluate resistance against the modeled buy fill,
+        # not the unadjusted candle open. enter() uses this same fill price.
+        entry_fill = raw_entry * (1 + SLIPPAGE)
         strategy = candidate["setup"]["strategy"]
         trade, trade_error = main.build_trade(
-            candidate["h"], strategy, entry_override=raw_entry,
+            candidate["h"], strategy, entry_override=entry_fill,
             enable_resistance_gate=use_gate
         )
         if trade is None:
             if use_gate and trade_error and "insufficient room below confirmed 4H resistance" in trade_error:
                 port["resistance_gate_rejections"] += 1
-                # Only the experimental gate arm records shadows; shadow trades never
-                # enter the real portfolio, consume slots, or alter cash/equity.
+                # Shadow outcomes are recorded only for selected candidates
+                # rejected at execution time. They never consume portfolio cash
+                # or change decision-time ranking.
                 if shadow_ledger is not None:
                     shadow_trade, shadow_error = main.build_trade(
-                        candidate["h"], strategy, entry_override=raw_entry,
+                        candidate["h"], strategy, entry_override=entry_fill,
                         enable_resistance_gate=False
                     )
+                    entry_idx = int(candidate["entry_index"])
                     if shadow_trade is not None:
-                        entry_idx = int(candidate["entry_index"])
                         shadow_ledger.append({
                             "symbol": candidate["symbol"], "strategy": strategy,
                             "score": int(candidate["setup"]["score"]),
@@ -419,6 +472,30 @@ def pick_scan_results(candidates, port, decision_ms, shadow_ledger=None):
                         p["qty"] = p["initial_qty"]
                         p["entry_fee_usdt"] = p["notional_usdt"] * FEE_RATE
                         p["fees_usdt"] = p["entry_fee_usdt"]
+                    else:
+                        # Preserve denominator coverage: every resistance-gate rejection
+                        # gets a ledger row, even if no valid ungated trade can be built.
+                        # Such rows are diagnostic only and must never be advanced as trades.
+                        shadow_ledger.append({
+                            "symbol": candidate["symbol"], "strategy": strategy,
+                            "score": int(candidate["setup"]["score"]),
+                            "decision_time": int(decision_ms),
+                            "entry_time": int(candidate["entry_time"]),
+                            "entry_index": entry_idx, "last_checked_index": entry_idx - 1,
+                            "entry_raw": raw_entry,
+                            "entry_price": raw_entry * (1 + SLIPPAGE),
+                            "sl": None, "tp1": None, "tp2": None, "resistance": None,
+                            "rejection_reason": f"{trade_error}; ungated trade unavailable: {shadow_error}",
+                            "status": "NOT_BUILDABLE_WITHOUT_GATE", "exit_time": None,
+                            "initial_qty": 0.0, "qty": 0.0, "notional_usdt": 0.0,
+                            "risk_budget_usdt": INITIAL_CASH * RISK_FRACTION,
+                            "entry_fee_usdt": 0.0, "fees_usdt": 0.0,
+                            "realized_pnl_usdt": 0.0, "net_pnl_usdt": None,
+                            "net_pnl_pct_notional": None, "net_pnl_r": None,
+                            "tp1_done": False, "tp1_hit": False, "tp2_hit": False,
+                            "mfe_pct": 0.0, "mae_pct": 0.0,
+                            "mfe_r": 0.0, "mae_r": 0.0
+                        })
             else:
                 port.setdefault("execution_rejections", 0)
                 port["execution_rejections"] += 1
@@ -426,26 +503,7 @@ def pick_scan_results(candidates, port, decision_ms, shadow_ledger=None):
         row = dict(candidate)
         row["_execution_trade"] = trade
         executable.append(row)
-
-    executable.sort(key=lambda x: (
-        int(x["setup"]["score"]),
-        float(x["_execution_trade"]["rr2"]),
-        -float(x["_execution_trade"]["risk_pct"])
-    ), reverse=True)
-    selected = []
-    used = set()
-    for r in executable:
-        sym = r["symbol"]
-        if sym in used:
-            continue
-        last = port["last_signal_ms"].get(sym)
-        if last is not None and decision_ms - last < main.DEDUP_HOURS * 3600 * 1000:
-            continue
-        selected.append(r)
-        used.add(sym)
-        if len(selected) >= main.MAX_SIGNALS:
-            break
-    return selected
+    return executable
 
 def summarize(port, market, idx_by_symbol, period_start, period_end):
     eq = equity(port, market, idx_by_symbol)
@@ -602,7 +660,7 @@ def main_run():
         "metadata": {
             "data_source": BASE, "evaluation_start_utc": datetime.fromtimestamp(start_ms/1000, timezone.utc).isoformat(),
             "evaluation_end_utc": datetime.fromtimestamp(end_ms/1000, timezone.utc).isoformat(),
-            "scan_schedule": "every 4 hours at minute 10 UTC",
+            "scan_schedule": "hourly at minute 10 UTC (experimental replay; not production schedule)",
             "symbols": symbols,
             "symbol_selection_mode": "fixed BACKTEST_SYMBOLS benchmark cohort" if fixed_symbols_env else "current 24h quote-volume selection",
             "evaluation_end_mode": "fixed BACKTEST_END_UTC" if end_utc else "wall-clock current UTC",
