@@ -65,6 +65,38 @@ class HistoricalCutoffTests(unittest.TestCase):
         })
         self.assertIsNone(hb.next_entry_index(h1, 2_000))
 
+    def test_execution_levels_use_slippage_adjusted_buy_fill(self):
+        raw_entry = 100.0
+        candidate = {
+            "symbol": "AAAUSDT",
+            "setup": {"strategy": "TREND", "score": 90},
+            "h": pd.DataFrame({"close": [100.0]}),
+            "entry_open_raw": raw_entry,
+            "entry_index": 1,
+            "entry_time": 20_000,
+            "decision_time": 10_000,
+        }
+        seen_overrides = []
+
+        def fake_build_trade(h, strategy, entry_override=None, enable_resistance_gate=True):
+            seen_overrides.append(entry_override)
+            entry = float(h.iloc[-1]["close"]) if entry_override is None else entry_override
+            return {
+                "entry": entry, "rr2": 2.0, "risk_pct": 2.0,
+                "sl": entry * 0.98, "tp1": entry * 1.04, "tp2": entry * 1.05,
+            }, None
+
+        with patch.object(hb.main, "build_trade", side_effect=fake_build_trade):
+            selected = hb.pick_scan_results(
+                [candidate], hb.make_portfolio("test"), 10_000
+            )
+
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(seen_overrides[0], None)  # decision-time ranking
+        self.assertAlmostEqual(seen_overrides[1], raw_entry * (1 + hb.SLIPPAGE))
+        self.assertAlmostEqual(selected[0]["_execution_trade"]["entry"],
+                               raw_entry * (1 + hb.SLIPPAGE))
+
     def test_future_entry_open_cannot_change_decision_time_ranking(self):
         port = hb.make_portfolio("test")
         candidates = [
