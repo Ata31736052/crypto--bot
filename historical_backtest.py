@@ -369,16 +369,58 @@ def mark_shadow_open_at_end(ledger, market, end_ms):
         p["exit_time"] = int(bar["close_time"])
 
 
-def pick_scan_results(candidates, port, decision_ms, shadow_ledger=None):
-    # Evaluate executable levels/gate before ranking and before the per-scan cap.
-    # Otherwise rejected candidates consume signal slots and are repeatedly counted,
-    # while sorting still uses close-price trade levels instead of next-open levels.
-    use_gate = port["apply_resistance_gate"]
-    executable = []
+def rank_scan_candidates(candidates, port, decision_ms):
+    """Rank/cap candidates using only decision-time candle data.
+
+    This stage must not read entry_open_raw or any future candle/open. Actual
+    next-open execution and the optional resistance gate happen only after
+    candidate ranking and slot selection.
+    """
+    ranked = []
     for candidate in candidates:
         if port["exclude_confirmed_trend"] and candidate["setup"]["strategy"] == "CONFIRMED TREND":
             port["excluded_trend_candidates"] += 1
             continue
+        strategy = candidate["setup"]["strategy"]
+        decision_trade, error = main.build_trade(
+            candidate["h"], strategy, enable_resistance_gate=False
+        )
+        if decision_trade is None:
+            port.setdefault("decision_time_rejections", 0)
+            port["decision_time_rejections"] += 1
+            continue
+        row = dict(candidate)
+        row["_decision_trade"] = decision_trade
+        ranked.append(row)
+
+    ranked.sort(key=lambda x: (
+        int(x["setup"]["score"]),
+        float(x["_decision_trade"]["rr2"]),
+        -float(x["_decision_trade"]["risk_pct"])
+    ), reverse=True)
+    selected = []
+    used = set()
+    for row in ranked:
+        symbol = row["symbol"]
+        if symbol in used:
+            continue
+        last = port["last_signal_ms"].get(symbol)
+        if last is not None and decision_ms - last < main.DEDUP_HOURS * 3600 * 1000:
+            continue
+        selected.append(row)
+        used.add(symbol)
+        if len(selected) >= main.MAX_SIGNALS:
+            break
+    return selected
+
+
+def pick_scan_results(candidates, port, decision_ms, shadow_ledger=None):
+    # First select/rank using decision-time data only. A future next-open price
+    # must not affect which symbol wins a slot or its ranking.
+    selected_at_decision = rank_scan_candidates(candidates, port, decision_ms)
+    use_gate = port["apply_resistance_gate"]
+    executable = []
+    for candidate in selected_at_decision:
         raw_entry = float(candidate["entry_open_raw"])
         strategy = candidate["setup"]["strategy"]
         trade, trade_error = main.build_trade(
@@ -388,10 +430,11 @@ def pick_scan_results(candidates, port, decision_ms, shadow_ledger=None):
         if trade is None:
             if use_gate and trade_error and "insufficient room below confirmed 4H resistance" in trade_error:
                 port["resistance_gate_rejections"] += 1
-                # Only the experimental gate arm records shadows; shadow trades never
-                # enter the real portfolio, consume slots, or alter cash/equity.
+                # Shadow outcomes are recorded only for selected candidates
+                # rejected at execution time. They never consume portfolio cash
+                # or change decision-time ranking.
                 if shadow_ledger is not None:
-                    shadow_trade, shadow_error = main.build_trade(
+                    shadow_trade, _ = main.build_trade(
                         candidate["h"], strategy, entry_override=raw_entry,
                         enable_resistance_gate=False
                     )
@@ -433,26 +476,7 @@ def pick_scan_results(candidates, port, decision_ms, shadow_ledger=None):
         row = dict(candidate)
         row["_execution_trade"] = trade
         executable.append(row)
-
-    executable.sort(key=lambda x: (
-        int(x["setup"]["score"]),
-        float(x["_execution_trade"]["rr2"]),
-        -float(x["_execution_trade"]["risk_pct"])
-    ), reverse=True)
-    selected = []
-    used = set()
-    for r in executable:
-        sym = r["symbol"]
-        if sym in used:
-            continue
-        last = port["last_signal_ms"].get(sym)
-        if last is not None and decision_ms - last < main.DEDUP_HOURS * 3600 * 1000:
-            continue
-        selected.append(r)
-        used.add(sym)
-        if len(selected) >= main.MAX_SIGNALS:
-            break
-    return selected
+    return executable
 
 def summarize(port, market, idx_by_symbol, period_start, period_end):
     eq = equity(port, market, idx_by_symbol)
