@@ -12,5 +12,19 @@
     "sent_at": 1792815995.2140353,
     "strategy": "BOTTOM HUNTER",
     "symbol": "RLUSDUSDT"
+  },
+  "USD1USDT": {
+    "entry": 0.99997,
+    "score": 70,
+    "sent_at": 1792867505.7536907,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "USD1USDT"
+  },
+  "USDCUSDT": {
+    "entry": 1.0012,
+    "score": 67,
+    "sent_at": 1792867506.0623868,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "USDCUSDT"
   }
 }
