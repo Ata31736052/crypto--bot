@@ -6,13 +6,6 @@
     "strategy": "BOTTOM HUNTER",
     "symbol": "BNBUSDT"
   },
-  "ENAUSDT": {
-    "entry": 0.2017,
-    "score": 68,
-    "sent_at": 1792676619.2646368,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "ENAUSDT"
-  },
   "ETHUSDT": {
     "entry": 2401.67,
     "score": 69,
@@ -26,5 +19,12 @@
     "sent_at": 1792730208.483642,
     "strategy": "BOTTOM HUNTER",
     "symbol": "LINKUSDT"
+  },
+  "RLUSDUSDT": {
+    "entry": 1.0013,
+    "score": 66,
+    "sent_at": 1792815995.2140353,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "RLUSDUSDT"
   }
 }
