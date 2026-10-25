@@ -348,6 +348,17 @@ def shadow_close_piece(p, qty, raw_price, reason, timestamp):
         p["net_pnl_r"] = p["net_pnl_usdt"] / max(p["risk_budget_usdt"], 1e-12)
 
 
+def shadow_metric_rows(ledger):
+    """Return only rows with a valid hypothetical trade for excursion metrics."""
+    return [
+        p for p in ledger
+        if p.get("status") != "NOT_BUILDABLE_WITHOUT_GATE"
+        and p.get("sl") is not None
+        and p.get("tp1") is not None
+        and p.get("tp2") is not None
+    ]
+
+
 def mark_shadow_open_at_end(ledger, market, end_ms):
     for p in ledger:
         if p["status"] != "PENDING":
@@ -629,8 +640,10 @@ def main_run():
     # This keeps TP/SL outcomes and MFE/MAE complete through the replay boundary.
     advance_shadow_ledger(shadow_ledger, market, end_ms)
     mark_shadow_open_at_end(shadow_ledger, market, end_ms)
+    metric_rows = shadow_metric_rows(shadow_ledger)
     shadow_summary = {
         "rejected_candidates_tracked": len(shadow_ledger),
+        "excursion_metric_trade_rows": len(metric_rows),
         "final_status_counts": {status: sum(p["status"] == status for p in shadow_ledger) for status in sorted({p["status"] for p in shadow_ledger})},
         "hit_sl_count": sum(p["status"] == "SL" for p in shadow_ledger),
         "hit_tp1_event_count": sum(bool(p.get("tp1_hit")) for p in shadow_ledger),
@@ -639,11 +652,11 @@ def main_run():
         "open_at_end_count": sum(p["status"] == "OPEN_AT_END_MARKED_TO_MARKET" for p in shadow_ledger),
         "net_pnl_usdt_sum_including_end_marks": round(sum(float(p["net_pnl_usdt"] or 0) for p in shadow_ledger), 4),
         "net_pnl_usdt_mean": round(float(np.mean([p["net_pnl_usdt"] for p in shadow_ledger if p["net_pnl_usdt"] is not None])), 4) if any(p["net_pnl_usdt"] is not None for p in shadow_ledger) else None,
-        "avg_mfe_pct": round(float(np.mean([p["mfe_pct"] for p in shadow_ledger])), 4) if shadow_ledger else None,
-        "avg_mae_pct": round(float(np.mean([p["mae_pct"] for p in shadow_ledger])), 4) if shadow_ledger else None,
-        "avg_mfe_r": round(float(np.mean([p["mfe_r"] for p in shadow_ledger])), 4) if shadow_ledger else None,
-        "avg_mae_r": round(float(np.mean([p["mae_r"] for p in shadow_ledger])), 4) if shadow_ledger else None,
-        "note": "Independent fixed-risk hypothetical trades; no shadow position affects real portfolio cash, ranking, selection or equity."
+        "avg_mfe_pct": round(float(np.mean([p["mfe_pct"] for p in metric_rows])), 4) if metric_rows else None,
+        "avg_mae_pct": round(float(np.mean([p["mae_pct"] for p in metric_rows])), 4) if metric_rows else None,
+        "avg_mfe_r": round(float(np.mean([p["mfe_r"] for p in metric_rows])), 4) if metric_rows else None,
+        "avg_mae_r": round(float(np.mean([p["mae_r"] for p in metric_rows])), 4) if metric_rows else None,
+        "note": "Excursion averages exclude diagnostic-only rows with no valid ungated trade. P&L summaries include only rows with a realized or end-marked hypothetical outcome; no shadow position affects real portfolio cash, ranking, selection or equity."
     }
     with (OUT / "resistance_rejected_shadow_ledger.csv").open("w", newline="", encoding="utf-8-sig") as fh:
         fields = list(shadow_ledger[0].keys()) if shadow_ledger else [
