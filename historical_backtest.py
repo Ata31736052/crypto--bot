@@ -153,14 +153,9 @@ def candidate_at(symbol, raw_frames, decision_ms, btc_d, btc_h, gate):
     h1 = frame_at(raw_frames["1h"], decision_ms)
     if min(len(d), len(h), len(h1)) < 210:
         return None
-    entry_idx = next_entry_index(raw_frames["1h"], decision_ms)
-    if entry_idx is None:
-        return None
-    entry_open = float(raw_frames["1h"].iloc[entry_idx]["open"])
-    if not np.isfinite(entry_open) or entry_open <= 0:
-        return None
-    # Signal qualification is identical in both variants and uses only closed candles.
-    # The experimental resistance gate is evaluated later at the actual next-open entry.
+    # Candidate qualification depends only on candles closed at decision_ms.
+    # Future entry availability/price is attached as execution metadata only and
+    # must never remove a signal from the decision-time candidate set.
     result, _, err = main.analyze_symbol(
         symbol, btc_d, btc_h,
         historical_frames={"1d": d, "4h": h, "1h": h1},
@@ -168,8 +163,18 @@ def candidate_at(symbol, raw_frames, decision_ms, btc_d, btc_h, gate):
     )
     if err or not result:
         return None
+    entry_idx = next_entry_index(raw_frames["1h"], decision_ms)
+    entry_open = None
+    entry_time = None
+    if entry_idx is not None:
+        candidate_open = float(raw_frames["1h"].iloc[entry_idx]["open"])
+        if np.isfinite(candidate_open) and candidate_open > 0:
+            entry_open = candidate_open
+            entry_time = int(raw_frames["1h"].iloc[entry_idx]["open_time"])
+        else:
+            entry_idx = None
     result["entry_index"] = entry_idx
-    result["entry_time"] = int(raw_frames["1h"].iloc[entry_idx]["open_time"])
+    result["entry_time"] = entry_time
     result["decision_time"] = decision_ms
     result["entry_open_raw"] = entry_open
     return result
@@ -432,7 +437,17 @@ def pick_scan_results(candidates, port, decision_ms, shadow_ledger=None):
     use_gate = port["apply_resistance_gate"]
     executable = []
     for candidate in selected_at_decision:
-        raw_entry = float(candidate["entry_open_raw"])
+        # Entry eligibility is an execution-stage concern. Do not let missing or
+        # invalid future opens remove candidates before decision-time ranking.
+        raw_entry_value = candidate.get("entry_open_raw")
+        entry_index_value = candidate.get("entry_index")
+        if (raw_entry_value is None or entry_index_value is None
+                or candidate.get("entry_time") is None
+                or not np.isfinite(float(raw_entry_value)) or float(raw_entry_value) <= 0):
+            port.setdefault("execution_rejections", 0)
+            port["execution_rejections"] += 1
+            continue
+        raw_entry = float(raw_entry_value)
         # Build SL/TP and evaluate resistance against the modeled buy fill,
         # not the unadjusted candle open. enter() uses this same fill price.
         entry_fill = raw_entry * (1 + SLIPPAGE)
