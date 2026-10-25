@@ -1,30 +1,16 @@
 {
-  "ERAUSDT": {
-    "entry": 0.0865,
-    "score": 82,
-    "sent_at": 1792845452.7742982,
-    "strategy": "CONFIRMED TREND",
-    "symbol": "ERAUSDT"
-  },
-  "RLUSDUSDT": {
-    "entry": 1.0013,
-    "score": 66,
-    "sent_at": 1792815995.2140353,
+  "QNTUSDT": {
+    "entry": 191.68,
+    "score": 69,
+    "sent_at": 1792967363.5983367,
     "strategy": "BOTTOM HUNTER",
-    "symbol": "RLUSDUSDT"
+    "symbol": "QNTUSDT"
   },
-  "USD1USDT": {
-    "entry": 0.99997,
-    "score": 70,
-    "sent_at": 1792867505.7536907,
+  "ZECUSDT": {
+    "entry": 1219.11,
+    "score": 68,
+    "sent_at": 1792967363.8987103,
     "strategy": "BOTTOM HUNTER",
-    "symbol": "USD1USDT"
-  },
-  "USDCUSDT": {
-    "entry": 1.0012,
-    "score": 67,
-    "sent_at": 1792867506.0623868,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "USDCUSDT"
+    "symbol": "ZECUSDT"
   }
 }
