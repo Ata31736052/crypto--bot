@@ -111,6 +111,33 @@ class HistoricalCutoffTests(unittest.TestCase):
         self.assertEqual(rows[0]["mfe_r"], 1.5)
         self.assertEqual(rows[0]["mae_r"], -1.0)
 
+    def test_candidate_survives_when_no_future_entry_bar_exists(self):
+        decision_ms = 300_000
+        history = pd.DataFrame({
+            "open_time": [i * 1_000 for i in range(211)],
+            "close_time": [i * 1_000 + 999 for i in range(211)],
+            "open": [100.0] * 211,
+            "high": [102.0] * 211,
+            "low": [98.0] * 211,
+            "close": [101.0] * 211,
+            "volume": [10.0] * 211,
+        })
+        raw_frames = {"1d": history, "4h": history, "1h": history}
+        analyzed = {
+            "symbol": "AAAUSDT",
+            "setup": {"strategy": "TREND", "score": 90},
+            "h": hb.frame_at(history, decision_ms),
+        }
+        with patch.object(hb.main, "analyze_symbol",
+                          return_value=(analyzed, None, None)):
+            candidate = hb.candidate_at(
+                "AAAUSDT", raw_frames, decision_ms, "neutral", "neutral", False
+            )
+        self.assertIsNotNone(candidate)
+        self.assertIsNone(candidate["entry_index"])
+        self.assertIsNone(candidate["entry_time"])
+        self.assertIsNone(candidate["entry_open_raw"])
+
     def test_future_entry_open_cannot_change_decision_time_ranking(self):
         port = hb.make_portfolio("test")
         candidates = [
