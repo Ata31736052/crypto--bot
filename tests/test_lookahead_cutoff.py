@@ -97,6 +97,20 @@ class HistoricalCutoffTests(unittest.TestCase):
         self.assertAlmostEqual(selected[0]["_execution_trade"]["entry"],
                                raw_entry * (1 + hb.SLIPPAGE))
 
+    def test_diagnostic_only_shadow_rows_are_excluded_from_excursion_metrics(self):
+        ledger = [
+            {"status": "SL", "sl": 98.0, "tp1": 104.0, "tp2": 105.0,
+             "mfe_pct": 3.0, "mae_pct": -2.0, "mfe_r": 1.5, "mae_r": -1.0},
+            {"status": "NOT_BUILDABLE_WITHOUT_GATE", "sl": None, "tp1": None, "tp2": None,
+             "mfe_pct": 0.0, "mae_pct": 0.0, "mfe_r": 0.0, "mae_r": 0.0},
+        ]
+        rows = hb.shadow_metric_rows(ledger)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["mfe_pct"], 3.0)
+        self.assertEqual(rows[0]["mae_pct"], -2.0)
+        self.assertEqual(rows[0]["mfe_r"], 1.5)
+        self.assertEqual(rows[0]["mae_r"], -1.0)
+
     def test_future_entry_open_cannot_change_decision_time_ranking(self):
         port = hb.make_portfolio("test")
         candidates = [
