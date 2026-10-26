@@ -199,7 +199,7 @@ class ExitCandleExcursionTests(unittest.TestCase):
             "symbol": symbol, "status": "PENDING",
             "entry_index": 0, "last_checked_index": -1,
             "entry_price": 100.0, "sl": 90.0, "tp1": 200.0, "tp2": 300.0,
-            "initial_qty": 1.0, "initial_qty": 1.0, "qty": 1.0,
+            "initial_qty": 1.0, "qty": 1.0,
             "notional_usdt": 100.0, "risk_budget_usdt": 10.0,
             "entry_fee_usdt": 0.1, "fees_usdt": 0.1, "realized_pnl_usdt": 0.0,
             "net_pnl_usdt": None, "net_pnl_pct_notional": None, "net_pnl_r": None,
