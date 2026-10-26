@@ -72,7 +72,9 @@ class ShadowLedgerTests(unittest.TestCase):
         hb.advance_shadow_ledger([p], market, decision_ms=2000)
         hb.mark_shadow_open_at_end([p], market, end_ms=2000)
         self.assertEqual(p["status"], "SL")
-        self.assertAlmostEqual(p["mfe_pct"], 3.0, places=7)
+        # This candle triggers the stop, so it must not contribute to MFE/MAE.
+        self.assertAlmostEqual(p["mfe_pct"], 0.0, places=7)
+        self.assertAlmostEqual(p["mae_pct"], 0.0, places=7)
         self.assertIsNotNone(p["net_pnl_usdt"])
 
     def test_final_completed_candles_are_processed_before_end_mark(self):
