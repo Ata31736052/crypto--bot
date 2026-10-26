@@ -234,5 +234,46 @@ class ExitCandleExcursionTests(unittest.TestCase):
         self.assertAlmostEqual(shadow["mae_r"], -0.2, places=7)
 
 
+
+    def test_portfolio_partial_tp1_then_tp2_preserves_fills_fees_and_final_pnl(self):
+        symbol = "AAAUSDT"
+        position = {
+            "symbol": symbol, "entry_index": 0, "last_checked_index": -1,
+            "entry_price": 100.0, "sl": 95.0, "tp1": 105.0, "tp2": 110.0,
+            "qty": 1.0, "initial_qty": 1.0, "tp1_done": False,
+            "mfe_pct": 0.0, "mae_pct": 0.0, "realized_pnl": 0.0,
+            "entry_fee": 0.0,
+        }
+        port = {
+            "positions": [position], "closed": [], "cash": 0.0, "fees_paid": 0.0,
+        }
+        market = {symbol: {"1h": pd.DataFrame([
+            {"open_time": 0, "close_time": 3_599_999,
+             "high": 106.0, "low": 99.0, "close": 104.0},
+            {"open_time": 3_600_000, "close_time": 7_199_999,
+             "high": 112.0, "low": 101.0, "close": 111.0},
+        ])}}
+
+        hb.advance_positions(port, market, 7_200_000)
+
+        self.assertEqual(len(port["positions"]), 0)
+        self.assertEqual(len(port["closed"]), 1)
+        closed = port["closed"][0]
+        self.assertEqual(closed["exit_reason"], "TP2")
+        self.assertEqual(closed["exit_time"], 7_199_999)
+        self.assertTrue(closed["tp1_done"])
+        self.assertEqual(closed["qty"], 0.0)
+
+        first_proceeds = 0.5 * 105.0 * (1 - hb.SLIPPAGE)
+        second_proceeds = 0.5 * 110.0 * (1 - hb.SLIPPAGE)
+        expected_fees = (first_proceeds + second_proceeds) * hb.FEE_RATE
+        expected_pnl = first_proceeds + second_proceeds - expected_fees - 100.0
+        self.assertAlmostEqual(port["cash"], first_proceeds + second_proceeds - expected_fees, places=7)
+        self.assertAlmostEqual(port["fees_paid"], expected_fees, places=7)
+        self.assertAlmostEqual(closed["final_pnl"], expected_pnl, places=7)
+        # Both exit candles are excluded from diagnostics; neither changes fills.
+        self.assertEqual(closed["mfe_pct"], 0.0)
+        self.assertEqual(closed["mae_pct"], 0.0)
+
 if __name__ == "__main__":
     unittest.main()
