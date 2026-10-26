@@ -94,6 +94,13 @@ class ShadowLedgerTests(unittest.TestCase):
         self.assertIsNone(p["net_pnl_usdt"])
         self.assertIsNone(p["exit_time"])
 
+    def test_pending_shadow_rows_are_excluded_from_excursion_metrics(self):
+        pending = shadow_trade(entry_index=1)
+        marked = shadow_trade()
+        marked["status"] = "OPEN_AT_END_MARKED_TO_MARKET"
+        rows = hb.shadow_metric_rows([pending, marked])
+        self.assertEqual(rows, [marked])
+
     def test_shadow_ledger_does_not_mutate_main_portfolio(self):
         port = {"cash": 1000.0, "positions": [], "closed": [], "signals": 7}
         before = copy.deepcopy(port)
