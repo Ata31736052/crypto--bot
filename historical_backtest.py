@@ -377,7 +377,13 @@ def mark_shadow_open_at_end(ledger, market, end_ms):
         if p["status"] != "PENDING":
             continue
         h1 = market[p["symbol"]]["1h"]
-        eligible = np.flatnonzero(h1["close_time"].to_numpy(dtype=np.int64) < end_ms)
+        # A shadow candidate may have a next-open entry beyond the replay
+        # boundary. Never mark it using a candle from before its entry index.
+        indices = np.arange(len(h1))
+        eligible = np.flatnonzero(
+            (h1["close_time"].to_numpy(dtype=np.int64) < end_ms)
+            & (indices >= int(p["entry_index"]))
+        )
         if not len(eligible):
             continue
         bar = h1.iloc[int(eligible[-1])]
