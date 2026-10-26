@@ -12,6 +12,7 @@ on:
   push:
     branches:
       - qa/exclude-exit-candle-excursions-20261026
+      - qa/15m-candle-cutoff-no-lookahead-20261026
     paths:
       - "historical_backtest.py"
       - "tests/**"
