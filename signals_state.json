@@ -1,10 +1,31 @@
 {
+  "BNBUSDT": {
+    "entry": 745.49,
+    "score": 68,
+    "sent_at": 1793027229.7144673,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "BNBUSDT"
+  },
   "QNTUSDT": {
     "entry": 191.68,
     "score": 69,
     "sent_at": 1792967363.5983367,
     "strategy": "BOTTOM HUNTER",
     "symbol": "QNTUSDT"
+  },
+  "SOLUSDT": {
+    "entry": 102.31,
+    "score": 68,
+    "sent_at": 1793027229.435248,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "SOLUSDT"
+  },
+  "USDCUSDT": {
+    "entry": 1.00144,
+    "score": 75,
+    "sent_at": 1793027229.0109558,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "USDCUSDT"
   },
   "ZECUSDT": {
     "entry": 1219.11,
