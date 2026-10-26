@@ -1,0 +1,43 @@
+name: 15m candle cutoff QA
+
+on:
+  push:
+    branches:
+      - qa/15m-candle-cutoff-base-20261026
+    paths:
+      - "historical_backtest.py"
+      - "tests/test_15m_candle_cutoff.py"
+      - "requirements.txt"
+      - ".github/workflows/qa-15m-candle-cutoff.yml"
+  pull_request:
+    branches:
+      - experiment/hourly-scan-parity-20261023
+    paths:
+      - "historical_backtest.py"
+      - "tests/test_15m_candle_cutoff.py"
+      - "requirements.txt"
+      - ".github/workflows/qa-15m-candle-cutoff.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  cutoff-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Compile and run cutoff tests
+        run: |
+          python -m py_compile historical_backtest.py
+          python -m compileall -q tests
+          python -m unittest tests.test_15m_candle_cutoff -v
