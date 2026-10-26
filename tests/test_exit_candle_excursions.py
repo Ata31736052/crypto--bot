@@ -164,5 +164,69 @@ class ExitCandleExcursionTests(unittest.TestCase):
         self.assertAlmostEqual(shadow["mae_r"], -0.4, places=7)
 
 
+    def test_portfolio_time_exit_candle_is_excluded_from_mfe_mae(self):
+        symbol = "AAAUSDT"
+        position = {
+            "symbol": symbol, "entry_index": 0, "last_checked_index": -1,
+            "entry_price": 100.0, "sl": 90.0, "tp1": 200.0, "tp2": 300.0,
+            "qty": 1.0, "initial_qty": 1.0, "tp1_done": False,
+            "mfe_pct": 0.0, "mae_pct": 0.0, "realized_pnl": 0.0,
+            "entry_fee": 0.0,
+        }
+        rows = []
+        for i in range(hb.MAX_HOLD_HOURS + 1):
+            is_time_exit = i == hb.MAX_HOLD_HOURS
+            rows.append({
+                "open_time": i * 3_600_000,
+                "close_time": (i + 1) * 3_600_000 - 1,
+                "high": 130.0 if is_time_exit else 104.0,
+                "low": 91.0 if is_time_exit else 98.0,
+                "close": 100.0,
+            })
+        port = {"positions": [position], "closed": [], "cash": 0.0, "fees_paid": 0.0}
+        market = {symbol: {"1h": pd.DataFrame(rows)}}
+
+        hb.advance_positions(port, market, (hb.MAX_HOLD_HOURS + 2) * 3_600_000)
+
+        self.assertEqual(len(port["closed"]), 1)
+        self.assertEqual(port["closed"][0]["exit_reason"], "TIME")
+        self.assertAlmostEqual(port["closed"][0]["mfe_pct"], 4.0, places=7)
+        self.assertAlmostEqual(port["closed"][0]["mae_pct"], -2.0, places=7)
+
+    def test_shadow_time_exit_candle_is_excluded_from_all_excursions(self):
+        symbol = "AAAUSDT"
+        shadow = {
+            "symbol": symbol, "status": "PENDING",
+            "entry_index": 0, "last_checked_index": -1,
+            "entry_price": 100.0, "sl": 90.0, "tp1": 200.0, "tp2": 300.0,
+            "initial_qty": 1.0, "initial_qty": 1.0, "qty": 1.0,
+            "notional_usdt": 100.0, "risk_budget_usdt": 10.0,
+            "entry_fee_usdt": 0.1, "fees_usdt": 0.1, "realized_pnl_usdt": 0.0,
+            "net_pnl_usdt": None, "net_pnl_pct_notional": None, "net_pnl_r": None,
+            "tp1_done": False, "tp1_hit": False, "tp2_hit": False,
+            "mfe_pct": 0.0, "mae_pct": 0.0, "mfe_r": 0.0, "mae_r": 0.0,
+            "exit_time": None,
+        }
+        rows = []
+        for i in range(hb.MAX_HOLD_HOURS + 1):
+            is_time_exit = i == hb.MAX_HOLD_HOURS
+            rows.append({
+                "open_time": i * 3_600_000,
+                "close_time": (i + 1) * 3_600_000 - 1,
+                "high": 130.0 if is_time_exit else 104.0,
+                "low": 91.0 if is_time_exit else 98.0,
+                "close": 100.0,
+            })
+        market = {symbol: {"1h": pd.DataFrame(rows)}}
+
+        hb.advance_shadow_ledger([shadow], market, (hb.MAX_HOLD_HOURS + 2) * 3_600_000)
+
+        self.assertEqual(shadow["status"], "TIME")
+        self.assertAlmostEqual(shadow["mfe_pct"], 4.0, places=7)
+        self.assertAlmostEqual(shadow["mae_pct"], -2.0, places=7)
+        self.assertAlmostEqual(shadow["mfe_r"], 0.4, places=7)
+        self.assertAlmostEqual(shadow["mae_r"], -0.2, places=7)
+
+
 if __name__ == "__main__":
     unittest.main()
