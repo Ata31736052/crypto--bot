@@ -30,6 +30,9 @@ class ExitCandleExcursionTests(unittest.TestCase):
         self.assertEqual(port["closed"][0]["exit_reason"], "SL")
         self.assertEqual(port["closed"][0]["mfe_pct"], 0.0)
         self.assertEqual(port["closed"][0]["mae_pct"], 0.0)
+        # The diagnostics change must not alter the actual stop fill or P&L.
+        self.assertAlmostEqual(port["closed"][0]["final_pnl"], -5.1424525, places=7)
+        self.assertAlmostEqual(port["fees_paid"], 94.9525 * hb.FEE_RATE, places=7)
 
     def test_shadow_exit_candle_is_excluded_from_percent_and_r_excursions(self):
         symbol = "AAAUSDT"
@@ -192,6 +195,9 @@ class ExitCandleExcursionTests(unittest.TestCase):
         self.assertEqual(port["closed"][0]["exit_reason"], "TIME")
         self.assertAlmostEqual(port["closed"][0]["mfe_pct"], 4.0, places=7)
         self.assertAlmostEqual(port["closed"][0]["mae_pct"], -2.0, places=7)
+        # Excluding the final candle affects diagnostics only, not TIME-exit P&L.
+        self.assertAlmostEqual(port["closed"][0]["final_pnl"], -100.05 * hb.SLIPPAGE - 100.0 * hb.FEE_RATE, places=7)
+        self.assertAlmostEqual(port["fees_paid"], 99.95 * hb.FEE_RATE, places=7)
 
     def test_shadow_time_exit_candle_is_excluded_from_all_excursions(self):
         symbol = "AAAUSDT"
