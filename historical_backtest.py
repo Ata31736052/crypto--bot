@@ -227,9 +227,8 @@ def advance_positions(port, market, decision_ms):
         for ix in end_idxs:
             bar = h1.iloc[int(ix)]
             hi, lo = float(bar["high"]), float(bar["low"])
-            p["mfe_pct"] = max(p["mfe_pct"], (hi / p["entry_price"] - 1) * 100)
-            p["mae_pct"] = min(p["mae_pct"], (lo / p["entry_price"] - 1) * 100)
             ts = int(bar["close_time"])
+            qty_before = p["qty"]
             # Conservative ambiguity rule: if stop and a target both fit in one
             # candle, assume the stop occurred first.
             if lo <= p["sl"]:
@@ -243,11 +242,16 @@ def advance_positions(port, market, decision_ms):
                     close_piece(port, p, p["qty"], p["tp2"], "TP2", ts)
             if p not in port["positions"]:
                 break
-            p["last_checked_index"] = int(ix)
-            # Bound stale positions to 30 days; close at this bar's close.
+            # The exit candle is excluded from MFE/MAE, including partial exits.
+            exited_on_bar = p["qty"] < qty_before
+            # Bound stale positions to 30 days; the time-exit candle is excluded too.
             if int(ix) - p["entry_index"] >= MAX_HOLD_HOURS:
                 close_piece(port, p, p["qty"], float(bar["close"]), "TIME", ts)
                 break
+            if not exited_on_bar:
+                p["mfe_pct"] = max(p["mfe_pct"], (hi / p["entry_price"] - 1) * 100)
+                p["mae_pct"] = min(p["mae_pct"], (lo / p["entry_price"] - 1) * 100)
+            p["last_checked_index"] = int(ix)
         if p in port["positions"] and len(end_idxs):
             p["last_checked_index"] = int(end_idxs[-1])
 
@@ -305,12 +309,8 @@ def advance_shadow_ledger(ledger, market, decision_ms):
         for ix in eligible:
             bar = h1.iloc[int(ix)]
             hi, lo, close = float(bar["high"]), float(bar["low"]), float(bar["close"])
-            p["mfe_pct"] = max(p["mfe_pct"], (hi / p["entry_price"] - 1) * 100)
-            p["mae_pct"] = min(p["mae_pct"], (lo / p["entry_price"] - 1) * 100)
-            risk_per_unit = max(p["entry_price"] - p["sl"], 1e-12)
-            p["mfe_r"] = max(p["mfe_r"], (hi - p["entry_price"]) / risk_per_unit)
-            p["mae_r"] = min(p["mae_r"], (lo - p["entry_price"]) / risk_per_unit)
             ts = int(bar["close_time"])
+            qty_before = p["qty"]
             if lo <= p["sl"]:
                 shadow_close_piece(p, p["qty"], p["sl"], "SL", ts)
             else:
@@ -322,10 +322,18 @@ def advance_shadow_ledger(ledger, market, decision_ms):
                     shadow_close_piece(p, p["qty"], p["tp2"], "TP2", ts)
             if p["status"] != "PENDING":
                 break
-            p["last_checked_index"] = int(ix)
+            exited_on_bar = p["qty"] < qty_before
             if int(ix) - p["entry_index"] >= MAX_HOLD_HOURS:
                 shadow_close_piece(p, p["qty"], close, "TIME", ts)
                 break
+            # Exclude any candle with an exit (including partial TP1) from excursions.
+            if not exited_on_bar:
+                risk_per_unit = max(p["entry_price"] - p["sl"], 1e-12)
+                p["mfe_pct"] = max(p["mfe_pct"], (hi / p["entry_price"] - 1) * 100)
+                p["mae_pct"] = min(p["mae_pct"], (lo / p["entry_price"] - 1) * 100)
+                p["mfe_r"] = max(p["mfe_r"], (hi - p["entry_price"]) / risk_per_unit)
+                p["mae_r"] = min(p["mae_r"], (lo - p["entry_price"]) / risk_per_unit)
+            p["last_checked_index"] = int(ix)
         if p["status"] == "PENDING" and len(eligible):
             p["last_checked_index"] = int(eligible[-1])
 
