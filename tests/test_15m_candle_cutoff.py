@@ -31,6 +31,29 @@ class FifteenMinuteCandleCutoffTests(unittest.TestCase):
         self.assertEqual(visible["close"].tolist(), [101.0, 102.0])
         self.assertTrue((visible["close_time"] < decision_ms).all())
 
+    def test_entry_open_at_decision_time_is_not_selected(self):
+        # An execution candle must start strictly after the decision timestamp.
+        from historical_backtest import next_entry_index
+
+        decision_ms = 10 * 60 * 60 * 1000 + 10 * 60 * 1000
+        h1 = pd.DataFrame({
+            "open_time": [decision_ms - 60_000, decision_ms, decision_ms + 50 * 60_000],
+            "open": [100.0, 101.0, 102.0],
+        })
+
+        self.assertEqual(next_entry_index(h1, decision_ms), 2)
+
+    def test_entry_is_none_when_no_open_is_after_decision(self):
+        from historical_backtest import next_entry_index
+
+        decision_ms = 10 * 60 * 60 * 1000
+        h1 = pd.DataFrame({
+            "open_time": [decision_ms - 60_000, decision_ms],
+            "open": [100.0, 101.0],
+        })
+
+        self.assertIsNone(next_entry_index(h1, decision_ms))
+
     def test_cutoff_does_not_mutate_source_dataframe(self):
         decision_ms = 10 * 60 * 60 * 1000
         candles = pd.DataFrame({
