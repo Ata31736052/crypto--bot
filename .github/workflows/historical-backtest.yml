@@ -6,6 +6,7 @@ on:
     branches:
       - experiment/resistance-headroom-gate-20261021-sync
       - experiment/hourly-scan-parity-20261023
+      - qa/exclude-exit-candle-excursions-20261026
     paths:
       - "main.py"
       - "historical_backtest.py"
