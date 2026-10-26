@@ -196,7 +196,7 @@ class ExitCandleExcursionTests(unittest.TestCase):
         self.assertAlmostEqual(port["closed"][0]["mfe_pct"], 4.0, places=7)
         self.assertAlmostEqual(port["closed"][0]["mae_pct"], -2.0, places=7)
         # Excluding the final candle affects diagnostics only, not TIME-exit P&L.
-        self.assertAlmostEqual(port["closed"][0]["final_pnl"], -100.05 * hb.SLIPPAGE - 100.0 * hb.FEE_RATE, places=7)
+        self.assertAlmostEqual(port["closed"][0]["final_pnl"], -100.0 * hb.SLIPPAGE - 99.95 * hb.FEE_RATE, places=7)
         self.assertAlmostEqual(port["fees_paid"], 99.95 * hb.FEE_RATE, places=7)
 
     def test_shadow_time_exit_candle_is_excluded_from_all_excursions(self):
