@@ -365,7 +365,7 @@ def shadow_metric_rows(ledger):
     """Return only rows with a valid hypothetical trade for excursion metrics."""
     return [
         p for p in ledger
-        if p.get("status") != "NOT_BUILDABLE_WITHOUT_GATE"
+        if p.get("status") not in {"NOT_BUILDABLE_WITHOUT_GATE", "PENDING"}
         and p.get("sl") is not None
         and p.get("tp1") is not None
         and p.get("tp2") is not None
