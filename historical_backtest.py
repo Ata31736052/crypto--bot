@@ -246,7 +246,7 @@ def advance_positions(port, market, decision_ms):
                 break
             p["last_checked_index"] = int(ix)
             # Bound stale positions to 30 days; close at this bar's close.
-            if ts - int(p["entry_time"]) >= MAX_HOLD_MS
+            if ts - int(p["entry_time"]) >= MAX_HOLD_MS:
                 close_piece(port, p, p["qty"], float(bar["close"]), "TIME", ts)
                 break
         if p in port["positions"] and len(end_idxs):
@@ -324,7 +324,7 @@ def advance_shadow_ledger(ledger, market, decision_ms):
             if p["status"] != "PENDING":
                 break
             p["last_checked_index"] = int(ix)
-            if ts - int(p["entry_time"]) >= MAX_HOLD_MS
+            if ts - int(p["entry_time"]) >= MAX_HOLD_MS:
                 shadow_close_piece(p, p["qty"], close, "TIME", ts)
                 break
         if p["status"] == "PENDING" and len(eligible):
