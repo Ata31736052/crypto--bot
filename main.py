@@ -1252,10 +1252,10 @@ def analyze_symbol(symbol, btc_d, btc_h, historical_frames=None, entry_override=
             required_frames = {"1d", "4h", "1h"}
             if not isinstance(historical_frames, dict) or not required_frames.issubset(historical_frames):
                 raise ValueError("historical_frames must provide closed-candle DataFrames for 1d, 4h, and 1h")
-            if confirmation_mode not in {"1h", "15m", "15m+30m"}:
+            if confirmation_mode not in {"1h", "30m", "15m", "15m+30m"}:
                 raise ValueError(f"Unsupported confirmation_mode: {confirmation_mode}")
             if confirmation_mode != "1h":
-                needed_confirmations = {"15m"} if confirmation_mode == "15m" else {"15m", "30m"}
+                needed_confirmations = {"30m"} if confirmation_mode == "30m" else {"15m"} if confirmation_mode == "15m" else {"15m", "30m"}
                 if not needed_confirmations.issubset(historical_frames):
                     raise ValueError(f"{confirmation_mode} requires closed-candle frames: {sorted(needed_confirmations)}")
             if any(not isinstance(historical_frames[tf], pd.DataFrame) for tf in required_frames):
@@ -1267,7 +1267,7 @@ def analyze_symbol(symbol, btc_d, btc_h, historical_frames=None, entry_override=
             confirm_frames = {}
             if confirmation_mode in {"15m", "15m+30m"}:
                 confirm_frames["15m"] = add_indicators(historical_frames["15m"].copy())
-            if confirmation_mode == "15m+30m":
+            if confirmation_mode in {"30m", "15m+30m"}:
                 confirm_frames["30m"] = add_indicators(historical_frames["30m"].copy())
         daily_state = validate_daily_state(daily_regime(d))
         # ROOT DAILY LOCK: the same validated state is passed through every Trend stage.
@@ -1389,7 +1389,7 @@ def analyze_symbol(symbol, btc_d, btc_h, historical_frames=None, entry_override=
         qualified=[]
         for setup in setups:
             strategy=setup["strategy"]
-            confirmation_frames = [("1h", h1)] if confirmation_mode == "1h" else [(tf, confirm_frames[tf]) for tf in (("15m",) if confirmation_mode == "15m" else ("15m", "30m"))]
+            confirmation_frames = [("1h", h1)] if confirmation_mode == "1h" else [(tf, confirm_frames[tf]) for tf in (("30m",) if confirmation_mode == "30m" else ("15m",) if confirmation_mode == "15m" else ("15m", "30m"))]
             confirmation_details = []
             for confirm_tf, confirm_df in confirmation_frames:
                 details = h1_trend_confirmation_details(confirm_df) if strategy=="CONFIRMED TREND" else h1_bottom_confirmation_details(confirm_df)

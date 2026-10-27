@@ -12,6 +12,7 @@ def shadow_trade(entry_index=0):
     qty = notional / entry
     return {
         "symbol": "TESTUSDT", "status": "PENDING", "entry_index": entry_index,
+        "entry_time": entry_index * 1000,
         "last_checked_index": entry_index - 1, "entry_price": entry,
         "entry_raw": entry, "sl": 95.0, "tp1": 105.0, "tp2": 110.0,
         "initial_qty": qty, "qty": qty, "notional_usdt": notional,
@@ -29,7 +30,7 @@ def market_with(bars):
     for i, (high, low, close) in enumerate(bars):
         rows.append({"open_time": i * 1000, "close_time": i * 1000 + 999,
                      "open": 100.0, "high": high, "low": low, "close": close})
-    return {"TESTUSDT": {"1h": pd.DataFrame(rows)}}
+    return {"TESTUSDT": {"15m": pd.DataFrame(rows)}}
 
 
 class ShadowLedgerTests(unittest.TestCase):

@@ -25,7 +25,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        confirmation_mode: ["1h", "15m", "15m+30m"]
+        confirmation_mode: ["1h", "30m", "15m+30m"]
     runs-on: ubuntu-latest
     timeout-minutes: 360
     env:
