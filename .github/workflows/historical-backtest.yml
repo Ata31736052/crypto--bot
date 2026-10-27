@@ -1,4 +1,4 @@
-name: Experimental 180-day historical A/B replay
+name: Experimental 180-day historical MTF replay (15m scan cadence)
 
 on:
   workflow_dispatch:

@@ -27,16 +27,17 @@ class MTFConfirmationCutoffTests(unittest.TestCase):
 
     def test_entry_is_first_15m_open_strictly_after_decision(self):
         bars = self.candles(15 * 60_000, count=8)
-        decision_ms = 35 * 60_000
+        decision_ms = 5 * 60_000
         idx = hb.next_entry_index(bars, decision_ms)
-        self.assertEqual(idx, 3)  # opens at :45; the :30 candle was already in progress
+        self.assertEqual(idx, 1)  # opens at :15; the :00 candle was already in progress
         self.assertGreater(int(bars.iloc[idx]["open_time"]), decision_ms)
 
-    def test_hourly_scan_schedule_uses_minute_35_for_closed_mtf_bars(self):
+    def test_15m_scan_schedule_uses_closed_mtf_bars(self):
         scans = list(hb.scan_times(0, 3 * 60 * 60 * 1000))
         self.assertTrue(scans)
+        self.assertGreaterEqual(len(scans), 10)
         for decision_ms in scans:
-            self.assertEqual((decision_ms // 60_000) % 60, 35)
+            self.assertIn((decision_ms // 60_000) % 60, (5, 20, 35, 50))
             for interval_ms in (15 * 60_000, 30 * 60_000):
                 visible = hb.frame_at(self.candles(interval_ms), decision_ms)
                 self.assertTrue((visible["close_time"] < decision_ms).all())

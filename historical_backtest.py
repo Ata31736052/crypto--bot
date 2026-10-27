@@ -2,7 +2,7 @@
 """Reproducible 180-day experimental MTF-confirmation replay.
 
 Scope: fixed 30-symbol Binance Spot USDT diagnostic cohort (see workflow).
-Signals share one hourly :35 UTC decision schedule; only fully closed candles
+Signals share a 15-minute decision schedule at :05/:20/:35/:50 UTC; only fully closed candles
 are visible. Every arm enters at the first 15m open strictly after decision and
 uses 15m bars for exits, equity marks, and MFE/MAE. No live orders or Telegram.
 """
@@ -130,14 +130,16 @@ def frame_at(df, decision_ms, n=250):
     return out
 
 def scan_times(start_ms, end_ms):
-    # Hourly decisions at :35 UTC allow the :00-:29 30m and :15-:29 15m
-    # candles to close. All comparison modes share this exact schedule.
-    start = datetime.fromtimestamp(start_ms / 1000, timezone.utc).replace(minute=35, second=0, microsecond=0)
-    if start.timestamp() * 1000 < start_ms:
-        start += timedelta(hours=1)
+    # Scan every 15 minutes, five minutes after each quarter-hour boundary.
+    # At :05/:20/:35/:50, only fully closed 15m and 30m candles are visible.
+    # All confirmation modes share the same decision schedule.
+    start = datetime.fromtimestamp(start_ms / 1000, timezone.utc).replace(second=0, microsecond=0)
+    valid_minutes = {5, 20, 35, 50}
+    while start.minute not in valid_minutes or start.timestamp() * 1000 < start_ms:
+        start += timedelta(minutes=1)
     while start.timestamp() * 1000 < end_ms:
         yield int(start.timestamp() * 1000)
-        start += timedelta(hours=1)
+        start += timedelta(minutes=15)
 
 def next_entry_index(h1, decision_ms):
     # The entry open must be strictly after the scan/decision timestamp.
