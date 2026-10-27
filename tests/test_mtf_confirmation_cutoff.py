@@ -17,10 +17,11 @@ class MTFConfirmationCutoffTests(unittest.TestCase):
         return pd.DataFrame(rows)
 
     def test_15m_and_30m_frames_exclude_open_or_exact_cutoff_candles(self):
-        decision_ms = 90_000
+        decision_ms = 35 * 60_000
         for interval_ms in (15 * 60_000, 30 * 60_000):
             with self.subTest(interval_ms=interval_ms):
                 visible = hb.frame_at(self.candles(interval_ms), decision_ms)
+                self.assertGreater(len(visible), 0)
                 self.assertTrue((visible["close_time"] < decision_ms).all())
                 self.assertFalse((visible["close_time"] == decision_ms).any())
 
