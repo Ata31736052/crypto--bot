@@ -275,5 +275,53 @@ class ExitCandleExcursionTests(unittest.TestCase):
         self.assertEqual(closed["mfe_pct"], 0.0)
         self.assertEqual(closed["mae_pct"], 0.0)
 
+
+    def test_exit_candle_extremes_do_not_change_financial_results(self):
+        # Two identical positions receive the same SL event but very different
+        # intrabar extremes. Exit-candle diagnostics must be excluded, while
+        # fill, exit event, fees, cash and realized PnL remain identical.
+        symbol = "AAAUSDT"
+
+        def run_with_extremes(high, low):
+            position = {
+                "symbol": symbol, "entry_index": 0, "last_checked_index": -1,
+                "entry_price": 100.0, "sl": 95.0, "tp1": 110.0, "tp2": 120.0,
+                "qty": 1.0, "initial_qty": 1.0, "tp1_done": False,
+                "mfe_pct": 0.0, "mae_pct": 0.0, "realized_pnl": 0.0,
+                "entry_fee": 0.0,
+            }
+            port = {
+                "positions": [position], "closed": [], "cash": 0.0, "fees_paid": 0.0,
+            }
+            market = {symbol: {"1h": pd.DataFrame([{
+                "open_time": 0, "close_time": 3_599_999,
+                "high": high, "low": low, "close": 100.0,
+            }])}}
+            hb.advance_positions(port, market, 3_600_000)
+            closed = port["closed"][0]
+            return {
+                "exit_reason": closed["exit_reason"],
+                "exit_time": closed["exit_time"],
+                "qty": closed["qty"],
+                "realized_pnl": closed["realized_pnl"],
+                "final_pnl": closed["final_pnl"],
+                "cash": port["cash"],
+                "fees_paid": port["fees_paid"],
+                "mfe_pct": closed["mfe_pct"],
+                "mae_pct": closed["mae_pct"],
+            }
+
+        ordinary_extremes = run_with_extremes(111.0, 94.0)
+        extreme_wick = run_with_extremes(150.0, 80.0)
+        self.assertEqual(ordinary_extremes["exit_reason"], "SL")
+        self.assertEqual(ordinary_extremes["exit_time"], extreme_wick["exit_time"])
+        for field in ("qty", "realized_pnl", "final_pnl", "cash", "fees_paid"):
+            self.assertAlmostEqual(ordinary_extremes[field], extreme_wick[field], places=10)
+        self.assertEqual(ordinary_extremes["mfe_pct"], 0.0)
+        self.assertEqual(ordinary_extremes["mae_pct"], 0.0)
+        self.assertEqual(extreme_wick["mfe_pct"], 0.0)
+        self.assertEqual(extreme_wick["mae_pct"], 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()
