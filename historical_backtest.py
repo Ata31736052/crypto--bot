@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-"""Reproducible 180-day A/B replay for ApexSignal's resistance-headroom gate.
+"""Reproducible 180-day experimental MTF-confirmation replay.
 
-Scope is deliberately explicit: top 30 currently liquid Binance Spot USDT pairs,
-selected by present-day 24h quote volume. This is a bounded diagnostic sample,
-not a survivorship-bias-free full-universe performance claim.
-Signals are evaluated on the production 4-hour schedule (:10 UTC); frames are
-cut at the decision timestamp and entries occur at the first 1h open strictly
-after that timestamp. The replay uses no Telegram or order placement.
+Scope: fixed 30-symbol Binance Spot USDT diagnostic cohort (see workflow).
+Signals share a 15-minute decision schedule at :05/:20/:35/:50 UTC; only fully closed candles
+are visible. Every arm enters at the first 15m open strictly after decision and
+uses 15m bars for exits, equity marks, and MFE/MAE. No live orders or Telegram.
 """
 import csv
 import json
@@ -35,6 +33,8 @@ MAX_POSITION = 1000.0
 FEE_RATE = 0.001
 SLIPPAGE = 0.0005
 MAX_HOLD_HOURS = 24 * 30
+MAX_HOLD_MS = MAX_HOLD_HOURS * 3600 * 1000
+EXECUTION_TF = "15m"
 OUT = Path("backtest-artifacts")
 COLS = ["open_time", "open", "high", "low", "close", "volume",
         "close_time", "quote_volume", "trades", "taker_base", "taker_quote", "ignore"]
@@ -108,8 +108,10 @@ def fetch_klines(symbol, interval, start_ms, end_ms):
     return df.drop_duplicates("open_time").sort_values("open_time").reset_index(drop=True)
 
 def load_market(symbols, start_ms, end_ms):
-    # 430-day warmup gives the 180-day evaluation window 250+ daily candles.
+    # Daily indicators need a long warmup; intraday confirmation only needs enough
+    # history for EMA200/rolling indicators. Avoid downloading 430 days of 15m bars.
     fetch_start = start_ms - int(430 * 86400 * 1000)
+    mtf_fetch_start = start_ms - int(60 * 86400 * 1000)
     market = {}
     for i, s in enumerate(symbols, 1):
         print(f"Downloading {i}/{len(symbols)}: {s}", flush=True)
@@ -117,6 +119,8 @@ def load_market(symbols, start_ms, end_ms):
             "1d": fetch_klines(s, "1d", fetch_start, end_ms),
             "4h": fetch_klines(s, "4h", fetch_start, end_ms),
             "1h": fetch_klines(s, "1h", fetch_start, end_ms),
+            "30m": fetch_klines(s, "30m", mtf_fetch_start, end_ms),
+            "15m": fetch_klines(s, "15m", mtf_fetch_start, end_ms),
         }
     return market
 
@@ -126,43 +130,51 @@ def frame_at(df, decision_ms, n=250):
     return out
 
 def scan_times(start_ms, end_ms):
-    start = datetime.fromtimestamp(start_ms / 1000, timezone.utc).replace(minute=10, second=0, microsecond=0)
-    while start.hour % 4 != 0:
-        start += timedelta(hours=1)
-    if start.timestamp() * 1000 < start_ms:
-        start += timedelta(hours=4)
+    # Scan every 15 minutes, five minutes after each quarter-hour boundary.
+    # At :05/:20/:35/:50, only fully closed 15m and 30m candles are visible.
+    # All confirmation modes share the same decision schedule.
+    start = datetime.fromtimestamp(start_ms / 1000, timezone.utc).replace(second=0, microsecond=0)
+    valid_minutes = {5, 20, 35, 50}
+    while start.minute not in valid_minutes or start.timestamp() * 1000 < start_ms:
+        start += timedelta(minutes=1)
     while start.timestamp() * 1000 < end_ms:
         yield int(start.timestamp() * 1000)
-        start += timedelta(hours=4)
+        start += timedelta(minutes=15)
 
 def next_entry_index(h1, decision_ms):
     # The entry open must be strictly after the scan/decision timestamp.
     idx = np.flatnonzero(h1["open_time"].to_numpy(dtype=np.int64) > decision_ms)
     return int(idx[0]) if len(idx) else None
 
-def candidate_at(symbol, raw_frames, decision_ms, btc_d, btc_h, gate):
+def candidate_at(symbol, raw_frames, decision_ms, btc_d, btc_h, gate, confirmation_mode="1h"):
     d = frame_at(raw_frames["1d"], decision_ms)
     h = frame_at(raw_frames["4h"], decision_ms)
     h1 = frame_at(raw_frames["1h"], decision_ms)
     if min(len(d), len(h), len(h1)) < 210:
         return None
-    entry_idx = next_entry_index(raw_frames["1h"], decision_ms)
+    execution = raw_frames[EXECUTION_TF]
+    entry_idx = next_entry_index(execution, decision_ms)
     if entry_idx is None:
         return None
-    entry_open = float(raw_frames["1h"].iloc[entry_idx]["open"])
+    entry_open = float(execution.iloc[entry_idx]["open"])
     if not np.isfinite(entry_open) or entry_open <= 0:
         return None
     # Signal qualification is identical in both variants and uses only closed candles.
     # The experimental resistance gate is evaluated later at the actual next-open entry.
     result, _, err = main.analyze_symbol(
         symbol, btc_d, btc_h,
-        historical_frames={"1d": d, "4h": h, "1h": h1},
-        enable_resistance_gate=False
+        historical_frames={
+            "1d": d, "4h": h, "1h": h1,
+            "15m": frame_at(raw_frames["15m"], decision_ms),
+            "30m": frame_at(raw_frames["30m"], decision_ms),
+        },
+        enable_resistance_gate=False,
+        confirmation_mode=confirmation_mode
     )
     if err or not result:
         return None
     result["entry_index"] = entry_idx
-    result["entry_time"] = int(raw_frames["1h"].iloc[entry_idx]["open_time"])
+    result["entry_time"] = int(execution.iloc[entry_idx]["open_time"])
     result["decision_time"] = decision_ms
     result["entry_open_raw"] = entry_open
     return result
@@ -181,9 +193,11 @@ def make_portfolio(name, apply_resistance_gate=False, exclude_confirmed_trend=Fa
 def equity(port, market, idx_by_symbol):
     total = port["cash"]
     for p in port["positions"]:
-        h1 = market[p["symbol"]]["1h"]
-        i = min(idx_by_symbol.get(p["symbol"], p["entry_index"]), len(h1) - 1)
-        mark = float(h1.iloc[i]["close"]) if i >= 0 else p["entry_price"]
+        bars = market[p["symbol"]][EXECUTION_TF]
+        latest = min(idx_by_symbol.get(p["symbol"], p["entry_index"] - 1), len(bars) - 1)
+        # A newly entered position has no completed post-entry 15m bar at this
+        # scan timestamp. Avoid a pre-entry close or future-candle leakage.
+        mark = float(bars.iloc[latest]["close"]) if latest >= p["entry_index"] else p["entry_price"]
         total += p["qty"] * mark * (1 - SLIPPAGE) * (1 - FEE_RATE)
     return total
 
@@ -209,11 +223,12 @@ def close_piece(port, p, qty, raw_price, reason, timestamp):
 
 def advance_positions(port, market, decision_ms):
     for p in list(port["positions"]):
-        h1 = market[p["symbol"]]["1h"]
-        end_idxs = np.flatnonzero((h1["close_time"].to_numpy(dtype=np.int64) < decision_ms) &
-                                  (np.arange(len(h1)) > p["last_checked_index"]))
+        bars = market[p["symbol"]][EXECUTION_TF]
+        end_idxs = np.flatnonzero((bars["close_time"].to_numpy(dtype=np.int64) < decision_ms) &
+                                  (np.arange(len(bars)) >= p["entry_index"]) &
+                                  (np.arange(len(bars)) > p["last_checked_index"]))
         for ix in end_idxs:
-            bar = h1.iloc[int(ix)]
+            bar = bars.iloc[int(ix)]
             hi, lo = float(bar["high"]), float(bar["low"])
             p["mfe_pct"] = max(p["mfe_pct"], (hi / p["entry_price"] - 1) * 100)
             p["mae_pct"] = min(p["mae_pct"], (lo / p["entry_price"] - 1) * 100)
@@ -233,7 +248,7 @@ def advance_positions(port, market, decision_ms):
                 break
             p["last_checked_index"] = int(ix)
             # Bound stale positions to 30 days; close at this bar's close.
-            if int(ix) - p["entry_index"] >= MAX_HOLD_HOURS:
+            if ts - int(p["entry_time"]) >= MAX_HOLD_MS:
                 close_piece(port, p, p["qty"], float(bar["close"]), "TIME", ts)
                 break
         if p in port["positions"] and len(end_idxs):
@@ -284,14 +299,14 @@ def advance_shadow_ledger(ledger, market, decision_ms):
     for p in ledger:
         if p["status"] != "PENDING":
             continue
-        h1 = market[p["symbol"]]["1h"]
+        bars = market[p["symbol"]][EXECUTION_TF]
         eligible = np.flatnonzero(
-            (h1["close_time"].to_numpy(dtype=np.int64) < decision_ms) &
-            (np.arange(len(h1)) >= p["entry_index"]) &
-            (np.arange(len(h1)) > p["last_checked_index"])
+            (bars["close_time"].to_numpy(dtype=np.int64) < decision_ms) &
+            (np.arange(len(bars)) >= p["entry_index"]) &
+            (np.arange(len(bars)) > p["last_checked_index"])
         )
         for ix in eligible:
-            bar = h1.iloc[int(ix)]
+            bar = bars.iloc[int(ix)]
             hi, lo, close = float(bar["high"]), float(bar["low"]), float(bar["close"])
             p["mfe_pct"] = max(p["mfe_pct"], (hi / p["entry_price"] - 1) * 100)
             p["mae_pct"] = min(p["mae_pct"], (lo / p["entry_price"] - 1) * 100)
@@ -311,7 +326,7 @@ def advance_shadow_ledger(ledger, market, decision_ms):
             if p["status"] != "PENDING":
                 break
             p["last_checked_index"] = int(ix)
-            if int(ix) - p["entry_index"] >= MAX_HOLD_HOURS:
+            if ts - int(p["entry_time"]) >= MAX_HOLD_MS:
                 shadow_close_piece(p, p["qty"], close, "TIME", ts)
                 break
         if p["status"] == "PENDING" and len(eligible):
@@ -345,11 +360,11 @@ def mark_shadow_open_at_end(ledger, market, end_ms):
     for p in ledger:
         if p["status"] != "PENDING":
             continue
-        h1 = market[p["symbol"]]["1h"]
-        eligible = np.flatnonzero(h1["close_time"].to_numpy(dtype=np.int64) < end_ms)
+        bars = market[p["symbol"]][EXECUTION_TF]
+        eligible = np.flatnonzero(bars["close_time"].to_numpy(dtype=np.int64) < end_ms)
         if not len(eligible):
             continue
-        bar = h1.iloc[int(eligible[-1])]
+        bar = bars.iloc[int(eligible[-1])]
         # Mark remaining quantity to market using the same conservative exit costs.
         fill = float(bar["close"]) * (1 - SLIPPAGE)
         proceeds = p["qty"] * fill
@@ -479,7 +494,7 @@ def summarize(port, market, idx_by_symbol, period_start, period_end):
         "assumptions": {"risk_fraction": RISK_FRACTION, "max_position_usdt": MAX_POSITION,
                         "fee_per_side": FEE_RATE, "slippage_per_side": SLIPPAGE,
                         "tp1_partial_exit_fraction": 0.5, "same_candle_stop_first": True,
-                        "max_holding_days": 30}
+                        "max_holding_days": 30, "execution_timeframe": EXECUTION_TF}
     }
 
 def main_run():
@@ -508,6 +523,9 @@ def main_run():
     if "BTCUSDT" not in data_symbols:
         data_symbols.append("BTCUSDT")
     market = load_market(data_symbols, start_ms, end_ms)
+    confirmation_mode = os.getenv("BACKTEST_CONFIRMATION_MODE", "1h").strip().lower()
+    if confirmation_mode not in {"1h", "30m", "15m+30m"}:
+        raise ValueError("BACKTEST_CONFIRMATION_MODE must be one of: 1h, 30m, 15m+30m")
     btc = market.get("BTCUSDT")
     if not btc:
         raise RuntimeError("BTCUSDT history is required for point-in-time regime context")
@@ -535,11 +553,11 @@ def main_run():
         baseline_candidates, exp_candidates = [], []
         idx_by_symbol = {}
         for sym in symbols:
-            h1raw = market[sym]["1h"]
-            closed = np.flatnonzero(h1raw["close_time"].to_numpy(dtype=np.int64) < decision_ms)
+            execution_raw = market[sym][EXECUTION_TF]
+            closed = np.flatnonzero(execution_raw["close_time"].to_numpy(dtype=np.int64) < decision_ms)
             if len(closed):
                 idx_by_symbol[sym] = int(closed[-1])
-            base = candidate_at(sym, market[sym], decision_ms, btc_d, btc_h, False)
+            base = candidate_at(sym, market[sym], decision_ms, btc_d, btc_h, False, confirmation_mode)
             if not base:
                 continue
             # Both variants receive exactly the same closed-candle signal candidates.
@@ -560,14 +578,14 @@ def main_run():
             print(f"scan {n}/{len(scans)} | baseline signals={baseline['signals']} "
                   f"experimental signals={experimental['signals']} "
                   f"gate-no-trend signals={trend_free['signals']}", flush=True)
-    # Mark remaining positions to market using each symbol's latest completed candle.
+    # Mark remaining positions to market using each symbol's latest completed 15m candle.
     idx_by_symbol = {}
     for sym in data_symbols:
-        h1 = market[sym]["1h"]
-        idx = np.flatnonzero(h1["close_time"].to_numpy(dtype=np.int64) < end_ms)
+        bars = market[sym][EXECUTION_TF]
+        idx = np.flatnonzero(bars["close_time"].to_numpy(dtype=np.int64) < end_ms)
         if len(idx):
             idx_by_symbol[sym] = int(idx[-1])
-    # Process every completed candle after the final scheduled scan before end-marking.
+    # Process every completed 15m candle after the final scheduled scan before end-marking.
     # This keeps TP/SL outcomes and MFE/MAE complete through the replay boundary.
     advance_shadow_ledger(shadow_ledger, market, end_ms)
     mark_shadow_open_at_end(shadow_ledger, market, end_ms)
@@ -602,7 +620,11 @@ def main_run():
         "metadata": {
             "data_source": BASE, "evaluation_start_utc": datetime.fromtimestamp(start_ms/1000, timezone.utc).isoformat(),
             "evaluation_end_utc": datetime.fromtimestamp(end_ms/1000, timezone.utc).isoformat(),
-            "scan_schedule": "every 4 hours at minute 10 UTC",
+            "scan_schedule": "hourly at minute 35 UTC (same schedule across confirmation modes)",
+            "execution_timeframe": EXECUTION_TF,
+            "entry_rule": "first 15m candle open_time strictly greater than decision_time",
+            "exit_rule": "closed 15m candles only; same-candle SL-first ambiguity rule",
+            "confirmation_mode": confirmation_mode,
             "symbols": symbols,
             "symbol_selection_mode": "fixed BACKTEST_SYMBOLS benchmark cohort" if fixed_symbols_env else "current 24h quote-volume selection",
             "evaluation_end_mode": "fixed BACKTEST_END_UTC" if end_utc else "wall-clock current UTC",

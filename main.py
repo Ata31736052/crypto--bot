@@ -1234,12 +1234,12 @@ def unified_bottom_score_audit(d, h, h1, btc_d, btc_h):
 
 
 
-def analyze_symbol(symbol, btc_d, btc_h, historical_frames=None, entry_override=None, enable_resistance_gate=True):
+def analyze_symbol(symbol, btc_d, btc_h, historical_frames=None, entry_override=None, enable_resistance_gate=True, confirmation_mode="1h"):
     """Analyze one symbol. Optional historical_frames enables offline replay.
 
     historical_frames must contain raw, time-cropped, CLOSED candles under
-    keys "1d", "4h", and "1h". The caller owns timestamp cutoffs; the normal
-    live path remains unchanged when historical_frames is omitted.
+    keys "1d", "4h", and "1h". Optional 15m/30m frames are used only by the
+    offline confirmation experiment. The normal live path remains 1h-only.
     """
     stats={"scanned":1,"trend_candidate":0,"bottom_candidate":0,"h1_reject":0,"risk_reject":0,"trade_reject_count":0,"final_gate_reject_count":0,"final":0,
            "diagnostic_reasons":Counter(),"trend_blockers":Counter(),"bottom_blockers":Counter(),"bottom_trigger_audit":Counter(),"bottom_subcondition_audit":Counter(),"trend_block_single":0,"trend_block_multiple":0,
@@ -1252,12 +1252,23 @@ def analyze_symbol(symbol, btc_d, btc_h, historical_frames=None, entry_override=
             required_frames = {"1d", "4h", "1h"}
             if not isinstance(historical_frames, dict) or not required_frames.issubset(historical_frames):
                 raise ValueError("historical_frames must provide closed-candle DataFrames for 1d, 4h, and 1h")
+            if confirmation_mode not in {"1h", "30m", "15m", "15m+30m"}:
+                raise ValueError(f"Unsupported confirmation_mode: {confirmation_mode}")
+            if confirmation_mode != "1h":
+                needed_confirmations = {"30m"} if confirmation_mode == "30m" else {"15m"} if confirmation_mode == "15m" else {"15m", "30m"}
+                if not needed_confirmations.issubset(historical_frames):
+                    raise ValueError(f"{confirmation_mode} requires closed-candle frames: {sorted(needed_confirmations)}")
             if any(not isinstance(historical_frames[tf], pd.DataFrame) for tf in required_frames):
                 raise TypeError("historical_frames values must be pandas DataFrames")
             # Copy before indicator calculation so replay cannot mutate cached history.
             d=add_indicators(historical_frames["1d"].copy())
             h=add_indicators(historical_frames["4h"].copy())
             h1=add_indicators(historical_frames["1h"].copy())
+            confirm_frames = {}
+            if confirmation_mode in {"15m", "15m+30m"}:
+                confirm_frames["15m"] = add_indicators(historical_frames["15m"].copy())
+            if confirmation_mode in {"30m", "15m+30m"}:
+                confirm_frames["30m"] = add_indicators(historical_frames["30m"].copy())
         daily_state = validate_daily_state(daily_regime(d))
         # ROOT DAILY LOCK: the same validated state is passed through every Trend stage.
         if daily_state not in {"BULLISH", "EARLY_BULLISH", "NEUTRAL", "BEARISH"}:
@@ -1378,8 +1389,17 @@ def analyze_symbol(symbol, btc_d, btc_h, historical_frames=None, entry_override=
         qualified=[]
         for setup in setups:
             strategy=setup["strategy"]
-            h1d = h1_trend_confirmation_details(h1) if strategy=="CONFIRMED TREND" else h1_bottom_confirmation_details(h1)
-            h1_ok=h1d["confirmed"]
+            confirmation_frames = [("1h", h1)] if confirmation_mode == "1h" else [(tf, confirm_frames[tf]) for tf in (("30m",) if confirmation_mode == "30m" else ("15m",) if confirmation_mode == "15m" else ("15m", "30m"))]
+            confirmation_details = []
+            for confirm_tf, confirm_df in confirmation_frames:
+                details = h1_trend_confirmation_details(confirm_df) if strategy=="CONFIRMED TREND" else h1_bottom_confirmation_details(confirm_df)
+                confirmation_details.append((confirm_tf, details))
+            h1d = confirmation_details[-1][1]
+            h1_ok = all(details["confirmed"] for _, details in confirmation_details)
+            if len(confirmation_details) > 1:
+                h1d = dict(h1d)
+                h1d["confirmations"] = " & ".join(f"{tf}:{details.get('confirmations', 'n/a')}" for tf, details in confirmation_details)
+                h1d["confirmed"] = h1_ok
             if not h1_ok:
                 stats["h1_reject"] += 1
                 stats["final_gate_rejects"][f"{strategy}: 1H confirmation"] += 1

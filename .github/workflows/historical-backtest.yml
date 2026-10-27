@@ -1,10 +1,11 @@
-name: Experimental 180-day historical A/B replay
+name: Experimental 180-day historical MTF replay (15m scan cadence)
 
 on:
   workflow_dispatch:
   push:
     branches:
       - experiment/resistance-headroom-gate-20261021-sync
+      - experiment/mtf-15m-30m-confirmation-20261027
     paths:
       - "main.py"
       - "historical_backtest.py"
@@ -17,13 +18,18 @@ permissions:
 
 concurrency:
   group: historical-ab-replay-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   replay:
+    strategy:
+      fail-fast: false
+      matrix:
+        confirmation_mode: ["1h", "30m", "15m+30m"]
     runs-on: ubuntu-latest
     timeout-minutes: 360
     env:
+      BACKTEST_CONFIRMATION_MODE: ${{ matrix.confirmation_mode }}
       BACKTEST_DAYS: "180"
       BACKTEST_MAX_SYMBOLS: "30"
       BACKTEST_END_UTC: "2026-10-23T04:04:04.952000+00:00"
@@ -53,7 +59,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: apexsignal-180d-ab-replay
+          name: apexsignal-180d-ab-replay-${{ matrix.confirmation_mode }}
           path: |
             backtest-artifacts/
             historical-backtest.log
