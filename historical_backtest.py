@@ -108,8 +108,10 @@ def fetch_klines(symbol, interval, start_ms, end_ms):
     return df.drop_duplicates("open_time").sort_values("open_time").reset_index(drop=True)
 
 def load_market(symbols, start_ms, end_ms):
-    # 430-day warmup gives the 180-day evaluation window 250+ daily candles.
+    # Daily indicators need a long warmup; intraday confirmation only needs enough
+    # history for EMA200/rolling indicators. Avoid downloading 430 days of 15m bars.
     fetch_start = start_ms - int(430 * 86400 * 1000)
+    mtf_fetch_start = start_ms - int(60 * 86400 * 1000)
     market = {}
     for i, s in enumerate(symbols, 1):
         print(f"Downloading {i}/{len(symbols)}: {s}", flush=True)
@@ -117,6 +119,8 @@ def load_market(symbols, start_ms, end_ms):
             "1d": fetch_klines(s, "1d", fetch_start, end_ms),
             "4h": fetch_klines(s, "4h", fetch_start, end_ms),
             "1h": fetch_klines(s, "1h", fetch_start, end_ms),
+            "30m": fetch_klines(s, "30m", mtf_fetch_start, end_ms),
+            "15m": fetch_klines(s, "15m", mtf_fetch_start, end_ms),
         }
     return market
 
@@ -126,21 +130,21 @@ def frame_at(df, decision_ms, n=250):
     return out
 
 def scan_times(start_ms, end_ms):
-    start = datetime.fromtimestamp(start_ms / 1000, timezone.utc).replace(minute=10, second=0, microsecond=0)
-    while start.hour % 4 != 0:
-        start += timedelta(hours=1)
+    # Hourly decisions at :35 UTC allow the :00-:29 30m and :15-:29 15m
+    # candles to close. All comparison modes share this exact schedule.
+    start = datetime.fromtimestamp(start_ms / 1000, timezone.utc).replace(minute=35, second=0, microsecond=0)
     if start.timestamp() * 1000 < start_ms:
-        start += timedelta(hours=4)
+        start += timedelta(hours=1)
     while start.timestamp() * 1000 < end_ms:
         yield int(start.timestamp() * 1000)
-        start += timedelta(hours=4)
+        start += timedelta(hours=1)
 
 def next_entry_index(h1, decision_ms):
     # The entry open must be strictly after the scan/decision timestamp.
     idx = np.flatnonzero(h1["open_time"].to_numpy(dtype=np.int64) > decision_ms)
     return int(idx[0]) if len(idx) else None
 
-def candidate_at(symbol, raw_frames, decision_ms, btc_d, btc_h, gate):
+def candidate_at(symbol, raw_frames, decision_ms, btc_d, btc_h, gate, confirmation_mode="1h"):
     d = frame_at(raw_frames["1d"], decision_ms)
     h = frame_at(raw_frames["4h"], decision_ms)
     h1 = frame_at(raw_frames["1h"], decision_ms)
@@ -156,8 +160,13 @@ def candidate_at(symbol, raw_frames, decision_ms, btc_d, btc_h, gate):
     # The experimental resistance gate is evaluated later at the actual next-open entry.
     result, _, err = main.analyze_symbol(
         symbol, btc_d, btc_h,
-        historical_frames={"1d": d, "4h": h, "1h": h1},
-        enable_resistance_gate=False
+        historical_frames={
+            "1d": d, "4h": h, "1h": h1,
+            "15m": frame_at(raw_frames["15m"], decision_ms),
+            "30m": frame_at(raw_frames["30m"], decision_ms),
+        },
+        enable_resistance_gate=False,
+        confirmation_mode=confirmation_mode
     )
     if err or not result:
         return None
@@ -508,6 +517,9 @@ def main_run():
     if "BTCUSDT" not in data_symbols:
         data_symbols.append("BTCUSDT")
     market = load_market(data_symbols, start_ms, end_ms)
+    confirmation_mode = os.getenv("BACKTEST_CONFIRMATION_MODE", "1h").strip().lower()
+    if confirmation_mode not in {"1h", "15m", "15m+30m"}:
+        raise ValueError("BACKTEST_CONFIRMATION_MODE must be one of: 1h, 15m, 15m+30m")
     btc = market.get("BTCUSDT")
     if not btc:
         raise RuntimeError("BTCUSDT history is required for point-in-time regime context")
@@ -539,7 +551,7 @@ def main_run():
             closed = np.flatnonzero(h1raw["close_time"].to_numpy(dtype=np.int64) < decision_ms)
             if len(closed):
                 idx_by_symbol[sym] = int(closed[-1])
-            base = candidate_at(sym, market[sym], decision_ms, btc_d, btc_h, False)
+            base = candidate_at(sym, market[sym], decision_ms, btc_d, btc_h, False, confirmation_mode)
             if not base:
                 continue
             # Both variants receive exactly the same closed-candle signal candidates.
@@ -602,7 +614,8 @@ def main_run():
         "metadata": {
             "data_source": BASE, "evaluation_start_utc": datetime.fromtimestamp(start_ms/1000, timezone.utc).isoformat(),
             "evaluation_end_utc": datetime.fromtimestamp(end_ms/1000, timezone.utc).isoformat(),
-            "scan_schedule": "every 4 hours at minute 10 UTC",
+            "scan_schedule": "hourly at minute 35 UTC (same schedule across confirmation modes)",
+            "confirmation_mode": confirmation_mode,
             "symbols": symbols,
             "symbol_selection_mode": "fixed BACKTEST_SYMBOLS benchmark cohort" if fixed_symbols_env else "current 24h quote-volume selection",
             "evaluation_end_mode": "fixed BACKTEST_END_UTC" if end_utc else "wall-clock current UTC",
