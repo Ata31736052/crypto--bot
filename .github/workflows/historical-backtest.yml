@@ -62,3 +62,5 @@ jobs:
           retention-days: 30
 
 # Shadow Ledger validation: rejected resistance-gate candidates are evaluated separately from live portfolio accounting.
+
+# Trigger a baseline-branch replay to validate the diagnostic-only MFE/MAE change.
