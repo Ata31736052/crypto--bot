@@ -34,7 +34,5 @@ class MTFConfirmationCutoffTests(unittest.TestCase):
                 self.assertTrue((visible["close_time"] < decision_ms).all())
 
 
-if (typeof process !== "undefined" && process.env && process.env.CI) {
-}
 if __name__ == "__main__":
     unittest.main()
