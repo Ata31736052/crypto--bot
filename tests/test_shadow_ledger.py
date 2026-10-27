@@ -72,7 +72,9 @@ class ShadowLedgerTests(unittest.TestCase):
         hb.advance_shadow_ledger([p], market, decision_ms=2000)
         hb.mark_shadow_open_at_end([p], market, end_ms=2000)
         self.assertEqual(p["status"], "SL")
-        self.assertAlmostEqual(p["mfe_pct"], 3.0, places=7)
+        # This candle triggers the stop, so it must not contribute to MFE/MAE.
+        self.assertAlmostEqual(p["mfe_pct"], 0.0, places=7)
+        self.assertAlmostEqual(p["mae_pct"], 0.0, places=7)
         self.assertIsNotNone(p["net_pnl_usdt"])
 
     def test_final_completed_candles_are_processed_before_end_mark(self):
@@ -83,6 +85,21 @@ class ShadowLedgerTests(unittest.TestCase):
         self.assertEqual(p["status"], "OPEN_AT_END_MARKED_TO_MARKET")
         self.assertAlmostEqual(p["mfe_pct"], 4.0, places=8)
         self.assertAlmostEqual(p["mae_pct"], -2.0, places=8)
+
+    def test_end_mark_does_not_use_candle_before_shadow_entry(self):
+        p = shadow_trade(entry_index=1)
+        market = market_with([(120, 80, 100)])
+        hb.mark_shadow_open_at_end([p], market, end_ms=2000)
+        self.assertEqual(p["status"], "PENDING")
+        self.assertIsNone(p["net_pnl_usdt"])
+        self.assertIsNone(p["exit_time"])
+
+    def test_pending_shadow_rows_are_excluded_from_excursion_metrics(self):
+        pending = shadow_trade(entry_index=1)
+        marked = shadow_trade()
+        marked["status"] = "OPEN_AT_END_MARKED_TO_MARKET"
+        rows = hb.shadow_metric_rows([pending, marked])
+        self.assertEqual(rows, [marked])
 
     def test_shadow_ledger_does_not_mutate_main_portfolio(self):
         port = {"cash": 1000.0, "positions": [], "closed": [], "signals": 7}

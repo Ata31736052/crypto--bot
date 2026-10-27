@@ -1,0 +1,54 @@
+name: PR offline regression tests
+
+on:
+  pull_request:
+    branches:
+      - experiment/hourly-scan-parity-20261023
+    paths:
+      - "historical_backtest.py"
+      - "tests/**"
+      - "requirements.txt"
+      - ".github/workflows/pr-regression.yml"
+  push:
+    branches:
+      - qa/exclude-exit-candle-excursions-20261026
+    paths:
+      - "historical_backtest.py"
+      - "tests/**"
+      - "requirements.txt"
+      - ".github/workflows/pr-regression.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-offline-regression-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  offline-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Checkout PR commit
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Compile changed code and tests
+        run: |
+          python -m py_compile main.py historical_backtest.py
+          python -m compileall -q tests
+      - name: Run offline regression tests
+        run: |
+          python -c "import main; main.self_test()"
+          python -m unittest discover -s tests -v
