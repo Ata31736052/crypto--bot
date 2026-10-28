@@ -1,10 +1,10 @@
-name: Optimized 180-day MTF confirmation comparison
+name: Simplified 180-day 1H-only confirmation replay
 
 on:
   workflow_dispatch:
   push:
     branches:
-      - experiment/replay-performance-binary-search-20261028
+      - experiment/simplified-1h-confirmation-20261028
     paths:
       - ".github/workflows/replay-optimization-180d.yml"
 
@@ -20,11 +20,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        confirmation_mode: ["1h", "30m", "15m+30m"]
+        confirmation_mode: ["1h"]
     runs-on: ubuntu-latest
     timeout-minutes: 360
     env:
-      BACKTEST_CONFIRMATION_MODE: ${{ matrix.confirmation_mode }}
       BACKTEST_DAYS: "180"
       BACKTEST_MAX_SYMBOLS: "30"
       BACKTEST_END_UTC: "2026-10-23T04:04:04.952000+00:00"
@@ -54,7 +53,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: optimized-180d-mtf-replay-${{ matrix.confirmation_mode }}
+          name: simplified-180d-1h-confirmation-replay
           path: |
             backtest-artifacts/
             historical-backtest.log
