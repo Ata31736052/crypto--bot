@@ -530,9 +530,9 @@ def main_run():
     if "BTCUSDT" not in data_symbols:
         data_symbols.append("BTCUSDT")
     market = load_market(data_symbols, start_ms, end_ms)
-    confirmation_mode = os.getenv("BACKTEST_CONFIRMATION_MODE", "1h").strip().lower()
-    if confirmation_mode not in {"1h", "30m", "15m+30m"}:
-        raise ValueError("BACKTEST_CONFIRMATION_MODE must be one of: 1h, 30m, 15m+30m")
+    # Simplified arm: retain only the production 1H confirmation. The 15m/30m
+    # confirmation alternatives are intentionally disabled in this branch.
+    confirmation_mode = "1h"
     btc = market.get("BTCUSDT")
     if not btc:
         raise RuntimeError("BTCUSDT history is required for point-in-time regime context")
