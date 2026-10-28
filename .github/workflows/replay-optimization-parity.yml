@@ -1,0 +1,92 @@
+name: Replay optimization parity smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - experiment/replay-performance-binary-search-20261028
+    paths:
+      - "historical_backtest.py"
+      - ".github/workflows/replay-optimization-parity.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      BACKTEST_DAYS: "3"
+      BACKTEST_MAX_SYMBOLS: "5"
+      BACKTEST_END_UTC: "2026-10-23T04:04:04.952000+00:00"
+      BACKTEST_SYMBOLS: "ETHUSDT,ZECUSDT,SOLUSDT,NEARUSDT,XRPUSDT"
+      BACKTEST_CONFIRMATION_MODE: "1h"
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Checkout original replay implementation
+        uses: actions/checkout@v4
+        with:
+          ref: e87a83d7cdbd069fcafa30807160132c29d15300
+          path: original
+      - name: Checkout optimized implementation under test
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: optimized
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: optimized/requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r optimized/requirements.txt
+      - name: Run identical short replay on original and optimized code
+        run: |
+          (cd original && python historical_backtest.py > /tmp/original-replay.log 2>&1)
+          (cd optimized && python historical_backtest.py > /tmp/optimized-replay.log 2>&1)
+      - name: Compare portfolio results and trade artifacts exactly
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          old_dir = Path("original/backtest-artifacts")
+          new_dir = Path("optimized/backtest-artifacts")
+          old = json.loads((old_dir / "summary.json").read_text())
+          new = json.loads((new_dir / "summary.json").read_text())
+
+          if old["results"] != new["results"]:
+              raise SystemExit("FAIL: portfolio summary results differ between original and optimized replay")
+          csv_names = [
+              "baseline_no_resistance_gate_closed_trades.csv",
+              "experimental_resistance_gate_closed_trades.csv",
+              "experimental_gate_no_confirmed_trend_closed_trades.csv",
+              "resistance_rejected_shadow_ledger.csv",
+          ]
+          for name in csv_names:
+              a = old_dir / name
+              b = new_dir / name
+              if a.exists() != b.exists():
+                  raise SystemExit(f"FAIL: artifact presence differs for {name}")
+              if a.exists() and a.read_bytes() != b.read_bytes():
+                  raise SystemExit(f"FAIL: trade artifact differs for {name}")
+          print("PASS: all portfolio summary results and trade CSVs are byte-for-byte equivalent")
+          print("Original schedule metadata:", old["metadata"]["scan_schedule"])
+          print("Optimized schedule metadata:", new["metadata"]["scan_schedule"])
+          PY
+      - name: Upload smoke replay logs and summaries
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: replay-optimization-parity-smoke
+          path: |
+            /tmp/original-replay.log
+            /tmp/optimized-replay.log
+            original/backtest-artifacts/
+            optimized/backtest-artifacts/
+          if-no-files-found: warn
+          retention-days: 14
