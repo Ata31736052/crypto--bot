@@ -13,6 +13,13 @@
     "strategy": "BOTTOM HUNTER",
     "symbol": "BNBUSDT"
   },
+  "FDUSDUSDT": {
+    "entry": 0.999,
+    "score": 83,
+    "sent_at": 1793199758.6712842,
+    "strategy": "CONFIRMED TREND",
+    "symbol": "FDUSDUSDT"
+  },
   "SUIUSDT": {
     "entry": 0.938,
     "score": 77,
