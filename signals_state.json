@@ -13,6 +13,13 @@
     "strategy": "BOTTOM HUNTER",
     "symbol": "BNBUSDT"
   },
+  "CELOUSDT": {
+    "entry": 0.08125,
+    "score": 71,
+    "sent_at": 1793221109.6598475,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "CELOUSDT"
+  },
   "FDUSDUSDT": {
     "entry": 0.999,
     "score": 83,
@@ -26,5 +33,19 @@
     "sent_at": 1793165252.9886613,
     "strategy": "BOTTOM HUNTER",
     "symbol": "SUIUSDT"
+  },
+  "WLDUSDT": {
+    "entry": 0.442,
+    "score": 72,
+    "sent_at": 1793221109.334138,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "WLDUSDT"
+  },
+  "XAUTUSDT": {
+    "entry": 4061.2,
+    "score": 75,
+    "sent_at": 1793221109.0147614,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "XAUTUSDT"
   }
 }
