@@ -1,0 +1,62 @@
+name: Optimized 180-day MTF confirmation comparison
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - experiment/replay-performance-binary-search-20261028
+    paths:
+      - ".github/workflows/replay-optimization-180d.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: optimized-180d-mtf-replay
+  cancel-in-progress: false
+
+jobs:
+  replay:
+    strategy:
+      fail-fast: false
+      matrix:
+        confirmation_mode: ["1h", "30m", "15m+30m"]
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      BACKTEST_CONFIRMATION_MODE: ${{ matrix.confirmation_mode }}
+      BACKTEST_DAYS: "180"
+      BACKTEST_MAX_SYMBOLS: "30"
+      BACKTEST_END_UTC: "2026-10-23T04:04:04.952000+00:00"
+      BACKTEST_SYMBOLS: "ETHUSDT,ZECUSDT,SOLUSDT,NEARUSDT,XRPUSDT,AIUSDT,XAUTUSDT,BNBUSDT,WLDUSDT,SNDKBUSDT,SOXLBUSDT,DOGEUSDT,UNIUSDT,SPCXBUSDT,ENAUSDT,PEPEUSDT,SUIUSDT,UUSDT,TRXUSDT,HYPEUSDT,PUMPUSDT,PAXGUSDT,TAOUSDT,ALTUSDT,ADAUSDT,AAVEUSDT,LINKUSDT,AVAXUSDT,CRCLBUSDT,BMTUSDT"
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Compile and run offline regression tests
+        run: |
+          python -m py_compile main.py historical_backtest.py tests/test_shadow_ledger.py tests/test_replay_indexing.py
+          python -c "import main; main.self_test()"
+          python -m unittest discover -s tests -v
+      - name: Run optimized 180-day replay (no Telegram or live orders)
+        run: |
+          set -o pipefail
+          python historical_backtest.py 2>&1 | tee historical-backtest.log
+      - name: Upload replay results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: optimized-180d-mtf-replay-${{ matrix.confirmation_mode }}
+          path: |
+            backtest-artifacts/
+            historical-backtest.log
+          if-no-files-found: warn
+          retention-days: 30
