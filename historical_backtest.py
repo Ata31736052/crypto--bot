@@ -628,7 +628,7 @@ def main_run():
         "metadata": {
             "data_source": BASE, "evaluation_start_utc": datetime.fromtimestamp(start_ms/1000, timezone.utc).isoformat(),
             "evaluation_end_utc": datetime.fromtimestamp(end_ms/1000, timezone.utc).isoformat(),
-            "scan_schedule": "hourly at minute 35 UTC (same schedule across confirmation modes)",
+            "scan_schedule": "every 15 minutes at :05/:20/:35/:50 UTC (same schedule across confirmation modes)",
             "execution_timeframe": EXECUTION_TF,
             "entry_rule": "first 15m candle open_time strictly greater than decision_time",
             "exit_rule": "closed 15m candles only; same-candle SL-first ambiguity rule",
