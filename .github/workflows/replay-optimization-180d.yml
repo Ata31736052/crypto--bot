@@ -1,4 +1,5 @@
 name: Simplified 180-day 1H-only confirmation replay
+# Uses a per-symbol cache for unchanged 1D/4H/1H setup candles to keep replay within runner limits.
 
 on:
   workflow_dispatch:
