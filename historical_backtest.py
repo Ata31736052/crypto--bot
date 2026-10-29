@@ -152,6 +152,12 @@ def next_entry_index(h1, decision_ms):
     idx = int(np.searchsorted(open_times, decision_ms, side="right"))
     return idx if idx < len(h1) else None
 
+# One-entry-per-symbol cache. In 1H-only mode, setup qualification depends on the
+# latest closed 1D/4H/1H candles and BTC regime, not on each 15m scan timestamp.
+# Keep only the latest key/result per symbol to bound memory. Entry timing and
+# execution-price gates are still recalculated for every scan.
+CANDIDATE_CACHE = {}
+
 def candidate_at(symbol, raw_frames, decision_ms, btc_d, btc_h, gate, confirmation_mode="1h"):
     d = frame_at(raw_frames["1d"], decision_ms)
     h = frame_at(raw_frames["4h"], decision_ms)
@@ -165,19 +171,33 @@ def candidate_at(symbol, raw_frames, decision_ms, btc_d, btc_h, gate, confirmati
     entry_open = float(execution.iloc[entry_idx]["open"])
     if not np.isfinite(entry_open) or entry_open <= 0:
         return None
-    # Signal qualification is identical in both variants and uses only closed candles.
-    # The experimental resistance gate is evaluated later at the actual next-open entry.
-    result, _, err = main.analyze_symbol(
-        symbol, btc_d, btc_h,
-        historical_frames={
-            "1d": d, "4h": h, "1h": h1,
-            "15m": frame_at(raw_frames["15m"], decision_ms),
-            "30m": frame_at(raw_frames["30m"], decision_ms),
-        },
-        enable_resistance_gate=False,
-        confirmation_mode=confirmation_mode
+
+    # These timestamps fully identify the candle windows used for setup scoring.
+    # The 15m/30m frames are not consumed by analyze_symbol in "1h" mode.
+    key = (
+        confirmation_mode, str(btc_d), str(btc_h),
+        len(d), int(d.iloc[-1]["close_time"]),
+        len(h), int(h.iloc[-1]["close_time"]),
+        len(h1), int(h1.iloc[-1]["close_time"]),
     )
-    if err or not result:
+    cached = CANDIDATE_CACHE.get(symbol)
+    if cached is not None and cached[0] == key:
+        result = dict(cached[1]) if cached[1] is not None else None
+    else:
+        # Signal qualification is unchanged and uses only fully closed candles.
+        result, _, err = main.analyze_symbol(
+            symbol, btc_d, btc_h,
+            historical_frames={"1d": d, "4h": h, "1h": h1},
+            enable_resistance_gate=False,
+            confirmation_mode=confirmation_mode
+        )
+        # Cache even a no-signal result until one of the relevant candles changes.
+        CANDIDATE_CACHE[symbol] = (key, dict(result) if result and not err else None)
+        if err or not result:
+            return None
+        result = dict(result)
+
+    if result is None:
         return None
     result["entry_index"] = entry_idx
     result["entry_time"] = int(execution.iloc[entry_idx]["open_time"])
