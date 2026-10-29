@@ -8,6 +8,10 @@ on:
       - experiment/simplified-1h-confirmation-20261028
     paths:
       - ".github/workflows/replay-optimization-180d.yml"
+      - "historical_backtest.py"
+      - "main.py"
+      - "tests/**"
+      - "requirements.txt"
 
 permissions:
   contents: read
@@ -43,7 +47,7 @@ jobs:
           pip install -r requirements.txt
       - name: Compile and run offline regression tests
         run: |
-          python -m py_compile main.py historical_backtest.py tests/test_shadow_ledger.py tests/test_replay_indexing.py
+          python -m py_compile main.py historical_backtest.py tests/test_shadow_ledger.py tests/test_replay_indexing.py tests/test_mtf_confirmation_cutoff.py
           python -c "import main; main.self_test()"
           python -m unittest discover -s tests -v
       - name: Run optimized 180-day replay (no Telegram or live orders)
