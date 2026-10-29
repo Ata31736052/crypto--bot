@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reproducible 180-day experimental MTF-confirmation replay.
+"""Reproducible 180-day experimental 1H-confirmation replay.
 
 Scope: fixed 30-symbol Binance Spot USDT diagnostic cohort (see workflow).
 Signals share a 15-minute decision schedule at :05/:20/:35/:50 UTC; only fully closed candles
@@ -119,7 +119,6 @@ def load_market(symbols, start_ms, end_ms):
             "1d": fetch_klines(s, "1d", fetch_start, end_ms),
             "4h": fetch_klines(s, "4h", fetch_start, end_ms),
             "1h": fetch_klines(s, "1h", fetch_start, end_ms),
-            "30m": fetch_klines(s, "30m", mtf_fetch_start, end_ms),
             "15m": fetch_klines(s, "15m", mtf_fetch_start, end_ms),
         }
     return market
@@ -135,8 +134,8 @@ def frame_at(df, decision_ms, n=250):
 
 def scan_times(start_ms, end_ms):
     # Scan every 15 minutes, five minutes after each quarter-hour boundary.
-    # At :05/:20/:35/:50, only fully closed 15m and 30m candles are visible.
-    # All confirmation modes share the same decision schedule.
+    # At :05/:20/:35/:50, setup scoring uses only closed 1D/4H/1H candles;
+    # 15m candles are used for entry execution and exit checks.
     start = datetime.fromtimestamp(start_ms / 1000, timezone.utc).replace(second=0, microsecond=0)
     valid_minutes = {5, 20, 35, 50}
     while start.minute not in valid_minutes or start.timestamp() * 1000 < start_ms:
@@ -152,6 +151,12 @@ def next_entry_index(h1, decision_ms):
     idx = int(np.searchsorted(open_times, decision_ms, side="right"))
     return idx if idx < len(h1) else None
 
+# One-entry-per-symbol cache. In 1H-only mode, setup qualification depends on the
+# latest closed 1D/4H/1H candles and BTC regime, not on each 15m scan timestamp.
+# Keep only the latest key/result per symbol to bound memory. Entry timing and
+# execution-price gates are still recalculated for every scan.
+CANDIDATE_CACHE = {}
+
 def candidate_at(symbol, raw_frames, decision_ms, btc_d, btc_h, gate, confirmation_mode="1h"):
     d = frame_at(raw_frames["1d"], decision_ms)
     h = frame_at(raw_frames["4h"], decision_ms)
@@ -165,19 +170,33 @@ def candidate_at(symbol, raw_frames, decision_ms, btc_d, btc_h, gate, confirmati
     entry_open = float(execution.iloc[entry_idx]["open"])
     if not np.isfinite(entry_open) or entry_open <= 0:
         return None
-    # Signal qualification is identical in both variants and uses only closed candles.
-    # The experimental resistance gate is evaluated later at the actual next-open entry.
-    result, _, err = main.analyze_symbol(
-        symbol, btc_d, btc_h,
-        historical_frames={
-            "1d": d, "4h": h, "1h": h1,
-            "15m": frame_at(raw_frames["15m"], decision_ms),
-            "30m": frame_at(raw_frames["30m"], decision_ms),
-        },
-        enable_resistance_gate=False,
-        confirmation_mode=confirmation_mode
+
+    # These timestamps fully identify the candle windows used for setup scoring.
+    # Only 1D/4H/1H frames are passed to analyze_symbol; 15m is execution-only.
+    key = (
+        confirmation_mode, str(btc_d), str(btc_h),
+        len(d), int(d.iloc[-1]["close_time"]),
+        len(h), int(h.iloc[-1]["close_time"]),
+        len(h1), int(h1.iloc[-1]["close_time"]),
     )
-    if err or not result:
+    cached = CANDIDATE_CACHE.get(symbol)
+    if cached is not None and cached[0] == key:
+        result = dict(cached[1]) if cached[1] is not None else None
+    else:
+        # Signal qualification is unchanged and uses only fully closed candles.
+        result, _, err = main.analyze_symbol(
+            symbol, btc_d, btc_h,
+            historical_frames={"1d": d, "4h": h, "1h": h1},
+            enable_resistance_gate=False,
+            confirmation_mode=confirmation_mode
+        )
+        # Cache even a no-signal result until one of the relevant candles changes.
+        CANDIDATE_CACHE[symbol] = (key, dict(result) if result and not err else None)
+        if err or not result:
+            return None
+        result = dict(result)
+
+    if result is None:
         return None
     result["entry_index"] = entry_idx
     result["entry_time"] = int(execution.iloc[entry_idx]["open_time"])
@@ -530,9 +549,9 @@ def main_run():
     if "BTCUSDT" not in data_symbols:
         data_symbols.append("BTCUSDT")
     market = load_market(data_symbols, start_ms, end_ms)
-    confirmation_mode = os.getenv("BACKTEST_CONFIRMATION_MODE", "1h").strip().lower()
-    if confirmation_mode not in {"1h", "30m", "15m+30m"}:
-        raise ValueError("BACKTEST_CONFIRMATION_MODE must be one of: 1h, 30m, 15m+30m")
+    # Simplified arm: retain only the production 1H confirmation. The 15m/30m
+    # confirmation alternatives are intentionally disabled in this branch.
+    confirmation_mode = "1h"
     btc = market.get("BTCUSDT")
     if not btc:
         raise RuntimeError("BTCUSDT history is required for point-in-time regime context")

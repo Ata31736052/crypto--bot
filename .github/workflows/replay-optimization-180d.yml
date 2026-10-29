@@ -1,12 +1,17 @@
-name: Optimized 180-day MTF confirmation comparison
+name: Simplified 180-day 1H-only confirmation replay
+# Uses a per-symbol cache for unchanged 1D/4H/1H setup candles to keep replay within runner limits.
 
 on:
   workflow_dispatch:
   push:
     branches:
-      - experiment/replay-performance-binary-search-20261028
+      - experiment/simplified-1h-confirmation-20261028
     paths:
       - ".github/workflows/replay-optimization-180d.yml"
+      - "historical_backtest.py"
+      - "main.py"
+      - "tests/**"
+      - "requirements.txt"
 
 permissions:
   contents: read
@@ -20,11 +25,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        confirmation_mode: ["1h", "30m", "15m+30m"]
+        confirmation_mode: ["1h"]
     runs-on: ubuntu-latest
     timeout-minutes: 360
     env:
-      BACKTEST_CONFIRMATION_MODE: ${{ matrix.confirmation_mode }}
       BACKTEST_DAYS: "180"
       BACKTEST_MAX_SYMBOLS: "30"
       BACKTEST_END_UTC: "2026-10-23T04:04:04.952000+00:00"
@@ -43,7 +47,7 @@ jobs:
           pip install -r requirements.txt
       - name: Compile and run offline regression tests
         run: |
-          python -m py_compile main.py historical_backtest.py tests/test_shadow_ledger.py tests/test_replay_indexing.py
+          python -m py_compile main.py historical_backtest.py tests/test_shadow_ledger.py tests/test_replay_indexing.py tests/test_mtf_confirmation_cutoff.py
           python -c "import main; main.self_test()"
           python -m unittest discover -s tests -v
       - name: Run optimized 180-day replay (no Telegram or live orders)
@@ -54,7 +58,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: optimized-180d-mtf-replay-${{ matrix.confirmation_mode }}
+          name: simplified-180d-1h-confirmation-replay
           path: |
             backtest-artifacts/
             historical-backtest.log
