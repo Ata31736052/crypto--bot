@@ -17,7 +17,9 @@ class MTFConfirmationCutoffTests(unittest.TestCase):
         return pd.DataFrame(rows)
 
     def test_1h_setup_and_15m_execution_frames_exclude_exact_cutoff_candles(self):
-        decision_ms = 35 * 60_000
+        # At the 01:00 boundary, the 00:00-00:59:59 candle is completed.
+        # A 00:35 decision would correctly have no completed 1H candle.
+        decision_ms = 60 * 60_000
         for interval_ms in (60 * 60_000, 15 * 60_000):
             with self.subTest(interval_ms=interval_ms):
                 visible = hb.frame_at(self.candles(interval_ms), decision_ms)
