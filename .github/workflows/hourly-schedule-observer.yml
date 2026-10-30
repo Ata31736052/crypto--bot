@@ -50,7 +50,7 @@ jobs:
               "purpose": "read-only schedule delivery observation; no market scan or Telegram activity",
           }
           Path("schedule-observation.json").write_text(
-              json.dumps(record, indent=2) + "\\n", encoding="utf-8"
+              json.dumps(record, indent=2) + "\n", encoding="utf-8"
           )
           print(json.dumps(record, indent=2))
           PY
