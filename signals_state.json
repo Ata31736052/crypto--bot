@@ -1,51 +1,9 @@
 {
-  "AVAXUSDT": {
-    "entry": 9.021,
-    "score": 84,
-    "sent_at": 1793165252.6991305,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "AVAXUSDT"
-  },
-  "BNBUSDT": {
-    "entry": 745.83,
-    "score": 72,
-    "sent_at": 1793165253.3781743,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "BNBUSDT"
-  },
-  "CELOUSDT": {
-    "entry": 0.08125,
-    "score": 71,
-    "sent_at": 1793221109.6598475,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "CELOUSDT"
-  },
-  "FDUSDUSDT": {
-    "entry": 0.999,
+  "EURUSDT": {
+    "entry": 1.1239,
     "score": 83,
-    "sent_at": 1793199758.6712842,
+    "sent_at": 1793372397.2502031,
     "strategy": "CONFIRMED TREND",
-    "symbol": "FDUSDUSDT"
-  },
-  "SUIUSDT": {
-    "entry": 0.938,
-    "score": 77,
-    "sent_at": 1793165252.9886613,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "SUIUSDT"
-  },
-  "WLDUSDT": {
-    "entry": 0.442,
-    "score": 72,
-    "sent_at": 1793221109.334138,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "WLDUSDT"
-  },
-  "XAUTUSDT": {
-    "entry": 4061.2,
-    "score": 75,
-    "sent_at": 1793221109.0147614,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "XAUTUSDT"
+    "symbol": "EURUSDT"
   }
 }
