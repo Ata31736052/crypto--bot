@@ -5,5 +5,12 @@
     "sent_at": 1793372397.2502031,
     "strategy": "CONFIRMED TREND",
     "symbol": "EURUSDT"
+  },
+  "ZECUSDT": {
+    "entry": 1258.15,
+    "score": 67,
+    "sent_at": 1793424289.4106934,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "ZECUSDT"
   }
 }
