@@ -1,10 +1,10 @@
 {
-  "EURUSDT": {
-    "entry": 1.1239,
-    "score": 83,
-    "sent_at": 1793372397.2502031,
-    "strategy": "CONFIRMED TREND",
-    "symbol": "EURUSDT"
+  "AVAXUSDT": {
+    "entry": 8.604,
+    "score": 72,
+    "sent_at": 1793476477.080454,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "AVAXUSDT"
   },
   "ZECUSDT": {
     "entry": 1258.15,
