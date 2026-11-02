@@ -12,6 +12,7 @@ import html
 import logging
 from collections import Counter
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
@@ -972,8 +973,14 @@ def _telegram_retry_after(response):
     try:
         value = response.headers.get("Retry-After")
         if value is not None:
-            return max(0.0, float(value))
-    except (TypeError, ValueError, AttributeError):
+            try:
+                return max(0.0, float(value))
+            except (TypeError, ValueError):
+                retry_at = parsedate_to_datetime(value)
+                if retry_at.tzinfo is None:
+                    retry_at = retry_at.replace(tzinfo=timezone.utc)
+                return max(0.0, (retry_at - datetime.now(timezone.utc)).total_seconds())
+    except (TypeError, ValueError, AttributeError, OverflowError):
         pass
     return TELEGRAM_RETRY_DEFAULT_SECONDS
 
