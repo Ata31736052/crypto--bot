@@ -54,6 +54,7 @@ jobs:
         run: |
           python -m py_compile main.py
           python -c "import main; main.self_test()"
+          python -m unittest discover -s tests -v
 
   production-scan:
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'production')
