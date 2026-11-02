@@ -27,6 +27,8 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 TIMEOUT = 15
 HTTP_RETRIES = 3
 RETRY_BACKOFF = 1.25
+TELEGRAM_MAX_ATTEMPTS = 3
+TELEGRAM_RETRY_DEFAULT_SECONDS = 1.0
 MAX_WORKERS = 8
 MAX_SIGNALS = 3  # maximum Telegram messages, NOT a coin/universe limit
 
@@ -146,6 +148,7 @@ def klines(symbol, interval, limit=250):
 
 
 def exchange_symbols():
+    """Return eligible signal symbols; BTCUSDT is reserved for macro context only."""
     info = get_json("/api/v3/exchangeInfo")
     out = []
     for s in info.get("symbols", []):
@@ -156,6 +159,8 @@ def exchange_symbols():
         if s.get("isSpotTradingAllowed") is False:
             continue
         sym = s.get("symbol", "")
+        if sym == "BTCUSDT":
+            continue
         if any(x in sym for x in ("UPUSDT", "DOWNUSDT", "BULLUSDT", "BEARUSDT")):
             continue
         out.append(sym)
@@ -955,7 +960,26 @@ def mark_signal_sent(state, item, now_ts=None):
 
 
 # ---------------- TELEGRAM ----------------
+def _telegram_retry_after(response):
+    """Read Telegram's retry_after value, then the standard Retry-After header."""
+    try:
+        body = response.json()
+        value = body.get("parameters", {}).get("retry_after") if isinstance(body, dict) else None
+        if value is not None:
+            return max(0.0, float(value))
+    except (TypeError, ValueError, AttributeError):
+        pass
+    try:
+        value = response.headers.get("Retry-After")
+        if value is not None:
+            return max(0.0, float(value))
+    except (TypeError, ValueError, AttributeError):
+        pass
+    return TELEGRAM_RETRY_DEFAULT_SECONDS
+
+
 def send_telegram(text):
+    """Send once; retry only explicit Telegram 429 rejections, never ambiguous failures."""
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
         log.warning("Telegram credentials missing; signal not sent.")
         return False
@@ -967,9 +991,25 @@ def send_telegram(text):
         "parse_mode": "HTML",
         "disable_web_page_preview": True,
     }
-    r = session.post(url, json=payload, timeout=TIMEOUT)
-    r.raise_for_status()
-    return True
+    for attempt in range(TELEGRAM_MAX_ATTEMPTS):
+        # Network errors/timeouts are deliberately not retried: delivery may be ambiguous.
+        r = session.post(url, json=payload, timeout=TIMEOUT)
+        if r.status_code == 429:
+            if attempt + 1 >= TELEGRAM_MAX_ATTEMPTS:
+                r.raise_for_status()
+            time.sleep(_telegram_retry_after(r))
+            continue
+        r.raise_for_status()
+        try:
+            result = r.json()
+        except ValueError as exc:
+            raise RuntimeError("Telegram returned invalid JSON; delivery is unconfirmed.") from exc
+        if not isinstance(result, dict) or result.get("ok") is not True:
+            description = result.get("description", "invalid Telegram API response") if isinstance(result, dict) else "invalid Telegram API response"
+            log.error("Telegram rejected send: %s", description)
+            return False
+        return True
+    return False
 
 
 def fmt_price(x):
