@@ -1,5 +1,7 @@
 import unittest
 from unittest.mock import patch
+from datetime import datetime, timedelta, timezone
+from email.utils import format_datetime
 
 import requests
 import main
@@ -76,6 +78,14 @@ class TelegramDeliveryTests(unittest.TestCase):
              patch.object(main.time, "sleep") as sleep:
             self.assertTrue(main.send_telegram("mock message"))
         sleep.assert_called_once_with(3.0)
+
+    def test_429_parses_http_date_retry_after_header(self):
+        retry_at = datetime.now(timezone.utc) + timedelta(seconds=60)
+        header = format_datetime(retry_at, usegmt=True)
+        response = FakeResponse(429, {"ok": False}, {"Retry-After": header})
+        delay = main._telegram_retry_after(response)
+        self.assertGreater(delay, 0.0)
+        self.assertLessEqual(delay, 60.0)
 
     def test_exhausted_429_stops_after_bounded_attempts(self):
         response = FakeResponse(429, {"ok": False, "parameters": {"retry_after": 0}})
