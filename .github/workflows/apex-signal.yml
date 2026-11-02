@@ -96,9 +96,13 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add signals_state.json 2>/dev/null || true
-          git diff --cached --quiet || git commit -m "chore: update signals_state.json [skip ci]"
-          git push || true
+          git add signals_state.json
+          if git diff --cached --quiet; then
+            echo "Signal state unchanged; no commit or push required."
+          else
+            git commit -m "chore: update signals_state.json [skip ci]"
+            git push
+          fi
 
   read-only-audit:
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'audit'
