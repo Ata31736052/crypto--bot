@@ -1,15 +1,15 @@
 {
-  "AVAXUSDT": {
-    "entry": 8.604,
-    "score": 72,
-    "sent_at": 1793476477.080454,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "AVAXUSDT"
+  "ETHUSDT": {
+    "entry": 2294.0,
+    "score": 80,
+    "sent_at": 1793598669.9100478,
+    "strategy": "CONFIRMED TREND",
+    "symbol": "ETHUSDT"
   },
   "ZECUSDT": {
-    "entry": 1258.15,
-    "score": 67,
-    "sent_at": 1793424289.4106934,
+    "entry": 1275.98,
+    "score": 66,
+    "sent_at": 1793598670.1925807,
     "strategy": "BOTTOM HUNTER",
     "symbol": "ZECUSDT"
   }
