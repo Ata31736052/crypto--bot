@@ -969,6 +969,19 @@ def send_telegram(text):
     }
     r = session.post(url, json=payload, timeout=TIMEOUT)
     r.raise_for_status()
+    try:
+        response_data = r.json()
+    except ValueError:
+        log.error("Telegram API returned non-JSON success response | HTTP=%s", r.status_code)
+        return False
+
+    if not isinstance(response_data, dict) or response_data.get("ok") is not True:
+        description = response_data.get("description", "unknown API response") if isinstance(response_data, dict) else "invalid response shape"
+        log.error("Telegram API rejected message | HTTP=%s | description=%s", r.status_code, description)
+        return False
+
+    result_data = response_data.get("result") or {}
+    log.info("TELEGRAM API ACCEPTED | message_id=%s", result_data.get("message_id", "n/a"))
     return True
 
 
@@ -1508,6 +1521,27 @@ def main():
             if not passed:
                 log.warning("LIVE FINAL GATE REJECT | %s | %s", item["symbol"], " | ".join(reasons))
                 continue
+            initial_trade = item["trade"]
+            signed_move_pct = (quote["ask"] - candle_close) / candle_close * 100
+            log.info(
+                "TRADE REPRICE AUDIT | %s | candle_close=%s live_ask=%s signed_move=%+.3f%% drift=%.3f%% limit=%.3f%% ATR=%s | "
+                "initial: entry=%s SL=%s SL_basis=%s SL_ref=%s risk=%.2f%% TP1=%s(%s) RR1=%.2f TP2=%s(%s) RR2=%.2f | "
+                "live: entry=%s SL=%s SL_basis=%s SL_ref=%s risk=%.2f%% TP1=%s(%s) RR1=%.2f TP2=%s(%s) RR2=%.2f",
+                item["symbol"], fmt_price(candle_close), fmt_price(quote["ask"]), signed_move_pct,
+                drift_pct, max_drift_pct, fmt_price(atrv),
+                fmt_price(initial_trade["entry"]), fmt_price(initial_trade["sl"]),
+                initial_trade.get("sl_basis", "n/a"),
+                fmt_price(initial_trade["sl_reference"]) if initial_trade.get("sl_reference") is not None else "n/a",
+                initial_trade["risk_pct"], fmt_price(initial_trade["tp1"]), initial_trade.get("tp1_name", "n/a"),
+                initial_trade["rr1"], fmt_price(initial_trade["tp2"]), initial_trade.get("tp2_name", "n/a"),
+                initial_trade["rr2"],
+                fmt_price(refreshed_trade["entry"]), fmt_price(refreshed_trade["sl"]),
+                refreshed_trade.get("sl_basis", "n/a"),
+                fmt_price(refreshed_trade["sl_reference"]) if refreshed_trade.get("sl_reference") is not None else "n/a",
+                refreshed_trade["risk_pct"], fmt_price(refreshed_trade["tp1"]), refreshed_trade.get("tp1_name", "n/a"),
+                refreshed_trade["rr1"], fmt_price(refreshed_trade["tp2"]), refreshed_trade.get("tp2_name", "n/a"),
+                refreshed_trade["rr2"],
+            )
             item["trade"] = refreshed_trade
             log.info("LIVE ENTRY VALIDATED | %s | bid=%s ask=%s spread=%.3f%% drift=%.3f%% limit=%.3f%% quote_at=%s",
                      item["symbol"], fmt_price(quote["bid"]), fmt_price(quote["ask"]),
