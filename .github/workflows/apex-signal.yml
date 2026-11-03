@@ -27,7 +27,9 @@ on:
       - ".github/workflows/apex-signal.yml"
 
 concurrency:
-  group: apexsignal-${{ github.event_name == 'schedule' && 'scheduled' || inputs.mode || 'checks' }}
+  # Scheduled scans and manually dispatched production scans share one lock.
+  # Read-only audits and CI checks remain isolated from production.
+  group: apexsignal-${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'production')) && 'production' || inputs.mode || 'checks' }}
   cancel-in-progress: false
 
 jobs:
