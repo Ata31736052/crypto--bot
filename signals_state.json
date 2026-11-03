@@ -1,4 +1,18 @@
 {
+  "BFUSDUSDT": {
+    "entry": 0.9995,
+    "score": 66,
+    "sent_at": 1793714521.2958994,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "BFUSDUSDT"
+  },
+  "BTCUSDT": {
+    "entry": 77350.5,
+    "score": 74,
+    "sent_at": 1793714520.9810662,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "BTCUSDT"
+  },
   "ETHUSDT": {
     "entry": 2270.47,
     "score": 82,
