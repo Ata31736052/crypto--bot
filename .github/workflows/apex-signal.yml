@@ -12,7 +12,7 @@ on:
           - audit
         default: production
   schedule:
-    - cron: "10 */4 * * *"
+    - cron: "10 * * * *"
   push:
     branches: [main]
     paths:
