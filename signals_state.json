@@ -1,16 +1,9 @@
 {
   "ETHUSDT": {
-    "entry": 2294.0,
-    "score": 80,
-    "sent_at": 1793598669.9100478,
-    "strategy": "CONFIRMED TREND",
-    "symbol": "ETHUSDT"
-  },
-  "ZECUSDT": {
-    "entry": 1275.98,
-    "score": 66,
-    "sent_at": 1793598670.1925807,
+    "entry": 2270.47,
+    "score": 82,
+    "sent_at": 1793702621.5322392,
     "strategy": "BOTTOM HUNTER",
-    "symbol": "ZECUSDT"
+    "symbol": "ETHUSDT"
   }
 }
