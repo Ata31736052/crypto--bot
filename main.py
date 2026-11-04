@@ -969,6 +969,19 @@ def send_telegram(text):
     }
     r = session.post(url, json=payload, timeout=TIMEOUT)
     r.raise_for_status()
+    try:
+        response_data = r.json()
+    except ValueError:
+        log.error("Telegram API returned non-JSON success response | HTTP=%s", r.status_code)
+        return False
+
+    if not isinstance(response_data, dict) or response_data.get("ok") is not True:
+        description = response_data.get("description", "unknown API response") if isinstance(response_data, dict) else "invalid response shape"
+        log.error("Telegram API rejected message | HTTP=%s | description=%s", r.status_code, description)
+        return False
+
+    result_data = response_data.get("result") or {}
+    log.info("TELEGRAM API ACCEPTED | message_id=%s", result_data.get("message_id", "n/a"))
     return True
 
 
@@ -1508,6 +1521,27 @@ def main():
             if not passed:
                 log.warning("LIVE FINAL GATE REJECT | %s | %s", item["symbol"], " | ".join(reasons))
                 continue
+            initial_trade = item["trade"]
+            signed_move_pct = (quote["ask"] - candle_close) / candle_close * 100
+            log.info(
+                "TRADE REPRICE AUDIT | %s | candle_close=%s live_ask=%s signed_move=%+.3f%% drift=%.3f%% limit=%.3f%% ATR=%s | "
+                "initial: entry=%s SL=%s SL_basis=%s SL_ref=%s risk=%.2f%% TP1=%s(%s) RR1=%.2f TP2=%s(%s) RR2=%.2f | "
+                "live: entry=%s SL=%s SL_basis=%s SL_ref=%s risk=%.2f%% TP1=%s(%s) RR1=%.2f TP2=%s(%s) RR2=%.2f",
+                item["symbol"], fmt_price(candle_close), fmt_price(quote["ask"]), signed_move_pct,
+                drift_pct, max_drift_pct, fmt_price(atrv),
+                fmt_price(initial_trade["entry"]), fmt_price(initial_trade["sl"]),
+                initial_trade.get("sl_basis", "n/a"),
+                fmt_price(initial_trade["sl_reference"]) if initial_trade.get("sl_reference") is not None else "n/a",
+                initial_trade["risk_pct"], fmt_price(initial_trade["tp1"]), initial_trade.get("tp1_name", "n/a"),
+                initial_trade["rr1"], fmt_price(initial_trade["tp2"]), initial_trade.get("tp2_name", "n/a"),
+                initial_trade["rr2"],
+                fmt_price(refreshed_trade["entry"]), fmt_price(refreshed_trade["sl"]),
+                refreshed_trade.get("sl_basis", "n/a"),
+                fmt_price(refreshed_trade["sl_reference"]) if refreshed_trade.get("sl_reference") is not None else "n/a",
+                refreshed_trade["risk_pct"], fmt_price(refreshed_trade["tp1"]), refreshed_trade.get("tp1_name", "n/a"),
+                refreshed_trade["rr1"], fmt_price(refreshed_trade["tp2"]), refreshed_trade.get("tp2_name", "n/a"),
+                refreshed_trade["rr2"],
+            )
             item["trade"] = refreshed_trade
             log.info("LIVE ENTRY VALIDATED | %s | bid=%s ask=%s spread=%.3f%% drift=%.3f%% limit=%.3f%% quote_at=%s",
                      item["symbol"], fmt_price(quote["bid"]), fmt_price(quote["ask"]),
@@ -1783,6 +1817,45 @@ def self_test():
     trigger_test = bottom_reversal_trigger_points(test_h)
     assert 0 <= trigger_test["raw"] <= 24
     assert sum(trigger_test["parts"].values()) == trigger_test["raw"]
+
+    # Telegram response contract tests: mock HTTP only; never contact Telegram.
+    from unittest.mock import Mock, patch
+    def _mock_telegram_response(json_value=None, json_error=None):
+        response = Mock()
+        response.status_code = 200
+        response.raise_for_status.return_value = None
+        if json_error is not None:
+            response.json.side_effect = json_error
+        else:
+            response.json.return_value = json_value
+        return response
+
+    with patch.dict(globals(), {"TELEGRAM_TOKEN": "self-test-token", "TELEGRAM_CHAT_ID": "self-test-chat"}):
+        accepted_response = _mock_telegram_response({
+            "ok": True, "result": {"message_id": 987654}
+        })
+        with patch.object(session, "post", return_value=accepted_response) as mocked_post:
+            with patch.object(log, "info") as mocked_info:
+                assert send_telegram("self-test accepted") is True
+                mocked_post.assert_called_once()
+                assert mocked_post.call_args.kwargs["json"]["chat_id"] == "self-test-chat"
+                assert any("message_id=%s" in str(call.args[0]) for call in mocked_info.call_args_list)
+
+        rejected_response = _mock_telegram_response({
+            "ok": False, "description": "simulated rejection"
+        })
+        with patch.object(session, "post", return_value=rejected_response):
+            with patch.object(log, "error") as mocked_error:
+                assert send_telegram("self-test rejected") is False
+                assert any("simulated rejection" in str(call.args) for call in mocked_error.call_args_list)
+
+        invalid_json_response = _mock_telegram_response(json_error=ValueError("simulated invalid JSON"))
+        with patch.object(session, "post", return_value=invalid_json_response):
+            with patch.object(log, "error") as mocked_error:
+                assert send_telegram("self-test invalid JSON") is False
+                assert any("non-JSON" in str(call.args) for call in mocked_error.call_args_list)
+
+    log.info("TELEGRAM API RESPONSE SELF-TEST: PASS (accepted, rejected, non-JSON; mocked)")
     log.info("v3.25.0 LIVE QUOTE ENTRY VALIDATION + RISK GATES + BOTTOM REVERSAL SELF-TEST: PASS")
 
 
