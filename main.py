@@ -1817,6 +1817,45 @@ def self_test():
     trigger_test = bottom_reversal_trigger_points(test_h)
     assert 0 <= trigger_test["raw"] <= 24
     assert sum(trigger_test["parts"].values()) == trigger_test["raw"]
+
+    # Telegram response contract tests: mock HTTP only; never contact Telegram.
+    from unittest.mock import Mock, patch
+    def _mock_telegram_response(json_value=None, json_error=None):
+        response = Mock()
+        response.status_code = 200
+        response.raise_for_status.return_value = None
+        if json_error is not None:
+            response.json.side_effect = json_error
+        else:
+            response.json.return_value = json_value
+        return response
+
+    with patch.dict(globals(), {"TELEGRAM_TOKEN": "self-test-token", "TELEGRAM_CHAT_ID": "self-test-chat"}):
+        accepted_response = _mock_telegram_response({
+            "ok": True, "result": {"message_id": 987654}
+        })
+        with patch.object(session, "post", return_value=accepted_response) as mocked_post:
+            with patch.object(log, "info") as mocked_info:
+                assert send_telegram("self-test accepted") is True
+                mocked_post.assert_called_once()
+                assert mocked_post.call_args.kwargs["json"]["chat_id"] == "self-test-chat"
+                assert any("message_id=%s" in str(call.args[0]) for call in mocked_info.call_args_list)
+
+        rejected_response = _mock_telegram_response({
+            "ok": False, "description": "simulated rejection"
+        })
+        with patch.object(session, "post", return_value=rejected_response):
+            with patch.object(log, "error") as mocked_error:
+                assert send_telegram("self-test rejected") is False
+                assert any("simulated rejection" in str(call.args) for call in mocked_error.call_args_list)
+
+        invalid_json_response = _mock_telegram_response(json_error=ValueError("simulated invalid JSON"))
+        with patch.object(session, "post", return_value=invalid_json_response):
+            with patch.object(log, "error") as mocked_error:
+                assert send_telegram("self-test invalid JSON") is False
+                assert any("non-JSON" in str(call.args) for call in mocked_error.call_args_list)
+
+    log.info("TELEGRAM API RESPONSE SELF-TEST: PASS (accepted, rejected, non-JSON; mocked)")
     log.info("v3.25.0 LIVE QUOTE ENTRY VALIDATION + RISK GATES + BOTTOM REVERSAL SELF-TEST: PASS")
 
 
