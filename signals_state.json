@@ -7,9 +7,9 @@
     "symbol": "BFUSDUSDT"
   },
   "BTCUSDT": {
-    "entry": 77350.5,
-    "score": 74,
-    "sent_at": 1793714520.9810662,
+    "entry": 78500.0,
+    "score": 68,
+    "sent_at": 1793782801.9155912,
     "strategy": "BOTTOM HUNTER",
     "symbol": "BTCUSDT"
   },
@@ -19,5 +19,19 @@
     "sent_at": 1793702621.5322392,
     "strategy": "BOTTOM HUNTER",
     "symbol": "ETHUSDT"
+  },
+  "LINKUSDT": {
+    "entry": 11.175,
+    "score": 67,
+    "sent_at": 1793782802.2112713,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "LINKUSDT"
+  },
+  "NEARUSDT": {
+    "entry": 4.061,
+    "score": 76,
+    "sent_at": 1793782801.6273506,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "NEARUSDT"
   }
 }
