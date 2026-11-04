@@ -27,6 +27,13 @@
     "strategy": "BOTTOM HUNTER",
     "symbol": "PAXGUSDT"
   },
+  "USD1USDT": {
+    "entry": 0.99949,
+    "score": 66,
+    "sent_at": 1793831654.539901,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "USD1USDT"
+  },
   "XAUTUSDT": {
     "entry": 4050.34,
     "score": 72,
