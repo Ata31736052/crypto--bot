@@ -1,24 +1,10 @@
 {
-  "BFUSDUSDT": {
-    "entry": 0.9995,
-    "score": 66,
-    "sent_at": 1793714521.2958994,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "BFUSDUSDT"
-  },
   "BTCUSDT": {
     "entry": 78500.0,
     "score": 68,
     "sent_at": 1793782801.9155912,
     "strategy": "BOTTOM HUNTER",
     "symbol": "BTCUSDT"
-  },
-  "ETHUSDT": {
-    "entry": 2270.47,
-    "score": 82,
-    "sent_at": 1793702621.5322392,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "ETHUSDT"
   },
   "LINKUSDT": {
     "entry": 11.175,
@@ -28,10 +14,24 @@
     "symbol": "LINKUSDT"
   },
   "NEARUSDT": {
-    "entry": 4.061,
-    "score": 76,
-    "sent_at": 1793782801.6273506,
+    "entry": 4.106,
+    "score": 69,
+    "sent_at": 1793812017.8095415,
     "strategy": "BOTTOM HUNTER",
     "symbol": "NEARUSDT"
+  },
+  "PAXGUSDT": {
+    "entry": 4061.98,
+    "score": 72,
+    "sent_at": 1793812017.5100684,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "PAXGUSDT"
+  },
+  "XAUTUSDT": {
+    "entry": 4050.34,
+    "score": 72,
+    "sent_at": 1793812017.2167714,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "XAUTUSDT"
   }
 }
