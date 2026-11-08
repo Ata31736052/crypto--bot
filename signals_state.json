@@ -1,16 +1,9 @@
 {
-  "NEARUSDT": {
-    "entry": 3.756,
-    "score": 76,
-    "sent_at": 1793985947.0517201,
+  "BNBUSDT": {
+    "entry": 698.54,
+    "score": 78,
+    "sent_at": 1794121916.3962173,
     "strategy": "BOTTOM HUNTER",
-    "symbol": "NEARUSDT"
-  },
-  "USDCUSDT": {
-    "entry": 1.00156,
-    "score": 67,
-    "sent_at": 1793911031.445995,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "USDCUSDT"
+    "symbol": "BNBUSDT"
   }
 }
