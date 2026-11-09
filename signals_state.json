@@ -5,5 +5,12 @@
     "sent_at": 1794121916.3962173,
     "strategy": "BOTTOM HUNTER",
     "symbol": "BNBUSDT"
+  },
+  "XAUTUSDT": {
+    "entry": 4106.42,
+    "score": 82,
+    "sent_at": 1794204292.1892526,
+    "strategy": "CONFIRMED TREND",
+    "symbol": "XAUTUSDT"
   }
 }
