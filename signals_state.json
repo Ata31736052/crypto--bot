@@ -6,6 +6,13 @@
     "strategy": "BOTTOM HUNTER",
     "symbol": "BNBUSDT"
   },
+  "NEARUSDT": {
+    "entry": 3.637,
+    "score": 66,
+    "sent_at": 1794269393.4312434,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "NEARUSDT"
+  },
   "XAUTUSDT": {
     "entry": 4106.42,
     "score": 82,
