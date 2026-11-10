@@ -6,18 +6,18 @@
     "strategy": "BOTTOM HUNTER",
     "symbol": "BNBUSDT"
   },
+  "ENAUSDT": {
+    "entry": 0.1529,
+    "score": 70,
+    "sent_at": 1794324791.3007724,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "ENAUSDT"
+  },
   "NEARUSDT": {
-    "entry": 3.637,
-    "score": 66,
-    "sent_at": 1794269393.4312434,
+    "entry": 3.655,
+    "score": 67,
+    "sent_at": 1794324791.5935743,
     "strategy": "BOTTOM HUNTER",
     "symbol": "NEARUSDT"
-  },
-  "XAUTUSDT": {
-    "entry": 4106.42,
-    "score": 82,
-    "sent_at": 1794204292.1892526,
-    "strategy": "CONFIRMED TREND",
-    "symbol": "XAUTUSDT"
   }
 }
