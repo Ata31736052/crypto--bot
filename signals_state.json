@@ -1,17 +1,17 @@
 {
-  "BNBUSDT": {
-    "entry": 690.15,
-    "score": 66,
-    "sent_at": 1794240125.7988958,
-    "strategy": "BOTTOM HUNTER",
-    "symbol": "BNBUSDT"
-  },
   "ENAUSDT": {
     "entry": 0.1529,
     "score": 70,
     "sent_at": 1794324791.3007724,
     "strategy": "BOTTOM HUNTER",
     "symbol": "ENAUSDT"
+  },
+  "ERAUSDT": {
+    "entry": 0.0833,
+    "score": 86,
+    "sent_at": 1794388486.2440019,
+    "strategy": "CONFIRMED TREND",
+    "symbol": "ERAUSDT"
   },
   "NEARUSDT": {
     "entry": 3.655,
