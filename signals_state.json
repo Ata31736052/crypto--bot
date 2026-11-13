@@ -1,16 +1,16 @@
 {
-  "AVAXUSDT": {
-    "entry": 8.661,
-    "score": 67,
-    "sent_at": 1794419493.0409303,
+  "NEARUSDT": {
+    "entry": 3.517,
+    "score": 80,
+    "sent_at": 1794583131.2049503,
     "strategy": "BOTTOM HUNTER",
-    "symbol": "AVAXUSDT"
+    "symbol": "NEARUSDT"
   },
-  "ERAUSDT": {
-    "entry": 0.0833,
-    "score": 86,
-    "sent_at": 1794388486.2440019,
-    "strategy": "CONFIRMED TREND",
-    "symbol": "ERAUSDT"
+  "USD1USDT": {
+    "entry": 0.99918,
+    "score": 67,
+    "sent_at": 1794583131.491645,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "USD1USDT"
   }
 }
