@@ -1,16 +1,16 @@
 {
-  "NEARUSDT": {
-    "entry": 3.517,
-    "score": 80,
-    "sent_at": 1794583131.2049503,
+  "USDCUSDT": {
+    "entry": 1.00078,
+    "score": 71,
+    "sent_at": 1794860352.5664723,
     "strategy": "BOTTOM HUNTER",
-    "symbol": "NEARUSDT"
+    "symbol": "USDCUSDT"
   },
-  "USD1USDT": {
-    "entry": 0.99918,
-    "score": 67,
-    "sent_at": 1794583131.491645,
+  "ZECUSDT": {
+    "entry": 899.18,
+    "score": 71,
+    "sent_at": 1794860352.8681126,
     "strategy": "BOTTOM HUNTER",
-    "symbol": "USD1USDT"
+    "symbol": "ZECUSDT"
   }
 }
