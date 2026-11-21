@@ -1,9 +1,23 @@
 {
   "RLUSDUSDT": {
-    "entry": 1.0023,
+    "entry": 1.002,
     "score": 85,
-    "sent_at": 1795224197.4384375,
+    "sent_at": 1795253887.7118664,
     "strategy": "CONFIRMED TREND",
     "symbol": "RLUSDUSDT"
+  },
+  "USDCUSDT": {
+    "entry": 1.00182,
+    "score": 80,
+    "sent_at": 1795253888.0093474,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "USDCUSDT"
+  },
+  "UUSDT": {
+    "entry": 1.0008,
+    "score": 76,
+    "sent_at": 1795253888.314663,
+    "strategy": "BOTTOM HUNTER",
+    "symbol": "UUSDT"
   }
 }
