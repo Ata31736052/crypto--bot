@@ -26,7 +26,7 @@ class HourlyBtcRegimeReplayTests(unittest.TestCase):
         self.assertEqual((stamp.hour, stamp.minute), (1, 10))
 
     def test_frame_at_excludes_candle_closing_at_decision(self):
-        frame = pd.DataFrame({"close_time": [999, 1999, 2999], "close": [1, 2, 3]})
+        frame = pd.DataFrame({"close_time": [999, 2000, 2999], "close": [1, 2, 3]})
         result = hb.frame_at(frame, 2000)
         self.assertEqual(result["close_time"].tolist(), [999])
 
