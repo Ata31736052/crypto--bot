@@ -749,7 +749,6 @@ def bottom_reversal_quality_gate(trigger_audit, structure, vol_ratio):
 def bottom_setup(d, h, h1, btc_d, btc_h):
     """Bottom Hunter uses Daily+4H for setup; 1H confirms entry only."""
     r=h.iloc[-1]
-    if btc_d=="BEARISH" and btc_h=="BEARISH": return None,["BTC Daily+4H bearish"]
     if d.iloc[-1].close<d.iloc[-1].ema200 and d.iloc[-1].mdi>d.iloc[-1].pdi and r.close<r.ema50: return None,["Daily+4H major trend bearish"]
     near_low,_=near_recent_low(h,BOTTOM_LOW_DISTANCE_PCT); fib_ok,_=fib_zone(h); ms=market_structure(h)
     triggers=(rsi_bullish_divergence(h),rejection_candle(h),macd_turn(h),reclaim_4h(h))
@@ -1046,7 +1045,6 @@ def diagnostic_trend_blocks(d,h,h1,btc_d,btc_h,daily_state):
 
 def diagnostic_bottom_blocks(d,h,h1,btc_d,btc_h):
     r=h.iloc[-1]; blocks=[]
-    if btc_d=="BEARISH" and btc_h=="BEARISH": blocks.append("BTC Daily+4H bearish")
     if r.vol_ratio<0.60: blocks.append("4H volume critically weak")
     a=unified_bottom_score_audit(d,h,h1,btc_d,btc_h)
     if a["score"]<BOTTOM_MIN_SCORE: blocks.append(f"setup score {a['score']}<{BOTTOM_MIN_SCORE}")
@@ -1174,6 +1172,15 @@ def bottom_reversal_trigger_points(h):
     return {"raw": sum(parts.values()), "parts": parts}
 
 
+def bottom_btc_context_points(btc_d, btc_h):
+    """Grade BTC as context, never as an unconditional Bottom Hunter veto."""
+    if btc_d == "BULLISH" and btc_h == "BULLISH":
+        return 2
+    if btc_d in {"BULLISH", "NEUTRAL"} or btc_h in {"BULLISH", "NEUTRAL"}:
+        return 1
+    return 0
+
+
 def unified_bottom_score_audit(d, h, h1, btc_d, btc_h):
     """Early-reversal weighted Daily+4H score. 1H confirms entry only; it is not scored here."""
     r=h.iloc[-1]; p=h.iloc[-2]; ms=market_structure(h); near_low,_=near_recent_low(h,BOTTOM_LOW_DISTANCE_PCT); fib_ok,_=fib_zone(h)
@@ -1192,7 +1199,7 @@ def unified_bottom_score_audit(d, h, h1, btc_d, btc_h):
     c["Trade activity"]=2 if r.trade_ratio>=1.0 else 1 if r.trade_ratio>=0.70 else 0
     c["ADX"]=2 if r.adx>=20 else 1 if r.adx>=14 and r.adx>p.adx else 0
     c["Daily context"]=3 if d.iloc[-1].close>d.iloc[-1].ema50 else 2 if d.iloc[-1].close>d.iloc[-1].ema200 else 1
-    c["BTC context"]=2 if btc_d=="BULLISH" and btc_h=="BULLISH" else 1 if btc_d=="BULLISH" or btc_h=="BULLISH" or btc_d=="NEUTRAL" or btc_h=="NEUTRAL" else 0
+    c["BTC context"]=bottom_btc_context_points(btc_d,btc_h)
     c["Volatility health"]=3 if finite(r.atr,r.close) and r.atr>0 and r.atr/r.close<0.08 else 1 if finite(r.atr,r.close) and r.atr>0 else 0
     weights={"Location":18,"Structure reaction":18,"Reversal triggers":32,"MACD":6,"RSI":6,"Bottom volume":5,"Taker buy":3,"Trade activity":2,"ADX":2,"Daily context":3,"BTC context":2,"Volatility health":3}
     raw=sum(c.values()); assert sum(weights.values())==100
@@ -1769,6 +1776,11 @@ def self_test():
     assert _rsi_divergence_details(edge)["two_pivots"] is False
     assert _rsi_divergence_details(edge)["both"] is False
     import inspect
+    assert bottom_btc_context_points("BEARISH","BEARISH") == 0
+    assert bottom_btc_context_points("BULLISH","BULLISH") == 2
+    assert bottom_btc_context_points("NEUTRAL","BEARISH") == 1
+    assert "BTC Daily+4H bearish" not in inspect.getsource(bottom_setup)
+    assert "BTC Daily+4H bearish" not in inspect.getsource(diagnostic_bottom_blocks)
     gate_src=inspect.getsource(professional_signal_quality_gate)
     assert 'check("Daily context"' not in gate_src and 'check("BTC safety"' not in gate_src and 'check("1H confirmation"' not in gate_src
     h1_src=inspect.getsource(h1_trend_confirmation_details)
