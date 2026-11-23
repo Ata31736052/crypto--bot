@@ -1,0 +1,61 @@
+name: Hourly BTC Regime 180-day A-B Replay
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - experiment/hourly-btc-regime-backtest-20261123
+    paths:
+      - "main.py"
+      - "main_experimental.py"
+      - "historical_backtest.py"
+      - "tests/**"
+      - ".github/workflows/hourly-btc-regime-backtest.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hourly-btc-regime-backtest
+  cancel-in-progress: false
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      BACKTEST_DAYS: "180"
+      BACKTEST_MAX_SYMBOLS: "30"
+      BACKTEST_END_UTC: "2026-11-23T00:00:00+00:00"
+      BACKTEST_SYMBOLS: "ETHUSDT,ZECUSDT,SOLUSDT,NEARUSDT,XRPUSDT,AIUSDT,XAUTUSDT,BNBUSDT,WLDUSDT,SNDKBUSDT,SOXLBUSDT,DOGEUSDT,UNIUSDT,SPCXBUSDT,ENAUSDT,PEPEUSDT,SUIUSDT,UUSDT,TRXUSDT,HYPEUSDT,PUMPUSDT,PAXGUSDT,TAOUSDT,ALTUSDT,ADAUSDT,AAVEUSDT,LINKUSDT,AVAXUSDT,CRCLBUSDT,BMTUSDT"
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Compile and run regression tests
+        run: |
+          python -m py_compile main.py main_experimental.py historical_backtest.py tests/test_hourly_btc_regime_replay.py
+          python -c "import main; main.self_test(); import main_experimental; main_experimental.self_test()"
+          python -m unittest discover -s tests -v
+      - name: Run 180-day hourly A/B replay (no Telegram or live orders)
+        run: |
+          set -o pipefail
+          python historical_backtest.py 2>&1 | tee historical-backtest.log
+      - name: Upload replay artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apexsignal-hourly-btc-regime-180d
+          path: |
+            backtest-artifacts/
+            historical-backtest.log
+          if-no-files-found: warn
+          retention-days: 30
