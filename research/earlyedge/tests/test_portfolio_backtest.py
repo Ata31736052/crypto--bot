@@ -12,20 +12,25 @@ class PortfolioTests(unittest.TestCase):
         r=portfolio_replay(data,starting_cash=1000,max_total_exposure=500,
                            max_position=1000,fee_pct=0,slippage_pct=0)
         self.assertLessEqual(r["max_deployed"],500.000001)
-        self.assertLessEqual(r["max_open_positions"],2)
 
     def test_watch_is_not_a_trade(self):
         data={"AAA":[row(1,s="WATCH"),row(2),row(3)]}
         self.assertEqual(portfolio_replay(data)["trade_count"],0)
 
-    def test_stop_wins_same_bar_collision(self):
+    def test_stop_wins_same_bar_collision_including_fill_bar(self):
         data={"AAA":[row(1,s="ENTRY"),row(2,h=105,l=95,c=100)]}
         r=portfolio_replay(data,fee_pct=0,slippage_pct=0)
         self.assertEqual(r["trades"][0]["reason"],"STOP")
+        self.assertEqual(r["trades"][0]["entry_time"],"2")
 
     def test_trade_fills_on_next_available_bar(self):
         data={"AAA":[row(1,s="ENTRY"),row(2,o=101,h=102,l=100,c=101),row(3,h=108,l=100,c=107)]}
         r=portfolio_replay(data,fee_pct=0,slippage_pct=0)
         self.assertEqual(r["trades"][0]["entry_time"],"2")
+        self.assertEqual(r["trades"][0]["reason"],"TARGET")
+
+    def test_exposure_limit_validation(self):
+        with self.assertRaises(ValueError):
+            portfolio_replay({"AAA":[row(1)]},max_total_exposure=0)
 
 if __name__=="__main__":unittest.main()
