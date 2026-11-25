@@ -9,12 +9,26 @@ This directory is an isolated research area. Nothing here changes the production
 
 ## Proposed EarlyEdge behavior
 - Binance Spot, long-only BUY alerts; no exchange order placement.
-- Four independent setups: bottom reversal, breakout, trend pullback, and range-support bounce.
-- A low-commitment WATCH state may be emitted before a confirmed ENTRY. WATCH must never be counted as a trade.
-- Scan cadence target: 5 minutes. Signal decisions must use completed candles only; 5m/15m/1h roles and confirmation timing must be explicit and tested.
-- Regime-aware means each engine may operate only where its setup is meaningful. It does not mean forcing trades in every market condition.
+- Four independent research engines: bottom reversal, breakout, trend pullback, and range-support bounce.
+- A low-commitment WATCH state may be emitted before a confirmed ENTRY. WATCH is not a trade and is ignored by the trade replay.
+- Intended scan cadence: 5 minutes. Decisions in this research prototype are made at the close of completed 15m candles, with 1h context filtered by `close_time <= decision_close_time`.
+- Regime-aware means each engine operates only where its setup is meaningful. It does not mean forcing trades in every market condition.
 
-## Required backtest protocol
+## Research pipeline currently implemented
+1. Download Binance Spot OHLCV with pagination: `download_binance.py`.
+2. Convert 15m + 1h kline CSVs into separate engine signal CSVs: `build_engine_csv.py`.
+3. Signal rules and indicators are in `strategy.py`; they use bounded indicator warm-up windows and completed higher-timeframe candles only.
+4. Replay one engine/symbol CSV using `backtest.py`. ENTRY fills at next bar open; WATCH is ignored; fees and slippage are modeled; stop wins same-bar stop/target collisions.
+
+Example commands (run from repository root):
+```bash
+python -m research.earlyedge.download_binance --symbol ETHUSDT --interval 15m --days 180
+python -m research.earlyedge.download_binance --symbol ETHUSDT --interval 1h --days 180
+python -m research.earlyedge.build_engine_csv --15m data/earlyedge/ETHUSDT_15m_180d.csv --1h data/earlyedge/ETHUSDT_1h_180d.csv
+python -m research.earlyedge.backtest data/earlyedge/signals/bottom_reversal.csv --cash 1000 --risk 1 --max-position 1000 --fee 0.1 --slippage 0.05
+```
+
+## Required backtest protocol before any strategy conclusion
 1. Use Binance Spot OHLCV with UTC timestamps and pagination; document missing candles and API failures.
 2. Use a point-in-time eligible symbol universe where possible. If only today's symbols are available, explicitly label survivorship bias and do not call the result an unbiased 180-day portfolio backtest.
 3. Build indicators only from candles whose close time is at or before the decision timestamp.
@@ -33,6 +47,8 @@ This directory is an isolated research area. Nothing here changes the production
 - No merge, production schedule change, or Telegram activation until results are reviewed and explicitly approved.
 
 ## Current status
-- Experimental branch created from `main`.
-- This plan is documentation only; no production code or workflow has been changed.
-- A full historical test has not yet been run. Do not describe this branch as a validated replacement.
+- Research code is on isolated branch `experiment/earlyedge-replacement-20261124` and draft PR #24.
+- Four engine rules, Binance historical downloader, per-engine signal CSV builder, single-symbol replay, and automated tests are present.
+- The CI workflow compiles the research package and runs unit tests.
+- A real 180-day multi-symbol portfolio backtest has NOT yet been run. The current replay is single-symbol; current-day symbol lists would also introduce survivorship bias.
+- No production code, production workflow, Telegram secret, or live schedule has been changed. No merge or live activation is approved.
