@@ -1,10 +1,10 @@
-name: EarlyEdge 180d Single-Symbol Pipeline Smoke Test
+name: EarlyEdge 180d Multi-Symbol Single-Engine Validation
 
 on:
   workflow_dispatch:
     inputs:
       confirm_research_run:
-        description: "Confirm the one-off 180-day ETHUSDT research pipeline"
+        description: "Confirm the one-off 180-day, 10-symbol Binance Spot research run"
         required: true
         type: boolean
         default: false
@@ -13,45 +13,60 @@ permissions:
   contents: read
 
 jobs:
-  smoke-180d:
+  validate-180d:
     if: inputs.confirm_research_run
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Download completed Binance Spot candles
+      - name: Download completed Binance Spot candles (180 days)
+        shell: bash
         run: |
-          python -m research.earlyedge.download_binance --symbol ETHUSDT --interval 15m --days 180
-          python -m research.earlyedge.download_binance --symbol ETHUSDT --interval 1h --days 180
-      - name: Generate four engine signal series
-        run: |
-          python -m research.earlyedge.build_engine_csv \
-            --15m data/earlyedge/ETHUSDT_15m_180d.csv \
-            --1h data/earlyedge/ETHUSDT_1h_180d.csv \
-            --out-dir data/earlyedge/ETHUSDT/signals
-      - name: Run shared-capital replay per engine
-        run: |
-          mkdir -p reports/earlyedge
-          for signal_file in data/earlyedge/ETHUSDT/signals/*.csv; do
-            engine=$(basename "$signal_file" .csv)
-            python -m research.earlyedge.portfolio_backtest \
-              "ETHUSDT=$signal_file" \
-              --cash 1000 --risk 1 --max-position 1000 --max-exposure 1000 \
-              --fee 0.1 --slippage 0.05 \
-              --out "reports/earlyedge/ETHUSDT_${engine}_180d.json"
+          set -euo pipefail
+          SYMBOLS=(ETHUSDT BNBUSDT SOLUSDT XRPUSDT ADAUSDT DOGEUSDT LINKUSDT AVAXUSDT DOTUSDT LTCUSDT)
+          for symbol in "${SYMBOLS[@]}"; do
+            echo "Downloading ${symbol}"
+            python -m research.earlyedge.download_binance --symbol "$symbol" --interval 15m --days 180
+            python -m research.earlyedge.download_binance --symbol "$symbol" --interval 1h --days 180
           done
-      - name: Upload raw data and research reports
+      - name: Generate only the enabled bottom-reversal signal series
+        shell: bash
+        run: |
+          set -euo pipefail
+          SYMBOLS=(ETHUSDT BNBUSDT SOLUSDT XRPUSDT ADAUSDT DOGEUSDT LINKUSDT AVAXUSDT DOTUSDT LTCUSDT)
+          for symbol in "${SYMBOLS[@]}"; do
+            python -m research.earlyedge.build_engine_csv \
+              --15m "data/earlyedge/${symbol}_15m_180d.csv" \
+              --1h "data/earlyedge/${symbol}_1h_180d.csv" \
+              --out-dir "data/earlyedge/${symbol}/signals"
+          done
+      - name: Run one shared-capital 10-symbol portfolio replay after costs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p reports/earlyedge
+          INPUTS=()
+          SYMBOLS=(ETHUSDT BNBUSDT SOLUSDT XRPUSDT ADAUSDT DOGEUSDT LINKUSDT AVAXUSDT DOTUSDT LTCUSDT)
+          for symbol in "${SYMBOLS[@]}"; do
+            INPUTS+=("${symbol}=data/earlyedge/${symbol}/signals/bottom_reversal.csv")
+          done
+          python -m research.earlyedge.portfolio_backtest "${INPUTS[@]}" \
+            --cash 1000 --risk 1 --max-position 1000 --max-exposure 1000 \
+            --max-positions 10 --fee 0.1 --slippage 0.05 \
+            --out reports/earlyedge/bottom_reversal_10symbol_180d.json
+      - name: Upload raw data, generated signals and portfolio report
         uses: actions/upload-artifact@v4
         with:
-          name: earlyedge-ethusdt-180d-smoke
+          name: earlyedge-bottom-reversal-10symbol-180d
           path: |
-            data/earlyedge/ETHUSDT_15m_180d.csv
-            data/earlyedge/ETHUSDT_15m_180d.json
-            data/earlyedge/ETHUSDT_1h_180d.csv
-            data/earlyedge/ETHUSDT_1h_180d.json
-            data/earlyedge/ETHUSDT/signals/*.csv
-            reports/earlyedge/*.json
+            data/earlyedge/*_15m_180d.csv
+            data/earlyedge/*_15m_180d.json
+            data/earlyedge/*_1h_180d.csv
+            data/earlyedge/*_1h_180d.json
+            data/earlyedge/*/signals/*.csv
+            reports/earlyedge/bottom_reversal_10symbol_180d.json
+          if-no-files-found: error
           retention-days: 14
