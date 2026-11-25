@@ -24,7 +24,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Compile and test research backtester
+      - name: Compile and test research engines
         run: |
-          python -m py_compile research/earlyedge/backtest.py
+          python -m compileall -q research/earlyedge
           python -m unittest discover -s research/earlyedge/tests -v
