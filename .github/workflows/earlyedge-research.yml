@@ -1,0 +1,34 @@
+name: EarlyEdge Research Tests
+
+on:
+  push:
+    branches: [experiment/earlyedge-replacement-20261124]
+    paths:
+      - "research/earlyedge/**"
+      - ".github/workflows/earlyedge-research.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "research/earlyedge/**"
+      - ".github/workflows/earlyedge-research.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install production strategy dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Compile and test research engines and current-main adapter
+        run: |
+          python -m compileall -q research/earlyedge
+          python -m unittest discover -s research/earlyedge/tests -v

@@ -1,0 +1,66 @@
+name: EarlyEdge Live Candidate (manual or external trigger)
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Do not send Telegram messages; run a read-only candidate scan"
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: earlyedge-live-candidate
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+    env:
+      TZ: Asia/Tehran
+      TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      EARLYEDGE_STATE_FILE: earlyedge_state.json
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Run Iran-window-guarded candidate scanner
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            python - <<'PY'
+          import json
+          from research.earlyedge.live_runner import run_scan
+          print(json.dumps(run_scan(send=False), ensure_ascii=False))
+          PY
+          else
+            python -m research.earlyedge.live_runner
+          fi
+
+      - name: Persist delivered-alert deduplication state
+        if: ${{ inputs.dry_run == false && success() }}
+        run: |
+          if [ -f earlyedge_state.json ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add earlyedge_state.json
+            if ! git diff --cached --quiet; then
+              git commit -m "chore: persist EarlyEdge alert deduplication state [skip ci]"
+              git push
+            fi
+          fi
