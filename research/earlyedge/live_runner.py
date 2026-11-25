@@ -193,9 +193,8 @@ def run_scan(now=None, session=None, telegram_token=None, telegram_chat_id=None,
             sent += 1
         state[key] = {"sent_at": now_ms, "symbol": symbol, "engine": signal["engine"],
                       "state": signal["state"], "candle_close": signal["timestamp"]}
-    if found and (not send or sent):
-        # In dry-run mode persist evaluated keys too; production should persist
-        # only successfully delivered messages to avoid dropping unsent alerts.
+    if send and sent:
+        # Persist only successfully delivered alerts; dry-runs must not suppress a later live alert.
         _save_state(state_file, state)
     return {"status": "completed", "symbols": len(symbols), "signals_found": len(found),
             "signals_sent": sent, "api_errors": api_errors, "btc_context": btc_label}
