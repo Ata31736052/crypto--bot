@@ -1,10 +1,11 @@
 import tempfile
 import unittest
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from unittest.mock import Mock
 
-from research.earlyedge.live_runner import run_scan, _bars, _format_alert
+from research.earlyedge.live_runner import run_scan, _bars, _format_alert, _decision_indices
 
 
 class LiveRunnerTests(unittest.TestCase):
@@ -38,6 +39,18 @@ class LiveRunnerTests(unittest.TestCase):
         bars = _bars(raw, now_ms, 900000)
         self.assertEqual(len(bars), 1)
         self.assertEqual(bars[0]["close_time"], 899999)
+
+    def test_morning_decisions_exclude_overnight_candles(self):
+        now = datetime(2026, 11, 25, 7, 30, tzinfo=ZoneInfo("Asia/Tehran"))
+        start_ms = int(datetime(2026, 11, 25, 7, 0, tzinfo=ZoneInfo("Asia/Tehran")).timestamp() * 1000)
+        bars = [
+            {"close_time": start_ms - 900001},  # 06:45 close: overnight, excluded
+            {"close_time": start_ms - 1},       # 07:00 close: eligible
+            {"close_time": start_ms + 899999},  # 07:15 close: eligible
+            {"close_time": start_ms + 1799999}, # 07:30 close: eligible
+        ]
+        self.assertEqual(_decision_indices(bars, now), [2, 3])
+
 
     def test_entry_alert_contains_risk_and_two_targets(self):
         signal = {"price": 100.0, "stop_pct": 1.5, "state": "ENTRY",
