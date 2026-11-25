@@ -88,14 +88,21 @@ def evaluate_engines(bars15,bars1h,index):
 
     # 1) Bottom reversal: wait for a local reclaim, not a falling-knife RSI print.
     bottom_watch=(rsi<43 and c>_v(prev,"close") and c>_v(bar,"open"))
+    # In a confirmed 1h downtrend, allow only a stronger countertrend
+    # reclaim; bearish context is a risk label, not an absolute BUY veto.
+    bottom_volume_min = 1.50 if ctx["bear"] else 1.15
     bottom_entry=(bottom_watch and rsi>_rsi(closes[:-1]) and c>_v(prev,"high")
-                  and vr>=1.15 and not ctx["bear"])
+                  and vr>=bottom_volume_min)
     if bottom_entry: results.append(_signal("BOTTOM_REVERSAL","ENTRY",bar,atr))
     elif bottom_watch: results.append(_signal("BOTTOM_REVERSAL","WATCH",bar,atr))
 
     # 2) Breakout: close beyond prior 20 completed bars with participation.
     breakout_watch=c>=high*0.997 and vr>=1.0
-    breakout_entry=c>high and vr>=1.5 and ctx["bull"]
+    # Countertrend breakouts are permitted only with stronger volume and
+    # a bullish decision candle; this catches short-lived relief rallies.
+    breakout_volume_min = 1.80 if ctx["bear"] else 1.50
+    breakout_entry=(c>high and vr>=breakout_volume_min
+                    and (ctx["bull"] or (ctx["bear"] and c>_v(bar,"open"))))
     if breakout_entry: results.append(_signal("BREAKOUT","ENTRY",bar,atr))
     elif breakout_watch: results.append(_signal("BREAKOUT","WATCH",bar,atr))
 
