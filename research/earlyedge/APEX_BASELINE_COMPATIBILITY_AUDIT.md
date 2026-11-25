@@ -25,13 +25,19 @@ That harness does use historical frame injection, but its branch is not the curr
 
 Therefore, any A/B result from that old branch would test an older, divergent ApexSignal implementation, not the current `main` snapshot. Do not use it as the production comparator for EarlyEdge.
 
+## Research adapter now added
+
+A research-only adapter is now present at `research/earlyedge/apexsignal_historical_adapter.py`. It temporarily injects preloaded historical frames into the current-main `main.klines()` call path while invoking the unmodified `main.analyze_symbol()` strategy logic. It filters frames to candles with `close_time < decision_ms`, requires 1d/4h/1h data for the symbol plus 1d/4h BTC context, serializes the temporary module-global injection with a lock, and restores the original live fetcher in a `finally` block. No production `main.py` code was changed.
+
+Three adapter tests cover candle cutoff/history cap, successful frame injection and restoration, and restoration after an exception. The research CI workflow now installs the production strategy dependencies before running the test suite. The push-triggered CI run on commit `42ca6b9c9ed97d63ec724d1bdd8abaf27d69b7c1` passed all 22 tests. The PR-triggered run is still being checked.
+
 ## Required safe approach
 
 1. Keep the EarlyEdge branch isolated.
-2. Add a research-only adapter or optional historical-frame injection seam that lets the exact current `main.py` strategy logic consume pre-downloaded, closed 1d/4h/1h candles. Do not change the live workflow, Telegram behavior, schedule, or live defaults.
-3. Verify by hash/diff that the strategy functions and constants used by production are unchanged; only the research injection seam is added on the experimental branch.
-4. Replay current ApexSignal and EarlyEdge on the same symbols, 180-day interval, candle cutoffs, next executable price convention, capital, risk sizing, fees, slippage, and stop/target collision policy. Where the native strategies differ (e.g. 4h decision schedule and 1h execution vs 15m EarlyEdge decisions), report both native schedules and a clearly defined comparable execution benchmark rather than silently forcing identical timing.
-5. Include current-universe selection bias, candle coverage, open-at-end handling, trade ledger, and per-regime/per-engine metrics.
+2. Use the research adapter to replay the exact current `main.py` strategy logic against pre-downloaded, closed 1d/4h/1h candles. Do not change the live workflow, Telegram behavior, schedule, or live defaults.
+3. Verify by hash/diff that the strategy functions and constants used by production are unchanged; only the adapter is added on the experimental branch.
+4. Replay current ApexSignal and EarlyEdge on the same symbols and 180-day interval, with transparent treatment of native schedule differences (4h decisions/1h execution vs 15m decisions). Match capital, risk sizing, fees, slippage, and conservative stop/target handling where possible; report any unavoidable non-comparability rather than silently forcing identical timing.
+5. Include universe-selection bias, candle coverage, open-at-end handling, raw trade ledger, and per-regime/per-engine metrics.
 
 ## Decision
 
