@@ -1,15 +1,10 @@
 name: EarlyEdge 180d Single-Symbol Pipeline Smoke Test
 
 on:
-  push:
-    branches: [experiment/earlyedge-replacement-20261124]
-    paths:
-      - "research/earlyedge/strategy.py"
-      - ".github/workflows/earlyedge-180d-smoke.yml"
   workflow_dispatch:
     inputs:
       confirm_research_run:
-        description: "Run the one-off 180-day ETHUSDT research pipeline"
+        description: "Confirm the one-off 180-day ETHUSDT research pipeline"
         required: true
         type: boolean
         default: false
@@ -19,7 +14,7 @@ permissions:
 
 jobs:
   smoke-180d:
-    if: github.event_name == 'push' || inputs.confirm_research_run
+    if: inputs.confirm_research_run
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
