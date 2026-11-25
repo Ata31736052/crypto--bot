@@ -12,13 +12,17 @@ class FakeResponse:
 
 class DownloaderTests(unittest.TestCase):
     def test_downloads_pages_without_duplicate_candles(self):
-        pages=[[kline(0),kline(300000)], [kline(600000)]]
+        first=[kline(i*300000) for i in range(1000)]
+        second=[kline(300000000),kline(300300000)]
+        pages=[first,second]
         calls=[]
         def opener(req,timeout=20):
             calls.append(req.full_url)
             return FakeResponse(pages.pop(0))
-        rows=download_klines("ETHUSDT","5m",0,900000,opener=opener,pause=0)
-        self.assertEqual([r[0] for r in rows],[0,300000,600000])
+        rows=download_klines("ETHUSDT","5m",0,600000000,opener=opener,pause=0)
+        self.assertEqual(len(rows),1002)
+        self.assertEqual(rows[0][0],0)
+        self.assertEqual(rows[-1][0],300300000)
         self.assertEqual(len(calls),2)
 
     def test_excludes_not_closed_candle(self):
