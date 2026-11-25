@@ -8,6 +8,9 @@ Replace the current Daily + 4H signal engine only after matched validation. The 
 ## Operating behavior
 - Binance Spot USDT symbols; BUY alerts only; never place exchange orders.
 - Scan on a 30-minute cadence. Evaluate the latest fully closed 15-minute candle; use only completed 1-hour context. A 30-minute invocation must not create duplicate decisions for the same 15-minute close.
+- **Iran operating window:** use the IANA timezone `Asia/Tehran`, not the runner's UTC clock. Start at 07:00 Iran time (inclusive) and stop at 23:00 (exclusive). No scan, symbol download, or Telegram alert may run from 23:00 through 06:59 Iran time.
+- The live runner must call `research.earlyedge.iran_schedule.is_scan_window()` as its first operational guard, before exchange/network requests, symbol iteration, or notification setup; if false, log `outside_iran_scan_window` and exit successfully. Historical backtests must not apply this wall-clock guard.
+- The external scheduler must trigger this repository only during 07:00-22:30 Iran time at 30-minute intervals. Do not add a recurring GitHub Actions schedule for live scanning: GitHub scheduled runs are UTC-based and can consume Actions even when a Python-level guard exits. Keep historical research runs manual/one-off.
 - User manually reviews alerts. Therefore emit both WATCH (early setup, not an entry) and ENTRY (actionable candidate) with clear labels rather than suppressing every candidate behind a strict score threshold.
 - Four independent setup families: bottom/reversal, breakout, trend pullback, and range-support bounce.
 - No absolute BTC bearish veto, no arbitrary RSI ceiling such as 72, and no requirement that all engines agree. BTC/market regime is context and risk annotation, not a universal lockout.
