@@ -29,7 +29,11 @@ Therefore, any A/B result from that old branch would test an older, divergent Ap
 
 A research-only adapter is now present at `research/earlyedge/apexsignal_historical_adapter.py`. It temporarily injects preloaded historical frames into the current-main `main.klines()` call path while invoking the unmodified `main.analyze_symbol()` strategy logic. It filters frames to candles with `close_time < decision_ms`, requires 1d/4h/1h data for the symbol plus 1d/4h BTC context, serializes the temporary module-global injection with a lock, and restores the original live fetcher in a `finally` block. No production `main.py` code was changed.
 
-Three adapter tests cover candle cutoff/history cap, successful frame injection and restoration, and restoration after an exception. The research CI workflow now installs the production strategy dependencies before running the test suite. The push-triggered CI run on commit `42ca6b9c9ed97d63ec724d1bdd8abaf27d69b7c1` passed all 22 tests. The PR-triggered run is still being checked.
+Four adapter/runner tests cover Binance taker-quote column mapping, candle cutoff/history cap, successful frame injection and restoration, and restoration after an exception. The research CI workflow now installs the production strategy dependencies before running the test suite. Both push-triggered and PR-triggered CI passed all 23 tests on commit `a532d7bce3bd9be0feebfc2f558b097e2cb80548`. The PR-triggered run is still being checked.
+
+## Current-main historical smoke run
+
+A research-only workflow downloads 365 days of 1d and 180 days of 4h/1h Binance Spot candles for ETHUSDT and BTCUSDT, then runs current-main ApexSignal candidate generation at 1,079 4h-close decision points with the completed 1h confirmation state. The first attempt failed on a Python import-path issue; the next attempt exposed the Binance `taker_buy_quote` vs current-main `taker_quote` naming difference. Both were corrected, and the corrected run is [Actions run 45582623410](https://github.com/Ata31736052/crypto--bot/actions/runs/45582623410), currently in progress at the historical replay step. The workflow is designed to compare the production `main.py` snapshot byte-for-byte before/after. This smoke test generates historical candidates only; it is not a fill/P&L backtest and does not yet compare against EarlyEdge.
 
 ## Required safe approach
 
