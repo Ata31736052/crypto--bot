@@ -1,0 +1,64 @@
+name: ApexSignal Current-Main Historical Smoke
+
+on:
+  push:
+    branches: [experiment/earlyedge-replacement-20261124]
+    paths:
+      - "research/earlyedge/apexsignal_historical_adapter.py"
+      - "research/earlyedge/run_apex_historical.py"
+      - ".github/workflows/apex-baseline-historical-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  historical-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Save production main.py snapshot
+        run: cp main.py /tmp/apexsignal-production-main.py
+      - name: Checkout research adapter and runner
+        uses: actions/checkout@v4
+        with:
+          ref: experiment/earlyedge-replacement-20261124
+          path: research-work
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Install isolated research files
+        run: |
+          mkdir -p research/earlyedge
+          cp research-work/research/earlyedge/apexsignal_historical_adapter.py research/earlyedge/
+          cp research-work/research/earlyedge/run_apex_historical.py research/earlyedge/
+          touch research/__init__.py research/earlyedge/__init__.py
+      - name: Download historical Binance Spot candles
+        run: |
+          python research-work/research/earlyedge/download_binance.py --symbol ETHUSDT --interval 1d --days 365 --out-dir data/apex-baseline
+          python research-work/research/earlyedge/download_binance.py --symbol ETHUSDT --interval 4h --days 180 --out-dir data/apex-baseline
+          python research-work/research/earlyedge/download_binance.py --symbol ETHUSDT --interval 1h --days 180 --out-dir data/apex-baseline
+          python research-work/research/earlyedge/download_binance.py --symbol BTCUSDT --interval 1d --days 365 --out-dir data/apex-baseline
+          python research-work/research/earlyedge/download_binance.py --symbol BTCUSDT --interval 4h --days 180 --out-dir data/apex-baseline
+          python research-work/research/earlyedge/download_binance.py --symbol BTCUSDT --interval 1h --days 180 --out-dir data/apex-baseline
+      - name: Replay current-main ApexSignal signal generation
+        run: |
+          python research/earlyedge/run_apex_historical.py --data-dir data/apex-baseline --symbol ETHUSDT --days 180
+      - name: Verify production main.py remained byte-identical
+        run: |
+          cmp main.py /tmp/apexsignal-production-main.py
+          sha256sum main.py /tmp/apexsignal-production-main.py
+      - name: Upload raw candles and candidate report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apexsignal-current-main-ethusdt-historical-smoke
+          path: |
+            data/apex-baseline/
+            reports/apex-baseline/
+          if-no-files-found: warn
+          retention-days: 14
