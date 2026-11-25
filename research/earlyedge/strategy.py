@@ -1,15 +1,14 @@
-"""Causal, completed-candle EarlyEdge signal engines.
+"""Conservative, causal EarlyEdge signal engine.
 
-Input bars are Binance kline dictionaries with open_time, close_time, open,
-high, low, close, volume. A decision is made at the close of a 15m candle;
-only 1h candles whose close_time is <= that decision time are eligible.
-This module emits research signals only; it never places orders.
+Only the strongest research candidate is enabled: a confirmed bottom reversal.
+Breakout, trend-pullback and range-bounce were negative after costs in the
+180-day ETHUSDT smoke and are disabled pending independent re-validation.
+WATCH-only setups are intentionally suppressed; this module emits ENTRY only.
 """
 from __future__ import annotations
 from math import isfinite
-from bisect import bisect_right
 
-ENGINES=("BOTTOM_REVERSAL","BREAKOUT","TREND_PULLBACK","RANGE_BOUNCE")
+ENGINES=("BOTTOM_REVERSAL",)
 
 def _v(bar,key):
     x=float(bar[key])
@@ -45,32 +44,26 @@ def _volume_ratio(bars,period=20):
     avg=sum(_v(x,"volume") for x in bars[-period-1:-1])/period
     return _v(bars[-1],"volume")/avg if avg>0 else None
 
-def _near(a,b,pct): return abs(a/b-1)*100 <= pct if b>0 else False
-
 def _context_1h(bars1h, decision_close):
     eligible=[b for b in bars1h if int(b["close_time"])<=decision_close]
     closes=[_v(b,"close") for b in eligible]
-    if len(closes)<30: return None
+    if len(closes)<50: return None
     e21,e50=_ema(closes,21),_ema(closes,50)
     if e21 is None or e50 is None: return None
-    return {"bars":eligible,"close":closes[-1],"ema21":e21,"ema50":e50,
+    return {"close":closes[-1],"ema21":e21,"ema50":e50,
             "bull":closes[-1]>e21 and e21>e50,
-            "bear":closes[-1]<e21 and e21<e50,
-            "flat":abs(e21/e50-1)*100<1.0}
+            "bear":closes[-1]<e21 and e21<e50}
 
-def _signal(engine,state,bar,atr):
+def _signal(bar,atr):
     close=_v(bar,"close")
     stop_pct=max(0.8,min(3.0,1.5*atr/close*100))
-    return {"engine":engine,"state":state,"timestamp":str(bar["close_time"]),
-            "price":close,"stop_pct":stop_pct,"target_pct":stop_pct*1.8,
-            "reason":engine.lower()+"_"+state.lower()}
+    return {"engine":"BOTTOM_REVERSAL","state":"ENTRY",
+            "timestamp":str(bar["close_time"]),"price":close,
+            "stop_pct":stop_pct,"target_pct":stop_pct*1.8,
+            "reason":"bottom_reversal_confirmed_high_volume"}
 
 def evaluate_engines(bars15,bars1h,index):
-    """Return one candidate per eligible engine at index (WATCH or ENTRY).
-
-    Historical callers must invoke this sequentially. No future 15m/1h candle
-    is consulted; the 1h context is explicitly close-time filtered.
-    """
+    """Return only a high-confirmation bottom-reversal ENTRY, never WATCH."""
     if index<0 or index>=len(bars15): raise IndexError("15m index out of range")
     hist=bars15[:index+1]
     if len(hist)<30: return []
@@ -79,43 +72,16 @@ def evaluate_engines(bars15,bars1h,index):
     if ctx is None: return []
     closes=[_v(x,"close") for x in hist]
     c=closes[-1]; prev=hist[-2]
-    e9,e21=_ema(closes,9),_ema(closes,21)
-    rsi=_rsi(closes); atr=_atr(hist); vr=_volume_ratio(hist)
-    if None in (e9,e21,rsi,atr,vr) or atr<=0: return []
-    high=max(_v(x,"high") for x in hist[-21:-1])
-    support=min(_v(x,"low") for x in hist[-21:-1])
-    results=[]
+    rsi=_rsi(closes); prior_rsi=_rsi(closes[:-1])
+    atr=_atr(hist); vr=_volume_ratio(hist)
+    if None in (rsi,prior_rsi,atr,vr) or atr<=0: return []
 
-    # 1) Bottom reversal: wait for a local reclaim, not a falling-knife RSI print.
-    bottom_watch=(rsi<43 and c>_v(prev,"close") and c>_v(bar,"open"))
-    # In a confirmed 1h downtrend, allow only a stronger countertrend
-    # reclaim; bearish context is a risk label, not an absolute BUY veto.
-    bottom_volume_min = 1.50 if ctx["bear"] else 1.15
-    bottom_entry=(bottom_watch and rsi>_rsi(closes[:-1]) and c>_v(prev,"high")
-                  and vr>=bottom_volume_min)
-    if bottom_entry: results.append(_signal("BOTTOM_REVERSAL","ENTRY",bar,atr))
-    elif bottom_watch: results.append(_signal("BOTTOM_REVERSAL","WATCH",bar,atr))
-
-    # 2) Breakout: close beyond prior 20 completed bars with participation.
-    breakout_watch=c>=high*0.997 and vr>=1.0
-    # Countertrend breakouts are permitted only with stronger volume and
-    # a bullish decision candle; this catches short-lived relief rallies.
-    breakout_volume_min = 1.80 if ctx["bear"] else 1.50
-    breakout_entry=(c>high and vr>=breakout_volume_min
-                    and (ctx["bull"] or (ctx["bear"] and c>_v(bar,"open"))))
-    if breakout_entry: results.append(_signal("BREAKOUT","ENTRY",bar,atr))
-    elif breakout_watch: results.append(_signal("BREAKOUT","WATCH",bar,atr))
-
-    # 3) Trend pullback: higher-timeframe trend intact; reclaim short EMA.
-    trend_watch=ctx["bull"] and _near(c,e21,0.8) and rsi>=42
-    trend_entry=(ctx["bull"] and c>e9 and _v(prev,"close")<=e9
-                 and 45<=rsi<=68 and vr>=0.9)
-    if trend_entry: results.append(_signal("TREND_PULLBACK","ENTRY",bar,atr))
-    elif trend_watch: results.append(_signal("TREND_PULLBACK","WATCH",bar,atr))
-
-    # 4) Range support bounce: only in flat 1h context, not in a confirmed downtrend.
-    range_watch=ctx["flat"] and _near(c,support,0.8) and c>_v(bar,"open")
-    range_entry=(range_watch and c>_v(prev,"high") and rsi>=35 and vr>=1.0)
-    if range_entry: results.append(_signal("RANGE_BOUNCE","ENTRY",bar,atr))
-    elif range_watch: results.append(_signal("RANGE_BOUNCE","WATCH",bar,atr))
-    return results
+    # Require a rising RSI, bullish candle, reclaim above prior high and
+    # exceptional relative volume. Countertrend entries demand still more.
+    bearish=ctx["bear"]
+    min_volume=2.0 if bearish else 1.8
+    confirmed=(rsi<43 and rsi>prior_rsi and c>_v(bar,"open")
+               and c>_v(prev,"high") and vr>=min_volume)
+    if not confirmed:
+        return []
+    return [_signal(bar,atr)]
