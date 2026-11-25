@@ -18,13 +18,17 @@ permissions:
 jobs:
   unit-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Compile and test research engines
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install production strategy dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Compile and test research engines and current-main adapter
         run: |
           python -m compileall -q research/earlyedge
           python -m unittest discover -s research/earlyedge/tests -v
