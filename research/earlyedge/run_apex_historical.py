@@ -1,7 +1,7 @@
 """Generate historical candidate diagnostics from the unmodified current-main ApexSignal.
 
-This is a research-only replay of the hourly scanner at each completed 4h
-boundary (a reduced cadence smoke run), not an execution/P&L backtest.
+This is a research-only replay of the production hourly scanner using completed
+1h decisions and the latest completed 4h/1d context, not an execution/P&L backtest.
 """
 import argparse
 import csv
@@ -22,7 +22,7 @@ def read_frame(path):
     for col in ("open_time", "close_time"):
         frame[col] = pd.to_numeric(frame[col], errors="raise").astype("int64")
     for col in ("open", "high", "low", "close", "volume", "quote_volume",
-                "taker_buy_base", "taker_buy_quote"):
+                "taker_buy_base", "taker_quote"):
         if col in frame.columns:
             frame[col] = pd.to_numeric(frame[col], errors="coerce")
     return frame
@@ -60,11 +60,14 @@ def main():
 
     rows = []
     errors = {}
+    warmup_skips = 0
     for i, close_ms in enumerate(decisions, 1):
         result, stats, error = analyze_current_main_from_history(
             symbol, sf, btc, int(close_ms) + 1
         )
-        if error:
+        if error == "insufficient historical data":
+            warmup_skips += 1
+        elif error:
             errors[error] = errors.get(error, 0) + 1
         if result:
             setup = result["setup"]
@@ -111,6 +114,7 @@ def main():
         "requested_days": args.days,
         "decision_schedule": "after every completed 1h candle; latest completed 4h/1d context",
         "decision_points": len(decisions),
+        "warmup_skipped_decision_points": warmup_skips,
         "candidate_count_before_dedup": len(rows),
         "sent_candidate_count_after_production_8h_symbol_dedup": sum(sent_count_by_strategy.values()),
         "dedup_suppressed_count": len(rows) - sum(sent_count_by_strategy.values()),
