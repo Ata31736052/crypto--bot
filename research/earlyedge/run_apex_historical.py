@@ -16,6 +16,9 @@ from research.earlyedge.apexsignal_historical_adapter import analyze_current_mai
 
 def read_frame(path):
     frame = pd.read_csv(path)
+    # Binance klines call this taker_buy_quote; current main.py expects taker_quote.
+    if "taker_buy_quote" in frame.columns and "taker_quote" not in frame.columns:
+        frame = frame.rename(columns={"taker_buy_quote": "taker_quote"})
     for col in ("open_time", "close_time"):
         frame[col] = pd.to_numeric(frame[col], errors="raise").astype("int64")
     for col in ("open", "high", "low", "close", "volume", "quote_volume",
