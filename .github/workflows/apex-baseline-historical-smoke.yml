@@ -46,6 +46,8 @@ jobs:
           python research-work/research/earlyedge/download_binance.py --symbol BTCUSDT --interval 4h --days 180 --out-dir data/apex-baseline
           python research-work/research/earlyedge/download_binance.py --symbol BTCUSDT --interval 1h --days 180 --out-dir data/apex-baseline
       - name: Replay current-main ApexSignal signal generation
+        env:
+          PYTHONPATH: .
         run: |
           python research/earlyedge/run_apex_historical.py --data-dir data/apex-baseline --symbol ETHUSDT --days 180
       - name: Verify production main.py remained byte-identical
