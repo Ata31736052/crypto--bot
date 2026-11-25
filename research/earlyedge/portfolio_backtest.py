@@ -27,7 +27,7 @@ def portfolio_replay(symbol_rows, starting_cash=1000.0, risk_pct=1.0,
                      max_positions=10, fee_pct=0.1, slippage_pct=0.05):
     if not symbol_rows or starting_cash<=0 or not 0<risk_pct<=100:
         raise ValueError("invalid portfolio/capital/risk settings")
-    if min(max_position,max_total_exposure)>0 is False or max_positions<1:
+    if max_position<=0 or max_total_exposure<=0 or max_positions<1:
         raise ValueError("invalid exposure/position limits")
     if fee_pct<0 or slippage_pct<0: raise ValueError("costs cannot be negative")
     for symbol,rows in symbol_rows.items():
@@ -66,10 +66,10 @@ def portfolio_replay(symbol_rows, starting_cash=1000.0, risk_pct=1.0,
                 del active[symbol]
         # Fill pending entries at the next available candle open.
         for symbol,i,row in events:
-            if symbol not in pending or symbol in active: continue
-            if len(active)>=max_positions: continue
+            if symbol not in pending: continue
+            p=pending.pop(symbol)
+            if symbol in active or len(active)>=max_positions: continue
             entry=float(row["open"])*(1+slippage_pct/100)
-            p=pending[symbol]
             sp,tp=p["stop_pct"],p["target_pct"]
             if not (0<sp<100 and tp>0): raise ValueError("invalid stop/target percentages")
             stop=entry*(1-sp/100); target=entry*(1+tp/100)
@@ -84,7 +84,26 @@ def portfolio_replay(symbol_rows, starting_cash=1000.0, risk_pct=1.0,
                 active[symbol]={"signal_time":p["signal_time"],"entry_time":str(timestamp),
                     "entry":entry,"stop":stop,"target":target,"qty":qty,
                     "entry_fee":entry_fee,"mae":0.0,"mfe":0.0}
-            del pending[symbol]
+        # Newly opened positions are exposed to the fill candle's full range.
+        for symbol,i,row in events:
+            pos=active.get(symbol)
+            if pos is None or pos["entry_time"]!=str(timestamp): continue
+            h,l=float(row["high"]),float(row["low"])
+            pos["mae"]=min(pos["mae"],(l/pos["entry"]-1)*100)
+            pos["mfe"]=max(pos["mfe"],(h/pos["entry"]-1)*100)
+            stop_hit=l<=pos["stop"]; target_hit=h>=pos["target"]
+            reason="STOP" if stop_hit else "TARGET" if target_hit else None
+            if reason:
+                raw=pos["stop"] if reason=="STOP" else pos["target"]
+                exit_price=raw*(1-slippage_pct/100)
+                exit_fee=exit_price*pos["qty"]*fee_pct/100
+                gross=(exit_price-pos["entry"])*pos["qty"]
+                fees=pos["entry_fee"]+exit_fee
+                cash+=exit_price*pos["qty"]-exit_fee
+                trades.append({**pos,"symbol":symbol,"exit_time":str(timestamp),
+                    "exit":exit_price,"gross_pnl":gross,"fees":fees,"net_pnl":gross-fees,
+                    "reason":reason})
+                del active[symbol]
         # Signals at this close can only fill on a later bar.
         for symbol,i,row in events:
             if symbol not in active and symbol not in pending and row["signal"].upper()=="ENTRY" and i<len(symbol_rows[symbol])-1:
