@@ -84,6 +84,8 @@ def portfolio_replay(symbol_rows, starting_cash=1000.0, risk_pct=1.0,
                 active[symbol]={"signal_time":p["signal_time"],"entry_time":str(timestamp),
                     "entry":entry,"stop":stop,"target":target,"qty":qty,
                     "entry_fee":entry_fee,"mae":0.0,"mfe":0.0}
+        deployed_now=sum(x["qty"]*x["entry"] for x in active.values())
+        max_deployed=max(max_deployed,deployed_now);max_open=max(max_open,len(active))
         # Newly opened positions are exposed to the fill candle's full range.
         for symbol,i,row in events:
             pos=active.get(symbol)
