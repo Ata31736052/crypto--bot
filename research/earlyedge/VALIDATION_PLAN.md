@@ -25,7 +25,7 @@ Example commands (run from repository root):
 python -m research.earlyedge.download_binance --symbol ETHUSDT --interval 15m --days 180
 python -m research.earlyedge.download_binance --symbol ETHUSDT --interval 1h --days 180
 python -m research.earlyedge.build_engine_csv --15m data/earlyedge/ETHUSDT_15m_180d.csv --1h data/earlyedge/ETHUSDT_1h_180d.csv
-python -m research.earlyedge.backtest data/earlyedge/signals/bottom_reversal.csv --cash 1000 --risk 1 --max-position 1000 --fee 0.1 --slippage 0.05
+python -m research.earlyedge.backtest data/earlyedge/signals/bottom_reversal.csv --cash 1000 --risk 1 --max-position 1000 --fee 0.1 --slippage 0.05\npython -m research.earlyedge.portfolio_backtest ETHUSDT=data/earlyedge/signals/bottom_reversal.csv SOLUSDT=data/earlyedge/SOLUSDT/signals/bottom_reversal.csv --cash 1000 --risk 1 --max-position 1000 --max-exposure 1000 --fee 0.1 --slippage 0.05
 ```
 
 ## Required backtest protocol before any strategy conclusion
@@ -48,7 +48,7 @@ python -m research.earlyedge.backtest data/earlyedge/signals/bottom_reversal.csv
 
 ## Current status
 - Research code is on isolated branch `experiment/earlyedge-replacement-20261124` and draft PR #24.
-- Four engine rules, Binance historical downloader, per-engine signal CSV builder, single-symbol replay, and automated tests are present.
+- Four engine rules, Binance historical downloader, per-engine signal CSV builder, single-symbol replay, shared-capital multi-symbol portfolio replay, and automated tests are present.
 - The CI workflow compiles the research package and runs unit tests.
-- A real 180-day multi-symbol portfolio backtest has NOT yet been run. The current replay is single-symbol; current-day symbol lists would also introduce survivorship bias.
+- A real 180-day multi-symbol portfolio backtest has NOT yet been run. The shared-capital portfolio runner is implemented, but no historical dataset has yet been downloaded and replayed. Current-day symbol lists would also introduce survivorship bias.
 - No production code, production workflow, Telegram secret, or live schedule has been changed. No merge or live activation is approved.
