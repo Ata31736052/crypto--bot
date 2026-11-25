@@ -1,9 +1,12 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 import pandas as pd
 
 import main
+from research.earlyedge.run_apex_historical import read_frame
 from research.earlyedge.apexsignal_historical_adapter import (
     analyze_current_main_from_history, closed_frame,
 )
@@ -19,6 +22,20 @@ def frame(n=215, step=1):
 
 
 class ApexHistoricalAdapterTests(unittest.TestCase):
+    def test_binance_taker_buy_quote_is_mapped_to_main_expected_column(self):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "klines.csv"
+            pd.DataFrame({
+                "open_time": [1], "close_time": [2], "open": [1.0],
+                "high": [2.0], "low": [0.5], "close": [1.5],
+                "volume": [10.0], "quote_volume": [15.0], "trades": [5],
+                "taker_buy_base": [7.0], "taker_buy_quote": [10.0],
+            }).to_csv(path, index=False)
+            loaded = read_frame(path)
+            self.assertIn("taker_quote", loaded.columns)
+            self.assertNotIn("taker_buy_quote", loaded.columns)
+            self.assertEqual(float(loaded.loc[0, "taker_quote"]), 10.0)
+
     def test_closed_frame_excludes_decision_candle_and_caps_history(self):
         source = frame(300)
         out = closed_frame(source, decision_ms=280, limit=250)
