@@ -1,0 +1,54 @@
+name: EarlyEdge 180d Single-Symbol Pipeline Smoke Test
+
+on:
+  push:
+    branches: [experiment/earlyedge-replacement-20261124]
+    paths:
+      - "research/earlyedge/**"
+      - ".github/workflows/earlyedge-180d-smoke.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  smoke-180d:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Download completed Binance Spot candles
+        run: |
+          python -m research.earlyedge.download_binance --symbol ETHUSDT --interval 15m --days 180
+          python -m research.earlyedge.download_binance --symbol ETHUSDT --interval 1h --days 180
+      - name: Generate four engine signal series
+        run: |
+          python -m research.earlyedge.build_engine_csv \
+            --15m data/earlyedge/ETHUSDT_15m_180d.csv \
+            --1h data/earlyedge/ETHUSDT_1h_180d.csv \
+            --out-dir data/earlyedge/ETHUSDT/signals
+      - name: Run shared-capital replay per engine
+        run: |
+          mkdir -p reports/earlyedge
+          for signal_file in data/earlyedge/ETHUSDT/signals/*.csv; do
+            engine=$(basename "$signal_file" .csv)
+            python -m research.earlyedge.portfolio_backtest \
+              "ETHUSDT=$signal_file" \
+              --cash 1000 --risk 1 --max-position 1000 --max-exposure 1000 \
+              --fee 0.1 --slippage 0.05 \
+              --out "reports/earlyedge/ETHUSDT_${engine}_180d.json"
+          done
+      - name: Upload raw data and research reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: earlyedge-ethusdt-180d-smoke
+          path: |
+            data/earlyedge/ETHUSDT_15m_180d.csv
+            data/earlyedge/ETHUSDT_15m_180d.json
+            data/earlyedge/ETHUSDT_1h_180d.csv
+            data/earlyedge/ETHUSDT_1h_180d.json
+            data/earlyedge/ETHUSDT/signals/*.csv
+            reports/earlyedge/*.json
+          retention-days: 14
