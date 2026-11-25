@@ -6,7 +6,8 @@ only 1h candles whose close_time is <= that decision time are eligible.
 This module emits research signals only; it never places orders.
 """
 from __future__ import annotations
-from math import isfinite\nfrom bisect import bisect_right
+from math import isfinite
+from bisect import bisect_right
 
 ENGINES=("BOTTOM_REVERSAL","BREAKOUT","TREND_PULLBACK","RANGE_BOUNCE")
 
