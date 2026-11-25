@@ -49,6 +49,16 @@ def _bars(raw, now_ms, interval_ms):
     return out
 
 
+def _decision_indices(bars15, now):
+    """Return at most the two 15m candles that closed during today's Iran window."""
+    local = iran_now(now)
+    start = local.replace(hour=7, minute=0, second=0, microsecond=0)
+    start_ms = int(start.timestamp() * 1000)
+    eligible = [i for i, bar in enumerate(bars15)
+                if int(bar["close_time"]) + 1 >= start_ms]
+    return eligible[-2:]
+
+
 def _load_state(path):
     try:
         value = json.loads(Path(path).read_text(encoding="utf-8"))
@@ -151,11 +161,12 @@ def run_scan(now=None, session=None, telegram_token=None, telegram_chat_id=None,
         bars1h = _bars(raw1h, now_ms, 3_600_000)
         if len(bars15) < 35 or len(bars1h) < 50:
             return symbol, bars15, []
-        # 30m cadence: evaluate the latest two fully closed 15m bars to avoid
-        # silently missing the intermediate 15m setup.
+        # 30m cadence: evaluate up to two fully closed 15m bars, but never
+        # emit a pre-07:00 Iran candle after the overnight quiet period.
         found = []
-        for index in range(max(29, len(bars15) - 2), len(bars15)):
-            found.extend(evaluate_engines(bars15, bars1h, index))
+        for index in _decision_indices(bars15, now_dt):
+            if index >= 29:
+                found.extend(evaluate_engines(bars15, bars1h, index))
         return symbol, bars15, found
 
     found = []
