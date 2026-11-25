@@ -30,7 +30,8 @@ class EngineTests(unittest.TestCase):
         self.assertGreaterEqual(len(eligible),30)
         b1h[-1]["close_time"]=decision+1
         out=evaluate_engines(b15,b1h,239)
-        self.assertEqual(out,[])
+        without_forming=evaluate_engines(b15,b1h[:-1],239)
+        self.assertEqual(out,without_forming)
 
     def test_future_15m_rows_do_not_change_past_decision(self):
         b15=bars(240)
