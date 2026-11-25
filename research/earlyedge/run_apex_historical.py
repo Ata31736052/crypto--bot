@@ -54,11 +54,9 @@ def main():
 
     last_ms = int(h1["close_time"].iloc[-1])
     cutoff_ms = last_ms - args.days * 86_400_000
-    # Evaluate only at completed 4h boundaries. The 1h frame still supplies
-    # the exact completed 1h confirmation state at each decision.
-    h4_closes = set(sf["4h"]["close_time"].astype("int64").tolist())
-    decisions = h1.loc[(h1["close_time"] >= cutoff_ms) &
-                       (h1["close_time"].isin(h4_closes)), "close_time"].astype("int64").tolist()
+    # Mirror the production hourly scan schedule: evaluate after every closed
+    # 1h candle. The adapter independently filters the latest closed 4h/1d bars.
+    decisions = h1.loc[h1["close_time"] >= cutoff_ms, "close_time"].astype("int64").tolist()
 
     rows = []
     errors = {}
@@ -88,9 +86,21 @@ def main():
         if i % 100 == 0:
             print(f"processed {i}/{len(decisions)} decision points; candidates={len(rows)}", flush=True)
 
+    # Production signal_state_key is the symbol; after one alert, every strategy
+    # for that symbol is suppressed for DEDUP_HOURS. Apply the same rule here.
+    last_sent_ms = None
+    sent_count_by_strategy = {}
+    for row in sorted(rows, key=lambda x: x["signal_close_time"]):
+        allowed = last_sent_ms is None or row["signal_close_time"] - last_sent_ms >= 8 * 3_600_000
+        row["sent_after_8h_dedup"] = allowed
+        if allowed:
+            last_sent_ms = row["signal_close_time"]
+            sent_count_by_strategy[row["strategy"]] = sent_count_by_strategy.get(row["strategy"], 0) + 1
+
     output_csv = out / f"{symbol}_apexsignal_candidates_{args.days}d.csv"
     fields = ["symbol", "signal_close_time", "strategy", "score", "raw_score",
-              "reference_entry", "sl", "tp1", "tp2", "risk_pct", "rr1", "rr2"]
+              "reference_entry", "sl", "tp1", "tp2", "risk_pct", "rr1", "rr2",
+              "sent_after_8h_dedup"]
     with output_csv.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fields)
         writer.writeheader()
@@ -99,19 +109,22 @@ def main():
     report = {
         "symbol": symbol,
         "requested_days": args.days,
-        "decision_schedule": "4h close boundaries; 1h confirmation as of each boundary",
+        "decision_schedule": "after every completed 1h candle; latest completed 4h/1d context",
         "decision_points": len(decisions),
-        "candidate_count": len(rows),
+        "candidate_count_before_dedup": len(rows),
+        "sent_candidate_count_after_production_8h_symbol_dedup": sum(sent_count_by_strategy.values()),
+        "dedup_suppressed_count": len(rows) - sum(sent_count_by_strategy.values()),
         "by_strategy": {},
         "errors": errors,
         "candidate_csv": str(output_csv),
         "execution_backtest": False,
-        "note": "Signal-generation smoke test only. No fill, stop/target, fees, slippage, or portfolio P&L simulated.",
+        "note": "Signal-generation smoke test only. Production 8h per-symbol dedup is applied. No fill, stop/target, fees, slippage, or portfolio P&L simulated.",
     }
     for strategy in sorted({r["strategy"] for r in rows}):
         subset = [r for r in rows if r["strategy"] == strategy]
         report["by_strategy"][strategy] = {
-            "count": len(subset),
+            "candidate_count_before_dedup": len(subset),
+            "sent_count_after_dedup": sent_count_by_strategy.get(strategy, 0),
             "score_min": min(r["score"] for r in subset),
             "score_median": sorted(r["score"] for r in subset)[len(subset)//2],
             "score_max": max(r["score"] for r in subset),
